@@ -1,19 +1,24 @@
-
 #!/usr/bin/env python3
 """
 Kalshi single-market top-of-book market-maker.
 
-What this version improves:
-- Uses fixed-point `_dollars` and `_fp` fields for prices and quantities.
-- Cancels quotes when a side is disabled or when the budget implies zero size.
-- Reads startup positions and live market-position updates for accurate net inventory.
-- Adds resting-order expirations and refreshes orders before they expire.
-- Uses clear, descriptive configuration names with explicit units in each name.
-- Avoids logging secrets and is launcher-friendly.
+This version keeps the fixed-point, inventory-aware, expiration-aware structure
+of the upgraded bot and adds three production-hardening behaviors that were
+missing from the earlier runtime:
 
-This bot keeps one BUY YES quote and one BUY NO quote live on a single market.
-It is intentionally conservative by default: whole-contract order entry, short
-resting-order expirations, post-only orders, and modest quote sizes.
+1. Shared write throttling across bot processes to reduce create/amend/cancel
+   bursts and avoid 429 write-rate spikes.
+2. Queue-abandonment logic so the bot stops wasting time in hopeless queues.
+3. Same-side post-fill re-entry suppression so the bot does not immediately
+   step back into the same side after getting hit.
+
+The default settings are intentionally quieter and more conservative than the
+previous production run:
+- slower repricing
+- longer expirations
+- passive placement further behind the best bid
+- stronger same-side cooldowns after fills
+- queue-position polling and side shutoffs enabled by default
 """
 
 from __future__ import annotations
@@ -21,14 +26,18 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+import hashlib
 import json
 import logging
 import math
 import os
+import random
+import tempfile
 import time
 import traceback
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, Iterable, List, Optional, Tuple
 
@@ -63,8 +72,162 @@ ONE_DOLLAR_PRICE_UNITS = PRICE_SCALE
 
 
 # ---------------------------------------------------------------------------
+# Small helpers
+# ---------------------------------------------------------------------------
+
+
+def now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+
+def utc_seconds_to_expiration_timestamp(seconds_in_future: int) -> int:
+    return int(time.time()) + int(seconds_in_future)
+
+
+
+def parse_iso_utc_timestamp_to_ms(value: Optional[str]) -> Optional[int]:
+    if not value:
+        return None
+    text = value.strip()
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        return int(datetime.fromisoformat(text).timestamp() * 1000)
+    except Exception:
+        return None
+
+
+
+def decimal_from_any(value: object) -> Decimal:
+    return Decimal(str(value))
+
+
+
+def parse_price_units_from_dollars(price_dollars: object) -> int:
+    scaled = decimal_from_any(price_dollars) * PRICE_SCALE
+    return int(scaled.to_integral_value(rounding=ROUND_HALF_UP))
+
+
+
+def parse_price_units_from_legacy_cents(price_cents: object) -> int:
+    return int(price_cents) * PRICE_UNITS_PER_CENT
+
+
+
+def parse_optional_price_units(message: dict, fixed_point_field: str, legacy_cents_field: str) -> Optional[int]:
+    if fixed_point_field in message and message.get(fixed_point_field) not in (None, ""):
+        return parse_price_units_from_dollars(message[fixed_point_field])
+    if legacy_cents_field in message and message.get(legacy_cents_field) not in (None, ""):
+        return parse_price_units_from_legacy_cents(message[legacy_cents_field])
+    return None
+
+
+
+def format_price_dollars(price_units: int) -> str:
+    value = (Decimal(price_units) / Decimal(PRICE_SCALE)).quantize(Decimal("0.0001"))
+    return format(value, "f")
+
+
+
+def parse_count_units_from_fp(count_fp: object) -> int:
+    scaled = decimal_from_any(count_fp) * COUNT_SCALE
+    return int(scaled.to_integral_value(rounding=ROUND_HALF_UP))
+
+
+
+def parse_optional_count_units(message: dict, fixed_point_field: str, legacy_integer_field: str) -> Optional[int]:
+    if fixed_point_field in message and message.get(fixed_point_field) not in (None, ""):
+        return parse_count_units_from_fp(message[fixed_point_field])
+    if legacy_integer_field in message and message.get(legacy_integer_field) not in (None, ""):
+        return int(message[legacy_integer_field]) * COUNT_SCALE
+    return None
+
+
+
+def format_count_fp(count_units: int) -> str:
+    value = (Decimal(count_units) / Decimal(COUNT_SCALE)).quantize(Decimal("0.00"))
+    return format(value, "f")
+
+
+
+def cents_to_price_units(cents: int) -> int:
+    return int(cents) * PRICE_UNITS_PER_CENT
+
+
+
+def contracts_to_count_units(contracts: int) -> int:
+    return int(contracts) * COUNT_SCALE
+
+
+
+def log_event(event_name: str, **fields: object) -> None:
+    if fields:
+        detail = " ".join(f"{key}={value}" for key, value in fields.items())
+        LOGGER.info("%s | %s", event_name, detail)
+    else:
+        LOGGER.info("%s", event_name)
+
+
+
+def is_post_only_cross_error(exception: Exception) -> bool:
+    message = str(exception).lower()
+    return (
+        "post_only_cross" in message
+        or "post only cross" in message
+        or "post-only cross" in message
+        or '"code":"post_only_cross"' in message
+        or "'code':'post_only_cross'" in message
+    )
+
+
+
+def is_missing_or_non_resting_amend_target(exception: Exception) -> bool:
+    message = str(exception).lower()
+    return (
+        ("amend" in message)
+        and (
+            "failed 404" in message
+            or " 404:" in message
+            or '"code":"not_found"' in message
+            or "'code':'not_found'" in message
+            or "order_not_found" in message
+            or "not found" in message
+            or "not_resting" in message
+            or "order not resting" in message
+            or "not resting" in message
+        )
+    )
+
+
+
+def is_order_not_found_error(exception: Exception) -> bool:
+    message = str(exception).lower()
+    return (
+        "failed 404" in message
+        or " 404:" in message
+        or '"code":"not_found"' in message
+        or "'code':'not_found'" in message
+        or "order_not_found" in message
+        or "not found" in message
+    )
+
+
+
+def is_rate_limit_error(exception: Exception) -> bool:
+    message = str(exception).lower()
+    return (
+        "failed 429" in message
+        or " 429:" in message
+        or "too_many_requests" in message
+        or "rate limit" in message
+    )
+
+
+# ---------------------------------------------------------------------------
 # Command-line arguments
 # ---------------------------------------------------------------------------
+
 
 def parse_bot_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -112,10 +275,10 @@ def parse_bot_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class BotSettings:
@@ -128,72 +291,55 @@ class BotSettings:
     subaccount_number: int = 0
 
     # --- Order sizing ---
-    # These are the maximum working budgets per side.
-    # Example: 100 means $1.00, 1000 means $10.00.
     yes_order_budget_cents: int = 100
     no_order_budget_cents: int = 100
     maximum_contracts_per_order: int = 2_000
     budget_fee_buffer_cents: int = 5
-
-    # Whole-contract order entry is the safest default.
-    # The bot still understands fractional positions and fills internally.
     allow_fractional_order_entry_when_supported: bool = False
-
-    # If False (default), the bot keeps the TOTAL MAX FILLABLE size on a quote
-    # at the target budget amount. After a partial fill, the resting size shrinks.
-    # If True, the bot replenishes the resting size back to the full target size.
     refill_resting_size_after_partial_fill: bool = False
 
     # --- Quote behavior ---
     post_only_quotes: bool = True
     cancel_quotes_if_exchange_pauses: bool = True
-    minimum_milliseconds_between_requotes: int = 6000
+    minimum_milliseconds_between_requotes: int = 1_000
 
-    # Use short expirations to avoid stale resting orders after crashes.
-    # Set to 0 to disable expirations and use good_till_canceled instead.
-    resting_order_expiration_seconds: int = 400
-    expiration_refresh_lead_seconds: int = 5
+    # Use longer expirations than the earlier version so we stop resetting queue
+    # priority every 45 seconds.
+    resting_order_expiration_seconds: int = 240
+    expiration_refresh_lead_seconds: int = 20
+    expiration_jitter_seconds: int = 20
+    stagger_yes_no_expiration_offsets_seconds: int = 10
 
-    # When spread is wide enough, the bot may improve by this many ticks.
-    # 0 means "do not improve; only join or sit behind".
-    aggressive_improvement_ticks_when_spread_is_wide: int = 0
-    minimum_spread_ticks_required_for_aggressive_improvement: int = 8
-
-    # When not improving, the bot can sit behind the current best bid by this many ticks.
+    aggressive_improvement_ticks_when_spread_is_wide: int = 1
+    minimum_spread_ticks_required_for_aggressive_improvement: int = 10
     passive_offset_ticks_when_not_improving: int = 2
+    join_current_best_bid_when_starting_new_quote_cycle: bool = False
 
-    # After a fill, disable aggressive improvement briefly to reduce adverse selection.
-    post_fill_no_improve_cooldown_ms: int = 10000
+    # After any fill, suppress same-side quoting for a while to reduce the
+    # "got filled, stepped right back in, got filled again" pattern.
+    post_fill_no_improve_cooldown_ms: int = 4_000
+    same_side_reentry_cooldown_ms: int = 4_000
+    suppress_same_side_quotes_during_reentry_cooldown: bool = True
 
-    # Stop quoting new interest on a side if the current market is too close to zero.
-    minimum_best_bid_cents_required_to_quote: int = 22
-    minimum_implied_ask_cents_required_to_quote: int = 22
+    # Only chase upward when the market moved materially. Downward / de-risking
+    # reprices still happen immediately.
+    minimum_upward_reprice_ticks_required: int = 2
 
-    # Keep our bid at least one valid tick below the implied ask on the opposite side.
+    minimum_best_bid_cents_required_to_quote: int = 20
+    minimum_implied_ask_cents_required_to_quote: int = 20
+    minimum_market_best_bid_cents_required_to_quote_any_side: int = 20
     enforce_one_tick_safety_below_implied_ask: bool = True
 
     # --- Inventory controls ---
     enable_one_way_inventory_guard: bool = True
-    one_way_inventory_guard_contracts: int = 10
-
-    inventory_skew_contracts_per_tick: int = 10
+    one_way_inventory_guard_contracts: int = 30
+    inventory_skew_contracts_per_tick: int = 15
     maximum_inventory_skew_ticks: int = 5
 
     # --- Pair / spread protection ---
     enable_pair_guard: bool = True
-
-    # Hard ceiling on YES bid + NO bid.
-    # Example: 98 means the two bids together must be <= $0.98, subject to the
-    # tighter minimum-profit calculation below.
     maximum_combined_bid_cents: int = 98
-
-    # Require at least this much extra gross room beyond the self-cross boundary.
     additional_profit_buffer_cents: int = 1
-
-    # When the pair guard must lower one side, choose:
-    # "yes" -> prefer keeping YES quote higher
-    # "no"  -> prefer keeping NO quote higher
-    # "auto" -> lower whichever side is currently larger
     pair_guard_priority: str = "auto"
 
     # --- Post-only collision handling ---
@@ -203,13 +349,24 @@ class BotSettings:
     # --- Startup / monitoring ---
     cancel_strategy_quotes_on_startup: bool = True
     subscribe_to_market_positions_channel: bool = True
-
-    # Optional queue-position polling (disabled by default to save API calls).
     enable_queue_position_logging: bool = True
-    queue_position_log_interval_seconds: float = 15.0
+    queue_position_log_interval_seconds: float = 10.0
 
-    # Client-order-id prefixes owned by this strategy. Legacy `tob:` support is
-    # included so the bot can safely clean up quotes from the older version.
+    # Queue-abandonment logic.
+    enable_queue_abandonment_guard: bool = True
+    maximum_queue_ahead_contracts_before_abandonment: int = 100
+    maximum_queue_ahead_multiple_of_our_remaining_size: float = 20.0
+    queue_abandonment_consecutive_polls_required: int = 3
+    queue_abandonment_side_cooldown_seconds: int = 60
+    queue_abandonment_market_cooldown_seconds: int = 60
+
+    # Cross-process shared write throttling.
+    enable_shared_write_rate_limiter: bool = True
+    shared_write_rate_limit_writes_per_second: float = 8.0
+    shared_write_rate_limit_burst_capacity: int = 4
+    shared_write_rate_limiter_directory: str = ""
+    global_rate_limit_backoff_seconds: float = 2.0
+
     primary_client_order_prefix: str = "mm"
     legacy_client_order_prefixes: Tuple[str, ...] = ("mm:", "tob:")
 
@@ -228,7 +385,11 @@ class BotSettings:
             raise ValueError("resting_order_expiration_seconds must be >= 0")
         if self.expiration_refresh_lead_seconds < 0:
             raise ValueError("expiration_refresh_lead_seconds must be >= 0")
-        if self.expiration_refresh_lead_seconds >= self.resting_order_expiration_seconds and self.resting_order_expiration_seconds > 0:
+        if self.expiration_jitter_seconds < 0:
+            raise ValueError("expiration_jitter_seconds must be >= 0")
+        if self.stagger_yes_no_expiration_offsets_seconds < 0:
+            raise ValueError("stagger_yes_no_expiration_offsets_seconds must be >= 0")
+        if self.resting_order_expiration_seconds > 0 and self.expiration_refresh_lead_seconds >= self.resting_order_expiration_seconds:
             raise ValueError("expiration_refresh_lead_seconds must be less than resting_order_expiration_seconds")
         if self.minimum_milliseconds_between_requotes < 0:
             raise ValueError("minimum_milliseconds_between_requotes must be >= 0")
@@ -240,8 +401,14 @@ class BotSettings:
             raise ValueError("passive_offset_ticks_when_not_improving must be >= 0")
         if self.post_fill_no_improve_cooldown_ms < 0:
             raise ValueError("post_fill_no_improve_cooldown_ms must be >= 0")
+        if self.same_side_reentry_cooldown_ms < 0:
+            raise ValueError("same_side_reentry_cooldown_ms must be >= 0")
+        if self.minimum_upward_reprice_ticks_required < 0:
+            raise ValueError("minimum_upward_reprice_ticks_required must be >= 0")
         if self.minimum_best_bid_cents_required_to_quote < 0 or self.minimum_implied_ask_cents_required_to_quote < 0:
             raise ValueError("Quote-threshold cents must be >= 0")
+        if self.minimum_market_best_bid_cents_required_to_quote_any_side < 0:
+            raise ValueError("minimum_market_best_bid_cents_required_to_quote_any_side must be >= 0")
         if self.one_way_inventory_guard_contracts < 0:
             raise ValueError("one_way_inventory_guard_contracts must be >= 0")
         if self.inventory_skew_contracts_per_tick <= 0:
@@ -258,8 +425,25 @@ class BotSettings:
             raise ValueError("post_only_reprice_cooldown_seconds must be >= 0")
         if self.queue_position_log_interval_seconds <= 0:
             raise ValueError("queue_position_log_interval_seconds must be > 0")
+        if self.maximum_queue_ahead_contracts_before_abandonment < 0:
+            raise ValueError("maximum_queue_ahead_contracts_before_abandonment must be >= 0")
+        if self.maximum_queue_ahead_multiple_of_our_remaining_size < 0:
+            raise ValueError("maximum_queue_ahead_multiple_of_our_remaining_size must be >= 0")
+        if self.queue_abandonment_consecutive_polls_required <= 0:
+            raise ValueError("queue_abandonment_consecutive_polls_required must be > 0")
+        if self.queue_abandonment_side_cooldown_seconds < 0:
+            raise ValueError("queue_abandonment_side_cooldown_seconds must be >= 0")
+        if self.queue_abandonment_market_cooldown_seconds < 0:
+            raise ValueError("queue_abandonment_market_cooldown_seconds must be >= 0")
+        if self.shared_write_rate_limit_writes_per_second <= 0:
+            raise ValueError("shared_write_rate_limit_writes_per_second must be > 0")
+        if self.shared_write_rate_limit_burst_capacity <= 0:
+            raise ValueError("shared_write_rate_limit_burst_capacity must be > 0")
+        if self.global_rate_limit_backoff_seconds < 0:
+            raise ValueError("global_rate_limit_backoff_seconds must be >= 0")
         if self.pair_guard_priority.lower() not in {"yes", "no", "auto"}:
             raise ValueError("pair_guard_priority must be 'yes', 'no', or 'auto'")
+
 
 
 def build_settings_from_args(bot_args: argparse.Namespace) -> BotSettings:
@@ -287,138 +471,166 @@ def build_settings_from_args(bot_args: argparse.Namespace) -> BotSettings:
 
 
 # ---------------------------------------------------------------------------
-# Small helpers
+# Cross-process shared write throttle
 # ---------------------------------------------------------------------------
 
-def now_ms() -> int:
-    return int(time.time() * 1000)
+
+class CrossProcessFileLock:
+    def __init__(self, path: str) -> None:
+        self.path = path
+        self._file = None
+
+    def __enter__(self):
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        self._file = open(self.path, "a+", encoding="utf-8")
+        self._file.seek(0)
+        existing = self._file.read()
+        if not existing:
+            self._file.seek(0)
+            self._file.write("{}")
+            self._file.flush()
+            os.fsync(self._file.fileno())
+        if os.name == "nt":
+            import msvcrt
+            self._file.seek(0)
+            while True:
+                try:
+                    msvcrt.locking(self._file.fileno(), msvcrt.LK_LOCK, 1)
+                    break
+                except OSError:
+                    time.sleep(0.05)
+        else:
+            import fcntl
+            fcntl.flock(self._file.fileno(), fcntl.LOCK_EX)
+        self._file.seek(0)
+        return self._file
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        if self._file is None:
+            return
+        try:
+            self._file.flush()
+            os.fsync(self._file.fileno())
+        except Exception:
+            pass
+        if os.name == "nt":
+            import msvcrt
+            self._file.seek(0)
+            try:
+                msvcrt.locking(self._file.fileno(), msvcrt.LK_UNLCK, 1)
+            except OSError:
+                pass
+        else:
+            import fcntl
+            try:
+                fcntl.flock(self._file.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+        self._file.close()
+        self._file = None
 
 
-def utc_seconds_to_expiration_timestamp(seconds_in_future: int) -> int:
-    return int(time.time()) + int(seconds_in_future)
+class SharedWriteRateLimiter:
+    def __init__(
+        self,
+        *,
+        state_file_path: str,
+        writes_per_second: float,
+        burst_capacity: int,
+        enabled: bool,
+    ) -> None:
+        self.state_file_path = state_file_path
+        self.writes_per_second = float(writes_per_second)
+        self.burst_capacity = int(burst_capacity)
+        self.enabled = bool(enabled)
 
+    def _default_state(self) -> dict:
+        now_epoch_seconds = time.time()
+        return {
+            "tokens_available": float(self.burst_capacity),
+            "last_refill_epoch_seconds": now_epoch_seconds,
+            "blocked_until_epoch_seconds": 0.0,
+        }
 
-def parse_iso_utc_timestamp_to_ms(value: Optional[str]) -> Optional[int]:
-    if not value:
-        return None
-    text = value.strip()
-    if text.endswith("Z"):
-        text = text[:-1] + "+00:00"
-    try:
-        from datetime import datetime
-        return int(datetime.fromisoformat(text).timestamp() * 1000)
-    except Exception:
-        return None
+    def _load_state_locked(self, locked_file) -> dict:
+        locked_file.seek(0)
+        raw = locked_file.read().strip()
+        if not raw:
+            return self._default_state()
+        try:
+            state = json.loads(raw)
+        except json.JSONDecodeError:
+            return self._default_state()
+        return {
+            "tokens_available": float(state.get("tokens_available", self.burst_capacity)),
+            "last_refill_epoch_seconds": float(state.get("last_refill_epoch_seconds", time.time())),
+            "blocked_until_epoch_seconds": float(state.get("blocked_until_epoch_seconds", 0.0)),
+        }
 
+    def _save_state_locked(self, locked_file, state: dict) -> None:
+        locked_file.seek(0)
+        locked_file.truncate(0)
+        locked_file.write(json.dumps(state, separators=(",", ":")))
+        locked_file.flush()
+        os.fsync(locked_file.fileno())
 
-def decimal_from_any(value: object) -> Decimal:
-    return Decimal(str(value))
+    def acquire_permit(self, *, action_name: str) -> None:
+        if not self.enabled:
+            return
 
+        while True:
+            sleep_seconds = 0.0
+            with CrossProcessFileLock(self.state_file_path) as locked_file:
+                now_epoch_seconds = time.time()
+                state = self._load_state_locked(locked_file)
 
-def parse_price_units_from_dollars(price_dollars: object) -> int:
-    scaled = decimal_from_any(price_dollars) * PRICE_SCALE
-    return int(scaled.to_integral_value(rounding=ROUND_HALF_UP))
+                blocked_until = float(state.get("blocked_until_epoch_seconds", 0.0))
+                if blocked_until > now_epoch_seconds:
+                    sleep_seconds = max(0.05, blocked_until - now_epoch_seconds)
+                    self._save_state_locked(locked_file, state)
+                else:
+                    last_refill = float(state.get("last_refill_epoch_seconds", now_epoch_seconds))
+                    elapsed = max(0.0, now_epoch_seconds - last_refill)
+                    refilled_tokens = elapsed * self.writes_per_second
+                    tokens_available = min(
+                        float(self.burst_capacity),
+                        float(state.get("tokens_available", self.burst_capacity)) + refilled_tokens,
+                    )
 
+                    if tokens_available >= 1.0:
+                        state["tokens_available"] = tokens_available - 1.0
+                        state["last_refill_epoch_seconds"] = now_epoch_seconds
+                        state["blocked_until_epoch_seconds"] = 0.0
+                        self._save_state_locked(locked_file, state)
+                        return
 
-def parse_price_units_from_legacy_cents(price_cents: object) -> int:
-    return int(price_cents) * PRICE_UNITS_PER_CENT
+                    tokens_needed = 1.0 - tokens_available
+                    sleep_seconds = max(0.05, tokens_needed / self.writes_per_second)
+                    state["tokens_available"] = tokens_available
+                    state["last_refill_epoch_seconds"] = now_epoch_seconds
+                    self._save_state_locked(locked_file, state)
 
+            log_event("SHARED_WRITE_LIMIT_WAIT", action=action_name, seconds=f"{sleep_seconds:.3f}")
+            time.sleep(sleep_seconds)
 
-def parse_optional_price_units(message: dict, fixed_point_field: str, legacy_cents_field: str) -> Optional[int]:
-    if fixed_point_field in message and message.get(fixed_point_field) not in (None, ""):
-        return parse_price_units_from_dollars(message[fixed_point_field])
-    if legacy_cents_field in message and message.get(legacy_cents_field) not in (None, ""):
-        return parse_price_units_from_legacy_cents(message[legacy_cents_field])
-    return None
-
-
-def format_price_dollars(price_units: int) -> str:
-    value = (Decimal(price_units) / Decimal(PRICE_SCALE)).quantize(Decimal("0.0001"))
-    return format(value, "f")
-
-
-def parse_count_units_from_fp(count_fp: object) -> int:
-    scaled = decimal_from_any(count_fp) * COUNT_SCALE
-    return int(scaled.to_integral_value(rounding=ROUND_HALF_UP))
-
-
-def parse_optional_count_units(message: dict, fixed_point_field: str, legacy_integer_field: str) -> Optional[int]:
-    if fixed_point_field in message and message.get(fixed_point_field) not in (None, ""):
-        return parse_count_units_from_fp(message[fixed_point_field])
-    if legacy_integer_field in message and message.get(legacy_integer_field) not in (None, ""):
-        return int(message[legacy_integer_field]) * COUNT_SCALE
-    return None
-
-
-def format_count_fp(count_units: int) -> str:
-    value = (Decimal(count_units) / Decimal(COUNT_SCALE)).quantize(Decimal("0.00"))
-    return format(value, "f")
-
-
-def cents_to_price_units(cents: int) -> int:
-    return int(cents) * PRICE_UNITS_PER_CENT
-
-
-def contracts_to_count_units(contracts: int) -> int:
-    return int(contracts) * COUNT_SCALE
-
-
-def count_units_to_contracts_string(count_units: int) -> str:
-    return format_count_fp(count_units)
-
-
-def log_event(event_name: str, **fields: object) -> None:
-    if fields:
-        detail = " ".join(f"{key}={value}" for key, value in fields.items())
-        LOGGER.info("%s | %s", event_name, detail)
-    else:
-        LOGGER.info("%s", event_name)
-
-
-def is_post_only_cross_error(exception: Exception) -> bool:
-    message = str(exception).lower()
-    return (
-        "post_only_cross" in message
-        or "post only cross" in message
-        or "post-only cross" in message
-        or '"code":"post_only_cross"' in message
-        or "'code':'post_only_cross'" in message
-    )
-
-
-def is_missing_or_non_resting_amend_target(exception: Exception) -> bool:
-    message = str(exception).lower()
-    return (
-        ("amend" in message)
-        and (
-            "failed 404" in message
-            or " 404:" in message
-            or '"code":"not_found"' in message
-            or "'code':'not_found'" in message
-            or "order_not_found" in message
-            or "not found" in message
-            or "not_resting" in message
-            or "order not resting" in message
-            or "not resting" in message
-        )
-    )
-
-
-def is_order_not_found_error(exception: Exception) -> bool:
-    message = str(exception).lower()
-    return (
-        "failed 404" in message
-        or " 404:" in message
-        or '"code":"not_found"' in message
-        or "'code':'not_found'" in message
-        or "order_not_found" in message
-        or "not found" in message
-    )
+    def apply_global_cooldown(self, cooldown_seconds: float) -> None:
+        if not self.enabled or cooldown_seconds <= 0:
+            return
+        with CrossProcessFileLock(self.state_file_path) as locked_file:
+            now_epoch_seconds = time.time()
+            state = self._load_state_locked(locked_file)
+            state["blocked_until_epoch_seconds"] = max(
+                float(state.get("blocked_until_epoch_seconds", 0.0)),
+                now_epoch_seconds + float(cooldown_seconds),
+            )
+            state["last_refill_epoch_seconds"] = now_epoch_seconds
+            self._save_state_locked(locked_file, state)
 
 
 # ---------------------------------------------------------------------------
 # Price grid
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class PriceRange:
@@ -428,16 +640,11 @@ class PriceRange:
 
 
 class PriceGrid:
-    """
-    Represents all valid order-entry prices for a market.
-
-    Prices are tracked in 1/10,000-dollar units so that:
-    - $0.0100 == 100 units
-    - $0.0010 == 10 units
-    """
-
     def __init__(self, price_ranges: Iterable[PriceRange]) -> None:
-        self.ranges: List[PriceRange] = sorted(price_ranges, key=lambda item: (item.start_units, item.end_units, item.step_units))
+        self.ranges: List[PriceRange] = sorted(
+            price_ranges,
+            key=lambda item: (item.start_units, item.end_units, item.step_units),
+        )
         if not self.ranges:
             raise ValueError("PriceGrid requires at least one price range")
 
@@ -474,7 +681,6 @@ class PriceGrid:
         if parsed_ranges:
             return cls(parsed_ranges)
 
-        # Fallback for older market payloads that only expose tick_size in legacy cents.
         legacy_tick_cents = int(market_payload.get("tick_size") or 1)
         fallback_step_units = max(1, legacy_tick_cents * PRICE_UNITS_PER_CENT)
         return cls(
@@ -583,16 +789,39 @@ class PriceGrid:
         return price_units
 
     def max_safe_partner_bid(self, own_bid_price_units: int) -> Optional[int]:
-        """
-        Largest valid opposite-side bid that keeps own_bid + other_bid < 1.0000.
-        """
         complement_units = ONE_DOLLAR_PRICE_UNITS - int(own_bid_price_units)
         return self.previous_price(complement_units)
+
+    def tick_distance(self, price_a_units: int, price_b_units: int, *, max_iterations: int = 10_000) -> int:
+        if price_a_units == price_b_units:
+            return 0
+
+        if price_b_units > price_a_units:
+            cursor = price_a_units
+            ticks = 0
+            while cursor < price_b_units and ticks < max_iterations:
+                next_price_units = self.next_price(cursor)
+                if next_price_units is None:
+                    break
+                ticks += 1
+                cursor = next_price_units
+            return ticks
+
+        cursor = price_a_units
+        ticks = 0
+        while cursor > price_b_units and ticks < max_iterations:
+            previous_price_units = self.previous_price(cursor)
+            if previous_price_units is None:
+                break
+            ticks += 1
+            cursor = previous_price_units
+        return ticks
 
 
 # ---------------------------------------------------------------------------
 # API client
 # ---------------------------------------------------------------------------
+
 
 class KalshiApiClient:
     def __init__(self, settings: BotSettings) -> None:
@@ -616,6 +845,18 @@ class KalshiApiClient:
 
         with open(settings.private_key_path, "rb") as private_key_file:
             self.private_key = serialization.load_pem_private_key(private_key_file.read(), password=None)
+
+        limiter_directory = settings.shared_write_rate_limiter_directory or tempfile.gettempdir()
+        limiter_namespace = hashlib.sha1(
+            f"{self.host}|{self.settings.api_key_id}|{self.settings.subaccount_number}".encode("utf-8")
+        ).hexdigest()[:16]
+        limiter_file_path = os.path.join(limiter_directory, f"kalshi_write_limiter_{limiter_namespace}.json")
+        self.shared_write_rate_limiter = SharedWriteRateLimiter(
+            state_file_path=limiter_file_path,
+            writes_per_second=settings.shared_write_rate_limit_writes_per_second,
+            burst_capacity=settings.shared_write_rate_limit_burst_capacity,
+            enabled=(settings.enable_shared_write_rate_limiter and not settings.dry_run),
+        )
 
     def sign_message(self, message_bytes: bytes) -> str:
         signature = self.private_key.sign(
@@ -651,6 +892,12 @@ class KalshiApiClient:
     def _build_url(self, path: str) -> str:
         return self.host + path
 
+    def _apply_global_rate_limit_backoff(self) -> None:
+        self.shared_write_rate_limiter.apply_global_cooldown(self.settings.global_rate_limit_backoff_seconds)
+
+    def _before_write_api_call(self, action_name: str) -> None:
+        self.shared_write_rate_limiter.acquire_permit(action_name=action_name)
+
     def rest_get(self, path: str, params: Optional[dict] = None) -> dict:
         response = self.session.get(
             self._build_url(path),
@@ -664,26 +911,30 @@ class KalshiApiClient:
             return {}
         return response.json()
 
-    def rest_post(self, path: str, body: dict) -> dict:
+    def rest_post(self, path: str, body: dict, *, action_name: str) -> dict:
         response = self.session.post(
             self._build_url(path),
             headers=self._rest_headers("POST", path),
             json=body,
             timeout=15,
         )
+        if response.status_code == 429:
+            self._apply_global_rate_limit_backoff()
         if response.status_code >= 400:
             raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
         if not response.text.strip():
             return {}
         return response.json()
 
-    def rest_delete(self, path: str, params: Optional[dict] = None) -> dict:
+    def rest_delete(self, path: str, params: Optional[dict] = None, *, action_name: str) -> dict:
         response = self.session.delete(
             self._build_url(path),
             headers=self._rest_headers("DELETE", path),
             params=params,
             timeout=15,
         )
+        if response.status_code == 429:
+            self._apply_global_rate_limit_backoff()
         if response.status_code >= 400:
             raise RuntimeError(f"DELETE {path} failed {response.status_code}: {response.text[:500]}")
         if not response.text.strip():
@@ -720,7 +971,7 @@ class KalshiApiClient:
 
             response = self.rest_get(f"{self.api_prefix}/portfolio/orders", params=params)
             all_orders.extend(response.get("orders", []))
-            cursor = response.get("cursor") or ""
+            cursor = response.get("cursor") or response.get("next_cursor") or ""
             if not cursor:
                 break
 
@@ -745,6 +996,7 @@ class KalshiApiClient:
             "post_only": bool(self.settings.post_only_quotes),
             "cancel_order_on_pause": bool(self.settings.cancel_quotes_if_exchange_pauses),
             "subaccount": self.settings.subaccount_number,
+            "time_in_force": "good_till_canceled",
         }
 
         if side == "yes":
@@ -754,9 +1006,6 @@ class KalshiApiClient:
 
         if expiration_timestamp_seconds and expiration_timestamp_seconds > 0:
             body["expiration_ts"] = int(expiration_timestamp_seconds)
-            body["time_in_force"] = "good_till_canceled"
-        else:
-            body["time_in_force"] = "good_till_canceled"
 
         if self.settings.dry_run:
             log_event(
@@ -773,7 +1022,8 @@ class KalshiApiClient:
                 }
             }
 
-        return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+        self._before_write_api_call("create_order")
+        return self.rest_post(f"{self.api_prefix}/portfolio/orders", body, action_name="create_order")
 
     def amend_order(
         self,
@@ -817,14 +1067,10 @@ class KalshiApiClient:
                 }
             }
 
-        return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+        self._before_write_api_call("amend_order")
+        return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body, action_name="amend_order")
 
-    def decrease_order_to(
-        self,
-        *,
-        order_id: str,
-        remaining_count_units: int,
-    ) -> dict:
+    def decrease_order_to(self, *, order_id: str, remaining_count_units: int) -> dict:
         body = {
             "subaccount": self.settings.subaccount_number,
             "reduce_to_fp": format_count_fp(remaining_count_units),
@@ -838,16 +1084,19 @@ class KalshiApiClient:
             )
             return {"order": {"order_id": order_id}}
 
-        return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/decrease", body)
+        self._before_write_api_call("decrease_order")
+        return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/decrease", body, action_name="decrease_order")
 
     def cancel_order(self, *, order_id: str) -> dict:
         if self.settings.dry_run:
             log_event("DRY_CANCEL", order_id=order_id)
             return {"order": {"order_id": order_id}}
 
+        self._before_write_api_call("cancel_order")
         return self.rest_delete(
             f"{self.api_prefix}/portfolio/orders/{order_id}",
             params={"subaccount": self.settings.subaccount_number},
+            action_name="cancel_order",
         )
 
     def get_order_queue_position(self, order_id: str) -> dict:
@@ -857,6 +1106,7 @@ class KalshiApiClient:
 # ---------------------------------------------------------------------------
 # Market metadata and order state
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class MarketMetadata:
@@ -880,6 +1130,10 @@ class ManagedOrderState:
     status: Optional[str] = None
     expiration_time_ms: Optional[int] = None
     last_queue_position_units: Optional[int] = None
+    consecutive_queue_ahead_breaches: int = 0
+    same_side_reentry_cooldown_until_ms: int = 0
+    queue_abandonment_cooldown_until_ms: int = 0
+    last_positive_fill_timestamp_ms: int = 0
 
     @property
     def has_active_resting_order(self) -> bool:
@@ -898,6 +1152,7 @@ class ManagedOrderState:
         self.status = None
         self.expiration_time_ms = None
         self.last_queue_position_units = None
+        self.consecutive_queue_ahead_breaches = 0
         if not preserve_quote_cycle:
             self.quote_cycle_filled_units = 0
 
@@ -905,6 +1160,7 @@ class ManagedOrderState:
 # ---------------------------------------------------------------------------
 # Bot
 # ---------------------------------------------------------------------------
+
 
 class TopOfBookBot:
     def __init__(self, settings: BotSettings, api_client: KalshiApiClient, market: MarketMetadata) -> None:
@@ -919,6 +1175,9 @@ class TopOfBookBot:
         self.last_orderbook_sequence: Optional[int] = None
         self.last_fill_timestamp_ms = 0
         self.last_requote_action_timestamp_ms = 0
+        self.market_wide_queue_cooldown_until_ms = 0
+        self.last_market_probability_guard_state: Optional[bool] = None
+        self.last_market_queue_cooldown_logged_state: Optional[bool] = None
 
         self.net_position_units = 0
 
@@ -929,6 +1188,11 @@ class TopOfBookBot:
 
         self.requote_event = asyncio.Event()
         self.requote_lock = asyncio.Lock()
+        self.instance_expiration_jitter_seconds = (
+            random.randint(0, self.settings.expiration_jitter_seconds)
+            if self.settings.expiration_jitter_seconds > 0
+            else 0
+        )
 
     # -------------------------
     # Startup / state sync
@@ -950,10 +1214,7 @@ class TopOfBookBot:
         position_payload = market_positions[0]
         position_units = parse_optional_count_units(position_payload, "position_fp", "position")
         self.net_position_units = int(position_units or 0)
-        log_event(
-            "STARTUP_POSITION",
-            contracts=format_count_fp(self.net_position_units),
-        )
+        log_event("STARTUP_POSITION", contracts=format_count_fp(self.net_position_units))
 
     def cancel_owned_resting_quotes_on_startup(self) -> None:
         if not self.settings.cancel_strategy_quotes_on_startup:
@@ -1003,7 +1264,6 @@ class TopOfBookBot:
 
         quantity_at_best_units = int(levels.get(best_price_units, 0))
         our_remaining_units = int(state.remaining_count_units or 0)
-
         if quantity_at_best_units - our_remaining_units > 0:
             return best_price_units
 
@@ -1042,6 +1302,17 @@ class TopOfBookBot:
     def post_fill_improvement_cooldown_active(self) -> bool:
         return now_ms() - self.last_fill_timestamp_ms < self.settings.post_fill_no_improve_cooldown_ms
 
+    def side_same_side_reentry_cooldown_active(self, side: str) -> bool:
+        state = self.orders[side]
+        return now_ms() < state.same_side_reentry_cooldown_until_ms
+
+    def side_queue_abandonment_cooldown_active(self, side: str) -> bool:
+        state = self.orders[side]
+        return now_ms() < state.queue_abandonment_cooldown_until_ms
+
+    def market_queue_cooldown_active(self) -> bool:
+        return now_ms() < self.market_wide_queue_cooldown_until_ms
+
     def quote_allowed_for_side(
         self,
         *,
@@ -1059,12 +1330,17 @@ class TopOfBookBot:
             and blocked_side != side
         )
 
-        # Exit-side override: if we are already long one direction, keep the opposite
-        # side available so the strategy can naturally work inventory back down.
         if self.net_position_units > 0 and side == "no" and blocked_side != "no":
             allowed = True
         elif self.net_position_units < 0 and side == "yes" and blocked_side != "yes":
             allowed = True
+
+        if self.settings.suppress_same_side_quotes_during_reentry_cooldown and self.side_same_side_reentry_cooldown_active(side):
+            allowed = False
+        if self.side_queue_abandonment_cooldown_active(side):
+            allowed = False
+        if self.market_queue_cooldown_active():
+            allowed = False
 
         return allowed
 
@@ -1131,7 +1407,6 @@ class TopOfBookBot:
         hard_limit_units = cents_to_price_units(self.settings.maximum_combined_bid_cents)
         profit_buffer_units = cents_to_price_units(self.settings.additional_profit_buffer_cents)
         minimum_step_units = self.market.price_grid.minimum_step_units
-
         theoretical_limit_units = ONE_DOLLAR_PRICE_UNITS - minimum_step_units - profit_buffer_units
         return max(0, min(hard_limit_units, theoretical_limit_units))
 
@@ -1164,7 +1439,6 @@ class TopOfBookBot:
                     yes_bid_units = lowered_yes_units
                 else:
                     no_bid_units = lowered_no_units
-
             elif priority == "no":
                 lowered_yes_units = lower_one_tick(yes_bid_units)
                 if lowered_yes_units == yes_bid_units:
@@ -1174,7 +1448,6 @@ class TopOfBookBot:
                     no_bid_units = lowered_no_units
                 else:
                     yes_bid_units = lowered_yes_units
-
             else:
                 if yes_bid_units >= no_bid_units:
                     lowered_yes_units = lower_one_tick(yes_bid_units)
@@ -1200,15 +1473,114 @@ class TopOfBookBot:
     def shift_for_inventory_skew(self, side: str, base_price_units: int, skew_ticks: int) -> int:
         if skew_ticks == 0:
             return base_price_units
-
         if side == "yes":
             return self.market.price_grid.move_price_by_ticks(base_price_units, -skew_ticks)
         return self.market.price_grid.move_price_by_ticks(base_price_units, +skew_ticks)
+
+    def maybe_market_probability_guard_triggered(self, *, best_yes_bid_units: int, best_no_bid_units: int) -> bool:
+        threshold_cents = self.settings.minimum_market_best_bid_cents_required_to_quote_any_side
+        if threshold_cents <= 0:
+            guard_active = False
+        else:
+            threshold_units = cents_to_price_units(threshold_cents)
+            guard_active = best_yes_bid_units < threshold_units or best_no_bid_units < threshold_units
+
+        if guard_active != self.last_market_probability_guard_state:
+            log_event(
+                "MARKET_PROBABILITY_GUARD",
+                active=guard_active,
+                best_yes_bid_cents=best_yes_bid_units // PRICE_UNITS_PER_CENT,
+                best_no_bid_cents=best_no_bid_units // PRICE_UNITS_PER_CENT,
+                threshold_cents=threshold_cents,
+            )
+            self.last_market_probability_guard_state = guard_active
+
+        return guard_active
+
+    def maybe_log_market_queue_cooldown(self) -> None:
+        active = self.market_queue_cooldown_active()
+        if active != self.last_market_queue_cooldown_logged_state:
+            log_event(
+                "MARKET_QUEUE_COOLDOWN",
+                active=active,
+                cooldown_remaining_ms=max(0, self.market_wide_queue_cooldown_until_ms - now_ms()),
+            )
+            self.last_market_queue_cooldown_logged_state = active
+
+    def final_quote_meets_side_floor(self, desired_price_units: Optional[int]) -> bool:
+        if desired_price_units is None:
+            return False
+        minimum_bid_units = cents_to_price_units(self.settings.minimum_best_bid_cents_required_to_quote)
+        return desired_price_units >= minimum_bid_units
+
+    def should_skip_small_upward_reprice(self, current_price_units: int, target_price_units: int) -> bool:
+        if target_price_units <= current_price_units:
+            return False
+        minimum_ticks = self.settings.minimum_upward_reprice_ticks_required
+        if minimum_ticks <= 0:
+            return False
+        tick_distance = self.market.price_grid.tick_distance(current_price_units, target_price_units)
+        return tick_distance < minimum_ticks
+
+    def compute_side_desired_quote_price(
+        self,
+        *,
+        side: str,
+        side_quote_allowed: bool,
+        maximum_bid_units: int,
+        other_best_units: Optional[int],
+        allow_aggressive_improvement: bool,
+    ) -> Optional[int]:
+        if not side_quote_allowed:
+            return None
+
+        current_price_units = self.orders[side].price_units
+        live_best_bid_units = self.best_bid(side)
+        if live_best_bid_units is None:
+            return None
+
+        if current_price_units is not None and current_price_units > maximum_bid_units:
+            return maximum_bid_units
+
+        if other_best_units is None:
+            if current_price_units is not None:
+                return min(current_price_units, maximum_bid_units)
+            return min(live_best_bid_units, maximum_bid_units)
+
+        target_units = self.choose_target_from_other_best(
+            other_best_units=other_best_units,
+            cap_price_units=maximum_bid_units,
+            allow_aggressive_improvement=allow_aggressive_improvement,
+        )
+
+        if current_price_units is None:
+            if self.settings.join_current_best_bid_when_starting_new_quote_cycle:
+                return min(live_best_bid_units, maximum_bid_units)
+            return target_units
+
+        if current_price_units > maximum_bid_units:
+            return maximum_bid_units
+
+        if target_units < current_price_units:
+            return target_units
+        if target_units > current_price_units and self.should_skip_small_upward_reprice(current_price_units, target_units):
+            return current_price_units
+        return target_units
 
     def desired_quote_prices(self) -> Tuple[Optional[int], Optional[int]]:
         best_yes_bid_units = self.best_bid("yes")
         best_no_bid_units = self.best_bid("no")
         if best_yes_bid_units is None or best_no_bid_units is None:
+            return None, None
+
+        if self.maybe_market_probability_guard_triggered(
+            best_yes_bid_units=best_yes_bid_units,
+            best_no_bid_units=best_no_bid_units,
+        ):
+            return None, None
+
+        self.maybe_log_market_queue_cooldown()
+        if self.market_queue_cooldown_active():
             return None, None
 
         implied_yes_ask_units = self.implied_yes_ask(best_no_bid_units)
@@ -1235,7 +1607,6 @@ class TopOfBookBot:
             and not self.post_fill_improvement_cooldown_active()
         )
 
-        # Approximate current spread in ticks using repeated next-price moves.
         if allow_aggressive_improvement:
             tick_counter = 0
             candidate_price_units = best_yes_bid_units
@@ -1251,64 +1622,42 @@ class TopOfBookBot:
         yes_other_best_units = self.best_bid_excluding_our_order("yes")
         no_other_best_units = self.best_bid_excluding_our_order("no")
 
-        desired_yes_units: Optional[int]
-        desired_no_units: Optional[int]
-
-        current_yes_price_units = self.orders["yes"].price_units
-        if not yes_quote_allowed:
-            desired_yes_units = None
-        elif current_yes_price_units is None:
-            desired_yes_units = min(best_yes_bid_units, maximum_yes_bid_units)
-        else:
-            if yes_other_best_units is None:
-                desired_yes_units = min(current_yes_price_units, maximum_yes_bid_units)
-            else:
-                target_yes_units = self.choose_target_from_other_best(
-                    other_best_units=yes_other_best_units,
-                    cap_price_units=maximum_yes_bid_units,
-                    allow_aggressive_improvement=allow_aggressive_improvement,
-                )
-                desired_yes_units = (
-                    target_yes_units
-                    if current_yes_price_units < yes_other_best_units or current_yes_price_units > target_yes_units
-                    else min(current_yes_price_units, maximum_yes_bid_units)
-                )
-
-        current_no_price_units = self.orders["no"].price_units
-        if not no_quote_allowed:
-            desired_no_units = None
-        elif current_no_price_units is None:
-            desired_no_units = min(best_no_bid_units, maximum_no_bid_units)
-        else:
-            if no_other_best_units is None:
-                desired_no_units = min(current_no_price_units, maximum_no_bid_units)
-            else:
-                target_no_units = self.choose_target_from_other_best(
-                    other_best_units=no_other_best_units,
-                    cap_price_units=maximum_no_bid_units,
-                    allow_aggressive_improvement=allow_aggressive_improvement,
-                )
-                desired_no_units = (
-                    target_no_units
-                    if current_no_price_units < no_other_best_units or current_no_price_units > target_no_units
-                    else min(current_no_price_units, maximum_no_bid_units)
-                )
+        desired_yes_units = self.compute_side_desired_quote_price(
+            side="yes",
+            side_quote_allowed=yes_quote_allowed,
+            maximum_bid_units=maximum_yes_bid_units,
+            other_best_units=yes_other_best_units,
+            allow_aggressive_improvement=allow_aggressive_improvement,
+        )
+        desired_no_units = self.compute_side_desired_quote_price(
+            side="no",
+            side_quote_allowed=no_quote_allowed,
+            maximum_bid_units=maximum_no_bid_units,
+            other_best_units=no_other_best_units,
+            allow_aggressive_improvement=allow_aggressive_improvement,
+        )
 
         if desired_yes_units is not None:
             desired_yes_units = self.market.price_grid.floor_to_valid(desired_yes_units)
         if desired_no_units is not None:
             desired_no_units = self.market.price_grid.floor_to_valid(desired_no_units)
 
-        if desired_yes_units is not None and desired_no_units is not None:
-            inventory_skew_ticks = self.current_inventory_skew_ticks()
+        inventory_skew_ticks = self.current_inventory_skew_ticks()
+        if desired_yes_units is not None:
             desired_yes_units = self.shift_for_inventory_skew("yes", desired_yes_units, inventory_skew_ticks)
-            desired_no_units = self.shift_for_inventory_skew("no", desired_no_units, inventory_skew_ticks)
-
             desired_yes_units = min(desired_yes_units, maximum_yes_bid_units)
+        if desired_no_units is not None:
+            desired_no_units = self.shift_for_inventory_skew("no", desired_no_units, inventory_skew_ticks)
             desired_no_units = min(desired_no_units, maximum_no_bid_units)
 
+        if desired_yes_units is not None and desired_no_units is not None:
             desired_yes_units, desired_no_units = self.clamp_pair_to_avoid_self_cross(desired_yes_units, desired_no_units)
             desired_yes_units, desired_no_units = self.apply_pair_guard(desired_yes_units, desired_no_units)
+
+        if not self.final_quote_meets_side_floor(desired_yes_units):
+            desired_yes_units = None
+        if not self.final_quote_meets_side_floor(desired_no_units):
+            desired_no_units = None
 
         return desired_yes_units, desired_no_units
 
@@ -1328,14 +1677,12 @@ class TopOfBookBot:
         quantity_units = (budget_money_units * COUNT_SCALE) // price_units
         maximum_count_units = contracts_to_count_units(self.settings.maximum_contracts_per_order)
         quantity_units = min(quantity_units, maximum_count_units)
-
         if quantity_units <= 0:
             return 0
 
         if self.market.fractional_trading_enabled and self.settings.allow_fractional_order_entry_when_supported:
             return int(quantity_units)
 
-        # Whole-contract default.
         quantity_units = (quantity_units // COUNT_SCALE) * COUNT_SCALE
         return int(quantity_units)
 
@@ -1347,8 +1694,6 @@ class TopOfBookBot:
         if self.settings.refill_resting_size_after_partial_fill:
             return quote_cycle_filled_units + budget_size_units
 
-        # Preserve the older behavior: keep the total max fillable size capped
-        # at the budget target. As fills occur, the resting size shrinks.
         return max(quote_cycle_filled_units, budget_size_units)
 
     def desired_remaining_units(self, side: str, price_units: int, quote_cycle_filled_units: int) -> int:
@@ -1366,6 +1711,15 @@ class TopOfBookBot:
             return False
         refresh_threshold_ms = self.settings.expiration_refresh_lead_seconds * 1000
         return state.expiration_time_ms - now_ms() <= refresh_threshold_ms
+
+    def expiration_timestamp_for_side(self, side: str) -> Optional[int]:
+        if self.settings.resting_order_expiration_seconds <= 0:
+            return None
+        total_seconds = self.settings.resting_order_expiration_seconds
+        total_seconds += self.instance_expiration_jitter_seconds
+        if self.settings.stagger_yes_no_expiration_offsets_seconds > 0 and side == "no":
+            total_seconds += self.settings.stagger_yes_no_expiration_offsets_seconds
+        return utc_seconds_to_expiration_timestamp(total_seconds)
 
     async def cancel_side_quote(self, side: str, *, reason: str, reset_quote_cycle: bool) -> None:
         state = self.orders[side]
@@ -1385,6 +1739,9 @@ class TopOfBookBot:
         except Exception as exc:
             if is_order_not_found_error(exc):
                 log_event("CANCEL_SKIPPED_ORDER_MISSING", side=side, reason=reason, order_id=order_id)
+            elif is_rate_limit_error(exc):
+                log_event("CANCEL_RATE_LIMITED", side=side, reason=reason, order_id=order_id, error=str(exc))
+                raise
             else:
                 raise
 
@@ -1409,7 +1766,6 @@ class TopOfBookBot:
 
         for attempt_index in range(self.settings.maximum_post_only_reprice_attempts):
             state = self.orders[side]
-
             desired_remaining_units = self.desired_remaining_units(side, attempt_price_units, state.quote_cycle_filled_units)
             if desired_remaining_units <= 0:
                 await self.cancel_side_quote(side, reason="target_size_zero", reset_quote_cycle=True)
@@ -1419,21 +1775,15 @@ class TopOfBookBot:
             current_order_total_fillable_units = state.current_order_total_fillable_units
 
             if state.has_active_resting_order:
-                if (
-                    state.price_units == attempt_price_units
-                    and current_order_total_fillable_units == desired_current_order_total_fillable_units
-                    and not self.order_needs_expiration_refresh(state)
-                ):
+                price_unchanged = state.price_units == attempt_price_units
+                size_unchanged = current_order_total_fillable_units == desired_current_order_total_fillable_units
+                if price_unchanged and size_unchanged and not self.order_needs_expiration_refresh(state):
                     return
 
             try:
                 if not state.has_active_resting_order:
                     new_client_order_id = f"{self.settings.primary_client_order_prefix}:{side}:{uuid.uuid4().hex[:16]}"
-                    expiration_ts = (
-                        utc_seconds_to_expiration_timestamp(self.settings.resting_order_expiration_seconds)
-                        if self.settings.resting_order_expiration_seconds > 0
-                        else None
-                    )
+                    expiration_ts = self.expiration_timestamp_for_side(side)
                     response = await asyncio.to_thread(
                         self.api_client.create_order,
                         market_ticker=self.settings.market_ticker,
@@ -1475,7 +1825,6 @@ class TopOfBookBot:
                     previous_client_order_id=state.client_order_id,
                     updated_client_order_id=updated_client_order_id,
                 )
-
                 amended_order_payload = (response or {}).get("order") or {}
                 state.client_order_id = amended_order_payload.get("client_order_id") or updated_client_order_id
                 state.price_units = attempt_price_units
@@ -1492,11 +1841,7 @@ class TopOfBookBot:
 
             except Exception as exc:
                 if is_missing_or_non_resting_amend_target(exc):
-                    log_event(
-                        "STALE_ORDER_RECOVER",
-                        side=side,
-                        order_id=state.order_id,
-                    )
+                    log_event("STALE_ORDER_RECOVER", side=side, order_id=state.order_id)
                     state.clear_active_order(preserve_quote_cycle=False)
                     continue
 
@@ -1509,22 +1854,91 @@ class TopOfBookBot:
                         old_price_dollars=format_price_dollars(attempt_price_units),
                         next_price_dollars=(format_price_dollars(next_lower_price_units) if next_lower_price_units is not None else "none"),
                     )
-
                     if next_lower_price_units is None:
                         return
-
                     attempt_price_units = next_lower_price_units
-
                     if attempt_index + 1 >= self.settings.maximum_post_only_reprice_attempts:
-                        log_event(
-                            "POST_ONLY_COOLDOWN",
-                            side=side,
-                            seconds=self.settings.post_only_reprice_cooldown_seconds,
-                        )
+                        log_event("POST_ONLY_COOLDOWN", side=side, seconds=self.settings.post_only_reprice_cooldown_seconds)
                         await asyncio.sleep(self.settings.post_only_reprice_cooldown_seconds)
                     continue
 
                 raise
+
+    # -------------------------
+    # Queue management
+    # -------------------------
+
+    def queue_abandonment_threshold_units(self, side: str) -> int:
+        state = self.orders[side]
+        absolute_limit_units = contracts_to_count_units(self.settings.maximum_queue_ahead_contracts_before_abandonment)
+        relative_limit_units = int(math.ceil(state.remaining_count_units * self.settings.maximum_queue_ahead_multiple_of_our_remaining_size))
+        return max(absolute_limit_units, relative_limit_units)
+
+    async def process_queue_position_update(self, side: str, queue_position_units: Optional[int]) -> None:
+        state = self.orders[side]
+        if queue_position_units is None or not state.has_active_resting_order:
+            state.consecutive_queue_ahead_breaches = 0
+            return
+
+        if not self.settings.enable_queue_abandonment_guard:
+            return
+
+        threshold_units = self.queue_abandonment_threshold_units(side)
+        if queue_position_units > threshold_units:
+            state.consecutive_queue_ahead_breaches += 1
+            log_event(
+                "QUEUE_AHEAD_BREACH",
+                side=side,
+                ahead_contracts=format_count_fp(queue_position_units),
+                threshold_contracts=format_count_fp(threshold_units),
+                consecutive_breaches=state.consecutive_queue_ahead_breaches,
+            )
+        else:
+            if state.consecutive_queue_ahead_breaches > 0:
+                log_event(
+                    "QUEUE_AHEAD_RECOVERED",
+                    side=side,
+                    ahead_contracts=format_count_fp(queue_position_units),
+                )
+            state.consecutive_queue_ahead_breaches = 0
+            return
+
+        if state.consecutive_queue_ahead_breaches < self.settings.queue_abandonment_consecutive_polls_required:
+            return
+
+        cooldown_until_ms = now_ms() + self.settings.queue_abandonment_side_cooldown_seconds * 1000
+        state.queue_abandonment_cooldown_until_ms = max(state.queue_abandonment_cooldown_until_ms, cooldown_until_ms)
+        state.consecutive_queue_ahead_breaches = 0
+
+        log_event(
+            "QUEUE_ABANDON_SIDE",
+            side=side,
+            cooldown_seconds=self.settings.queue_abandonment_side_cooldown_seconds,
+            ahead_contracts=format_count_fp(queue_position_units),
+            threshold_contracts=format_count_fp(threshold_units),
+        )
+
+        opposite_side = "no" if side == "yes" else "yes"
+        opposite_state = self.orders[opposite_side]
+        if now_ms() < opposite_state.queue_abandonment_cooldown_until_ms:
+            self.market_wide_queue_cooldown_until_ms = max(
+                self.market_wide_queue_cooldown_until_ms,
+                now_ms() + self.settings.queue_abandonment_market_cooldown_seconds * 1000,
+            )
+            log_event(
+                "QUEUE_ABANDON_MARKET",
+                cooldown_seconds=self.settings.queue_abandonment_market_cooldown_seconds,
+            )
+
+        async with self.requote_lock:
+            try:
+                await self.cancel_side_quote(side, reason="queue_abandonment", reset_quote_cycle=False)
+            except Exception as exc:
+                if is_rate_limit_error(exc):
+                    log_event("QUEUE_ABANDON_CANCEL_RATE_LIMITED", side=side, error=str(exc))
+                else:
+                    raise
+        self.requote_event.set()
 
     # -------------------------
     # WebSocket / event handling
@@ -1592,13 +2006,10 @@ class TopOfBookBot:
             return
 
         state = self.orders[side]
-
         incoming_order_id = order_message.get("order_id")
         incoming_status = order_message.get("status")
 
         if incoming_order_id and state.order_id and incoming_order_id != state.order_id:
-            # A new order was created for the same side. Keep quote-cycle fill totals,
-            # but reset the per-order tracking to the fresh order's fields.
             state.order_id = incoming_order_id
             state.current_order_filled_units = 0
             state.remaining_count_units = 0
@@ -1613,12 +2024,25 @@ class TopOfBookBot:
             fill_units = int(fill_units)
             fill_delta_units = fill_units - state.current_order_filled_units
             if fill_delta_units > 0:
+                event_timestamp_ms = now_ms()
                 state.quote_cycle_filled_units += fill_delta_units
-                self.last_fill_timestamp_ms = now_ms()
+                state.last_positive_fill_timestamp_ms = event_timestamp_ms
+                state.same_side_reentry_cooldown_until_ms = max(
+                    state.same_side_reentry_cooldown_until_ms,
+                    event_timestamp_ms + self.settings.same_side_reentry_cooldown_ms,
+                )
+                self.last_fill_timestamp_ms = event_timestamp_ms
                 if side == "yes":
                     self.net_position_units += fill_delta_units
                 else:
                     self.net_position_units -= fill_delta_units
+                log_event(
+                    "FILL_DETECTED",
+                    side=side,
+                    fill_contracts=format_count_fp(fill_delta_units),
+                    cooldown_ms=self.settings.same_side_reentry_cooldown_ms,
+                    net_position_contracts=format_count_fp(self.net_position_units),
+                )
             state.current_order_filled_units = fill_units
 
         remaining_units = parse_optional_count_units(order_message, "remaining_count_fp", "remaining_count")
@@ -1639,12 +2063,7 @@ class TopOfBookBot:
 
         if state.status != "resting":
             preserve_cycle = state.status == "canceled"
-            log_event(
-                "ORDER_NOT_RESTING",
-                side=side,
-                status=state.status,
-                order_id=state.order_id,
-            )
+            log_event("ORDER_NOT_RESTING", side=side, status=state.status, order_id=state.order_id)
             state.clear_active_order(preserve_quote_cycle=preserve_cycle)
 
         self.requote_event.set()
@@ -1669,7 +2088,6 @@ class TopOfBookBot:
 
             async with self.requote_lock:
                 desired_yes_units, desired_no_units = self.desired_quote_prices()
-
                 try:
                     await self.ensure_side_quote("yes", desired_yes_units)
                     await self.ensure_side_quote("no", desired_no_units)
@@ -1677,6 +2095,10 @@ class TopOfBookBot:
                 except Exception as exc:
                     if is_post_only_cross_error(exc):
                         log_event("REQUOTE_POST_ONLY_CROSS_IGNORED", error=str(exc))
+                    elif is_rate_limit_error(exc):
+                        log_event("REQUOTE_RATE_LIMIT_BACKOFF", seconds=self.settings.global_rate_limit_backoff_seconds, error=str(exc))
+                        await asyncio.sleep(self.settings.global_rate_limit_backoff_seconds)
+                        self.requote_event.set()
                     else:
                         log_event("REQUOTE_ERROR", error=str(exc))
                         traceback.print_exc()
@@ -1690,11 +2112,14 @@ class TopOfBookBot:
 
             for side, state in self.orders.items():
                 if not state.has_active_resting_order or not state.order_id:
+                    state.consecutive_queue_ahead_breaches = 0
                     continue
 
                 try:
                     response = await asyncio.to_thread(self.api_client.get_order_queue_position, state.order_id)
                     queue_position_units = parse_optional_count_units(response, "queue_position_fp", "queue_position")
+                    if queue_position_units is None and isinstance(response.get("order"), dict):
+                        queue_position_units = parse_optional_count_units(response["order"], "queue_position_fp", "queue_position")
                     state.last_queue_position_units = queue_position_units
                     log_event(
                         "QUEUE_POSITION",
@@ -1702,6 +2127,7 @@ class TopOfBookBot:
                         order_id=state.order_id,
                         ahead_contracts=(format_count_fp(queue_position_units) if queue_position_units is not None else "unknown"),
                     )
+                    await self.process_queue_position_update(side, queue_position_units)
                 except Exception as exc:
                     log_event("QUEUE_POSITION_ERROR", side=side, order_id=state.order_id, error=str(exc))
 
@@ -1775,7 +2201,6 @@ class TopOfBookBot:
                             self.last_orderbook_sequence = data.get("seq")
                             self.apply_orderbook_snapshot(data.get("msg", {}))
                             self.requote_event.set()
-
                         elif message_type == "orderbook_delta":
                             new_sequence = data.get("seq")
                             if (
@@ -1793,14 +2218,11 @@ class TopOfBookBot:
                             self.last_orderbook_sequence = new_sequence
                             self.apply_orderbook_delta(data.get("msg", {}))
                             self.requote_event.set()
-
                         elif message_type == "user_order":
                             self.handle_user_order_update(data.get("msg", {}))
-
                         elif message_type == "market_position":
                             self.handle_market_position_update(data.get("msg", {}))
                             self.requote_event.set()
-
                         elif message_type == "error":
                             log_event("WS_ERROR", payload=data)
 
@@ -1820,10 +2242,12 @@ class TopOfBookBot:
             fractional_trading=self.market.fractional_trading_enabled,
             dry_run=self.settings.dry_run,
             websocket=self.api_client.websocket_url,
+            reprice_ms=self.settings.minimum_milliseconds_between_requotes,
+            expiration_seconds=self.settings.resting_order_expiration_seconds,
+            same_side_reentry_cooldown_ms=self.settings.same_side_reentry_cooldown_ms,
+            queue_guard=self.settings.enable_queue_abandonment_guard,
         )
 
-        # Startup synchronization is intentionally REST-based and synchronous so
-        # the strategy starts from a correct inventory baseline.
         self.load_startup_position()
         self.cancel_owned_resting_quotes_on_startup()
 
@@ -1837,6 +2261,7 @@ class TopOfBookBot:
 # Main
 # ---------------------------------------------------------------------------
 
+
 def load_market_metadata(api_client: KalshiApiClient, market_ticker: str) -> MarketMetadata:
     market_payload = api_client.get_market(market_ticker)
     price_grid = PriceGrid.from_market_response(market_payload)
@@ -1849,6 +2274,7 @@ def load_market_metadata(api_client: KalshiApiClient, market_ticker: str) -> Mar
         fractional_trading_enabled=bool(market_payload.get("fractional_trading_enabled")),
         price_grid=price_grid,
     )
+
 
 
 def main() -> None:
