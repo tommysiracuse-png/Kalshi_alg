@@ -1,0 +1,1488 @@
+
+=== START 2026-03-08 04:38:41 ===
+CMD: /home/codespace/.python/current/bin/python3 /workspaces/Kalshi_alg/V1.py --ticker KXNBAGAME-26MAR08NYKLAL-LAL --yes-budget-cents 1000 --no-budget-cents 1000
+04:38:44 INFO START | environment=PROD ticker=KXNBAGAME-26MAR08NYKLAL-LAL yes_budget_cents=1000 no_budget_cents=1000 price_structure=linear_cent fractional_trading=False dry_run=False websocket=wss://api.elections.kalshi.com/trade-api/ws/v2
+04:38:44 INFO STARTUP_POSITION | contracts=0.00
+04:38:45 INFO WS_CONNECTED_AND_SUBSCRIBED
+04:38:45 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:38:47 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=5fa912da-bfcd-41c7-a189-bba29d8eeb2c
+04:38:47 INFO CREATE_OK | side=no price_dollars=0.5800 remaining_contracts=17.00 order_id=809e0176-462e-4b6b-8aac-b56980f06133
+04:38:48 INFO AMEND_OK | side=yes price_dollars=0.3900 total_fillable_contracts=25.00 order_id=5fa912da-bfcd-41c7-a189-bba29d8eeb2c
+04:38:48 INFO AMEND_OK | side=no price_dollars=0.5700 total_fillable_contracts=17.00 order_id=809e0176-462e-4b6b-8aac-b56980f06133
+04:38:59 INFO QUEUE_POSITION | side=yes order_id=5fa912da-bfcd-41c7-a189-bba29d8eeb2c ahead_contracts=108969.00
+04:38:59 INFO QUEUE_POSITION | side=no order_id=809e0176-462e-4b6b-8aac-b56980f06133 ahead_contracts=166732.00
+04:39:14 INFO QUEUE_POSITION | side=yes order_id=5fa912da-bfcd-41c7-a189-bba29d8eeb2c ahead_contracts=108969.00
+04:39:14 INFO QUEUE_POSITION | side=no order_id=809e0176-462e-4b6b-8aac-b56980f06133 ahead_contracts=166732.00
+04:39:29 INFO QUEUE_POSITION | side=yes order_id=5fa912da-bfcd-41c7-a189-bba29d8eeb2c ahead_contracts=108969.00
+04:39:29 INFO QUEUE_POSITION | side=no order_id=809e0176-462e-4b6b-8aac-b56980f06133 ahead_contracts=166732.00
+04:39:45 INFO QUEUE_POSITION | side=yes order_id=5fa912da-bfcd-41c7-a189-bba29d8eeb2c ahead_contracts=108969.00
+04:39:45 INFO QUEUE_POSITION | side=no order_id=809e0176-462e-4b6b-8aac-b56980f06133 ahead_contracts=166732.00
+04:39:46 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=809e0176-462e-4b6b-8aac-b56980f06133
+04:39:46 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=5fa912da-bfcd-41c7-a189-bba29d8eeb2c
+04:39:46 INFO CANCEL_SKIPPED_ORDER_MISSING | side=yes reason=refresh_expiring_quote order_id=5fa912da-bfcd-41c7-a189-bba29d8eeb2c
+04:39:46 INFO CREATE_OK | side=yes price_dollars=0.3900 remaining_contracts=25.00 order_id=daf3dbdd-92fc-4386-8b65-ab2642e392ae
+04:39:46 INFO CREATE_OK | side=no price_dollars=0.5800 remaining_contracts=17.00 order_id=e69ba67a-9489-499f-8c8b-dbb0aecea0a1
+04:39:47 INFO AMEND_OK | side=no price_dollars=0.5700 total_fillable_contracts=17.00 order_id=e69ba67a-9489-499f-8c8b-dbb0aecea0a1
+04:40:00 INFO QUEUE_POSITION | side=yes order_id=daf3dbdd-92fc-4386-8b65-ab2642e392ae ahead_contracts=108969.00
+04:40:00 INFO QUEUE_POSITION | side=no order_id=e69ba67a-9489-499f-8c8b-dbb0aecea0a1 ahead_contracts=166732.00
+04:40:15 INFO QUEUE_POSITION | side=yes order_id=daf3dbdd-92fc-4386-8b65-ab2642e392ae ahead_contracts=108969.00
+04:40:15 INFO QUEUE_POSITION | side=no order_id=e69ba67a-9489-499f-8c8b-dbb0aecea0a1 ahead_contracts=166732.00
+04:40:30 INFO QUEUE_POSITION | side=yes order_id=daf3dbdd-92fc-4386-8b65-ab2642e392ae ahead_contracts=108969.00
+04:40:30 INFO QUEUE_POSITION | side=no order_id=e69ba67a-9489-499f-8c8b-dbb0aecea0a1 ahead_contracts=166732.00
+04:40:45 INFO QUEUE_POSITION | side=yes order_id=daf3dbdd-92fc-4386-8b65-ab2642e392ae ahead_contracts=108969.00
+04:40:45 INFO QUEUE_POSITION | side=no order_id=e69ba67a-9489-499f-8c8b-dbb0aecea0a1 ahead_contracts=166732.00
+04:40:45 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=e69ba67a-9489-499f-8c8b-dbb0aecea0a1
+04:40:45 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=daf3dbdd-92fc-4386-8b65-ab2642e392ae
+04:40:45 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=ddac0436-3b55-4329-8c59-f1b51c2421d7
+04:40:45 INFO CREATE_OK | side=no price_dollars=0.5800 remaining_contracts=17.00 order_id=f1446bad-39dd-43ba-8d99-c4451fca84a3
+04:40:46 INFO AMEND_OK | side=yes price_dollars=0.3900 total_fillable_contracts=25.00 order_id=ddac0436-3b55-4329-8c59-f1b51c2421d7
+04:40:46 INFO AMEND_OK | side=no price_dollars=0.5700 total_fillable_contracts=17.00 order_id=f1446bad-39dd-43ba-8d99-c4451fca84a3
+04:41:00 INFO QUEUE_POSITION | side=yes order_id=ddac0436-3b55-4329-8c59-f1b51c2421d7 ahead_contracts=108969.00
+04:41:00 INFO QUEUE_POSITION | side=no order_id=f1446bad-39dd-43ba-8d99-c4451fca84a3 ahead_contracts=166740.00
+04:41:15 INFO QUEUE_POSITION | side=yes order_id=ddac0436-3b55-4329-8c59-f1b51c2421d7 ahead_contracts=108969.00
+04:41:15 INFO QUEUE_POSITION | side=no order_id=f1446bad-39dd-43ba-8d99-c4451fca84a3 ahead_contracts=166740.00
+04:41:30 INFO QUEUE_POSITION | side=yes order_id=ddac0436-3b55-4329-8c59-f1b51c2421d7 ahead_contracts=108969.00
+04:41:30 INFO QUEUE_POSITION | side=no order_id=f1446bad-39dd-43ba-8d99-c4451fca84a3 ahead_contracts=166740.00
+04:41:44 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=ddac0436-3b55-4329-8c59-f1b51c2421d7
+04:41:44 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=f1446bad-39dd-43ba-8d99-c4451fca84a3
+04:41:44 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=6e0fa908-0867-4f8a-8f92-67e2370088ae
+04:41:44 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=ff2484a8-372b-44d3-94c4-daa352cd94bb
+04:41:45 INFO AMEND_OK | side=yes price_dollars=0.3900 total_fillable_contracts=25.00 order_id=6e0fa908-0867-4f8a-8f92-67e2370088ae
+04:41:45 INFO QUEUE_POSITION | side=yes order_id=6e0fa908-0867-4f8a-8f92-67e2370088ae ahead_contracts=108969.00
+04:41:45 INFO QUEUE_POSITION | side=no order_id=ff2484a8-372b-44d3-94c4-daa352cd94bb ahead_contracts=166740.00
+04:42:00 INFO QUEUE_POSITION | side=yes order_id=6e0fa908-0867-4f8a-8f92-67e2370088ae ahead_contracts=108969.00
+04:42:00 INFO QUEUE_POSITION | side=no order_id=ff2484a8-372b-44d3-94c4-daa352cd94bb ahead_contracts=166740.00
+04:42:15 INFO QUEUE_POSITION | side=yes order_id=6e0fa908-0867-4f8a-8f92-67e2370088ae ahead_contracts=108969.00
+04:42:15 INFO QUEUE_POSITION | side=no order_id=ff2484a8-372b-44d3-94c4-daa352cd94bb ahead_contracts=166740.00
+04:42:30 INFO QUEUE_POSITION | side=yes order_id=6e0fa908-0867-4f8a-8f92-67e2370088ae ahead_contracts=108969.00
+04:42:30 INFO QUEUE_POSITION | side=no order_id=ff2484a8-372b-44d3-94c4-daa352cd94bb ahead_contracts=166740.00
+04:42:39 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=6e0fa908-0867-4f8a-8f92-67e2370088ae
+04:42:39 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=6e0fa908-0867-4f8a-8f92-67e2370088ae
+04:42:39 INFO CREATE_OK | side=yes price_dollars=0.3900 remaining_contracts=25.00 order_id=dec40150-9985-48a8-8d35-8b5de102d4de
+04:42:39 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=ff2484a8-372b-44d3-94c4-daa352cd94bb
+04:42:39 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=ff2484a8-372b-44d3-94c4-daa352cd94bb
+04:42:39 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=dae262e2-393b-41f1-8ee8-77079bf5ec6d
+04:42:45 INFO QUEUE_POSITION | side=yes order_id=dec40150-9985-48a8-8d35-8b5de102d4de ahead_contracts=108969.00
+04:42:45 INFO QUEUE_POSITION | side=no order_id=dae262e2-393b-41f1-8ee8-77079bf5ec6d ahead_contracts=166740.00
+04:43:00 INFO QUEUE_POSITION | side=yes order_id=dec40150-9985-48a8-8d35-8b5de102d4de ahead_contracts=108969.00
+04:43:00 INFO QUEUE_POSITION | side=no order_id=dae262e2-393b-41f1-8ee8-77079bf5ec6d ahead_contracts=166740.00
+04:43:16 INFO QUEUE_POSITION | side=yes order_id=dec40150-9985-48a8-8d35-8b5de102d4de ahead_contracts=108969.00
+04:43:16 INFO QUEUE_POSITION | side=no order_id=dae262e2-393b-41f1-8ee8-77079bf5ec6d ahead_contracts=166740.00
+04:43:31 INFO QUEUE_POSITION | side=yes order_id=dec40150-9985-48a8-8d35-8b5de102d4de ahead_contracts=104977.00
+04:43:31 INFO QUEUE_POSITION | side=no order_id=dae262e2-393b-41f1-8ee8-77079bf5ec6d ahead_contracts=166740.00
+04:43:38 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=dec40150-9985-48a8-8d35-8b5de102d4de
+04:43:38 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=dae262e2-393b-41f1-8ee8-77079bf5ec6d
+04:43:38 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=207c2d34-954f-46cf-a2a8-80fdb9adb9f7
+04:43:38 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=97016e3f-9615-48ea-a5e3-5b9aad5b2e62
+04:43:39 INFO AMEND_OK | side=yes price_dollars=0.3900 total_fillable_contracts=25.00 order_id=207c2d34-954f-46cf-a2a8-80fdb9adb9f7
+04:43:46 INFO QUEUE_POSITION | side=yes order_id=207c2d34-954f-46cf-a2a8-80fdb9adb9f7 ahead_contracts=96660.00
+04:43:46 INFO QUEUE_POSITION | side=no order_id=97016e3f-9615-48ea-a5e3-5b9aad5b2e62 ahead_contracts=166740.00
+04:44:01 INFO QUEUE_POSITION | side=yes order_id=207c2d34-954f-46cf-a2a8-80fdb9adb9f7 ahead_contracts=96660.00
+04:44:01 INFO QUEUE_POSITION | side=no order_id=97016e3f-9615-48ea-a5e3-5b9aad5b2e62 ahead_contracts=166740.00
+04:44:16 INFO QUEUE_POSITION | side=yes order_id=207c2d34-954f-46cf-a2a8-80fdb9adb9f7 ahead_contracts=96660.00
+04:44:16 INFO QUEUE_POSITION | side=no order_id=97016e3f-9615-48ea-a5e3-5b9aad5b2e62 ahead_contracts=166740.00
+04:44:31 INFO QUEUE_POSITION | side=yes order_id=207c2d34-954f-46cf-a2a8-80fdb9adb9f7 ahead_contracts=85949.00
+04:44:31 INFO QUEUE_POSITION | side=no order_id=97016e3f-9615-48ea-a5e3-5b9aad5b2e62 ahead_contracts=166740.00
+04:44:37 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=207c2d34-954f-46cf-a2a8-80fdb9adb9f7
+04:44:37 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=97016e3f-9615-48ea-a5e3-5b9aad5b2e62
+04:44:37 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=7fe57d1e-2a3e-4955-a75e-692148fd7c57
+04:44:37 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=b411725f-12a0-4ff2-8564-807d955a8785
+04:44:38 INFO AMEND_OK | side=yes price_dollars=0.3900 total_fillable_contracts=25.00 order_id=7fe57d1e-2a3e-4955-a75e-692148fd7c57
+04:44:46 INFO QUEUE_POSITION | side=yes order_id=7fe57d1e-2a3e-4955-a75e-692148fd7c57 ahead_contracts=85949.00
+04:44:46 INFO QUEUE_POSITION | side=no order_id=b411725f-12a0-4ff2-8564-807d955a8785 ahead_contracts=177781.00
+04:45:01 INFO QUEUE_POSITION | side=yes order_id=7fe57d1e-2a3e-4955-a75e-692148fd7c57 ahead_contracts=85723.00
+04:45:01 INFO QUEUE_POSITION | side=no order_id=b411725f-12a0-4ff2-8564-807d955a8785 ahead_contracts=177781.00
+04:45:16 INFO QUEUE_POSITION | side=yes order_id=7fe57d1e-2a3e-4955-a75e-692148fd7c57 ahead_contracts=85723.00
+04:45:16 INFO QUEUE_POSITION | side=no order_id=b411725f-12a0-4ff2-8564-807d955a8785 ahead_contracts=177781.00
+04:45:31 INFO QUEUE_POSITION | side=yes order_id=7fe57d1e-2a3e-4955-a75e-692148fd7c57 ahead_contracts=27190.00
+04:45:31 INFO QUEUE_POSITION | side=no order_id=b411725f-12a0-4ff2-8564-807d955a8785 ahead_contracts=54848.00
+04:45:36 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=b411725f-12a0-4ff2-8564-807d955a8785
+04:45:36 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=7fe57d1e-2a3e-4955-a75e-692148fd7c57
+04:45:36 INFO CANCEL_SKIPPED_ORDER_MISSING | side=yes reason=refresh_expiring_quote order_id=7fe57d1e-2a3e-4955-a75e-692148fd7c57
+04:45:36 INFO CREATE_OK | side=yes price_dollars=0.3900 remaining_contracts=25.00 order_id=794936d9-ff83-4d5c-bb8b-01273eb4c686
+04:45:36 INFO CREATE_OK | side=no price_dollars=0.5800 remaining_contracts=17.00 order_id=a8e0f6c5-1014-453a-803e-706954e72068
+04:45:37 INFO AMEND_OK | side=no price_dollars=0.5700 total_fillable_contracts=17.00 order_id=a8e0f6c5-1014-453a-803e-706954e72068
+04:45:46 INFO QUEUE_POSITION | side=yes order_id=794936d9-ff83-4d5c-bb8b-01273eb4c686 ahead_contracts=36588.00
+04:45:46 INFO QUEUE_POSITION | side=no order_id=a8e0f6c5-1014-453a-803e-706954e72068 ahead_contracts=54953.00
+04:46:01 INFO QUEUE_POSITION | side=yes order_id=794936d9-ff83-4d5c-bb8b-01273eb4c686 ahead_contracts=36094.00
+04:46:01 INFO QUEUE_POSITION | side=no order_id=a8e0f6c5-1014-453a-803e-706954e72068 ahead_contracts=54953.00
+04:46:16 INFO QUEUE_POSITION | side=yes order_id=794936d9-ff83-4d5c-bb8b-01273eb4c686 ahead_contracts=36094.00
+04:46:16 INFO QUEUE_POSITION | side=no order_id=a8e0f6c5-1014-453a-803e-706954e72068 ahead_contracts=54953.00
+04:46:31 INFO QUEUE_POSITION | side=yes order_id=794936d9-ff83-4d5c-bb8b-01273eb4c686 ahead_contracts=36094.00
+04:46:31 INFO QUEUE_POSITION | side=no order_id=a8e0f6c5-1014-453a-803e-706954e72068 ahead_contracts=54953.00
+04:46:32 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=794936d9-ff83-4d5c-bb8b-01273eb4c686
+04:46:32 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=794936d9-ff83-4d5c-bb8b-01273eb4c686
+04:46:32 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:46:32 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=72fa6c7f-80e5-4db4-a919-778b14f16b8e
+04:46:32 INFO REQUOTE_ERROR | error=DELETE /trade-api/v2/portfolio/orders/a8e0f6c5-1014-453a-803e-706954e72068 failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1406, in ensure_side_quote
+    await self.cancel_side_quote(side, reason="refresh_expiring_quote", reset_quote_cycle=False)
+  File "/workspaces/Kalshi_alg/V1.py", line 1383, in cancel_side_quote
+    await asyncio.to_thread(self.api_client.cancel_order, order_id=order_id)
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 848, in cancel_order
+    return self.rest_delete(
+           ^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 688, in rest_delete
+    raise RuntimeError(f"DELETE {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: DELETE /trade-api/v2/portfolio/orders/a8e0f6c5-1014-453a-803e-706954e72068 failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:46:32 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/72fa6c7f-80e5-4db4-a919-778b14f16b8e/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/72fa6c7f-80e5-4db4-a919-778b14f16b8e/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:46:33 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/72fa6c7f-80e5-4db4-a919-778b14f16b8e/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/72fa6c7f-80e5-4db4-a919-778b14f16b8e/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:46:35 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=a8e0f6c5-1014-453a-803e-706954e72068
+04:46:35 INFO AMEND_OK | side=yes price_dollars=0.3900 total_fillable_contracts=25.00 order_id=72fa6c7f-80e5-4db4-a919-778b14f16b8e
+04:46:35 INFO CREATE_OK | side=no price_dollars=0.5800 remaining_contracts=17.00 order_id=62276547-068f-4b3f-b919-e40f0b064ade
+04:46:36 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/62276547-068f-4b3f-b919-e40f0b064ade/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/62276547-068f-4b3f-b919-e40f0b064ade/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:46:36 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/62276547-068f-4b3f-b919-e40f0b064ade/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/62276547-068f-4b3f-b919-e40f0b064ade/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:46:38 INFO AMEND_OK | side=no price_dollars=0.5700 total_fillable_contracts=17.00 order_id=62276547-068f-4b3f-b919-e40f0b064ade
+04:46:47 INFO QUEUE_POSITION | side=yes order_id=72fa6c7f-80e5-4db4-a919-778b14f16b8e ahead_contracts=94627.00
+04:46:47 INFO QUEUE_POSITION | side=no order_id=62276547-068f-4b3f-b919-e40f0b064ade ahead_contracts=182591.00
+04:47:02 INFO QUEUE_POSITION | side=yes order_id=72fa6c7f-80e5-4db4-a919-778b14f16b8e ahead_contracts=94627.00
+04:47:02 INFO QUEUE_POSITION | side=no order_id=62276547-068f-4b3f-b919-e40f0b064ade ahead_contracts=182591.00
+04:47:17 INFO QUEUE_POSITION | side=yes order_id=72fa6c7f-80e5-4db4-a919-778b14f16b8e ahead_contracts=94627.00
+04:47:17 INFO QUEUE_POSITION | side=no order_id=62276547-068f-4b3f-b919-e40f0b064ade ahead_contracts=182591.00
+04:47:28 INFO REQUOTE_ERROR | error=DELETE /trade-api/v2/portfolio/orders/72fa6c7f-80e5-4db4-a919-778b14f16b8e failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1406, in ensure_side_quote
+    await self.cancel_side_quote(side, reason="refresh_expiring_quote", reset_quote_cycle=False)
+  File "/workspaces/Kalshi_alg/V1.py", line 1383, in cancel_side_quote
+    await asyncio.to_thread(self.api_client.cancel_order, order_id=order_id)
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 848, in cancel_order
+    return self.rest_delete(
+           ^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 688, in rest_delete
+    raise RuntimeError(f"DELETE {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: DELETE /trade-api/v2/portfolio/orders/72fa6c7f-80e5-4db4-a919-778b14f16b8e failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:47:28 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=72fa6c7f-80e5-4db4-a919-778b14f16b8e
+04:47:28 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=72fa6c7f-80e5-4db4-a919-778b14f16b8e
+04:47:28 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:47:28 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:47:29 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=dab1f7a1-3b43-4ab0-80b7-8a9438a5d24b
+04:47:29 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/dab1f7a1-3b43-4ab0-80b7-8a9438a5d24b/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/dab1f7a1-3b43-4ab0-80b7-8a9438a5d24b/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:47:29 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/dab1f7a1-3b43-4ab0-80b7-8a9438a5d24b/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/dab1f7a1-3b43-4ab0-80b7-8a9438a5d24b/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:47:32 INFO QUEUE_POSITION | side=yes order_id=dab1f7a1-3b43-4ab0-80b7-8a9438a5d24b ahead_contracts=683.00
+04:47:32 INFO QUEUE_POSITION | side=no order_id=62276547-068f-4b3f-b919-e40f0b064ade ahead_contracts=182591.00
+04:47:34 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=62276547-068f-4b3f-b919-e40f0b064ade
+04:47:34 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/dab1f7a1-3b43-4ab0-80b7-8a9438a5d24b/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/dab1f7a1-3b43-4ab0-80b7-8a9438a5d24b/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:47:38 INFO AMEND_OK | side=yes price_dollars=0.3900 total_fillable_contracts=25.00 order_id=dab1f7a1-3b43-4ab0-80b7-8a9438a5d24b
+04:47:38 INFO CREATE_OK | side=no price_dollars=0.5800 remaining_contracts=17.00 order_id=5cea88c9-c831-4d03-aa95-a1375b5be4d8
+04:47:39 INFO AMEND_OK | side=no price_dollars=0.5700 total_fillable_contracts=17.00 order_id=5cea88c9-c831-4d03-aa95-a1375b5be4d8
+04:47:47 INFO QUEUE_POSITION | side=yes order_id=dab1f7a1-3b43-4ab0-80b7-8a9438a5d24b ahead_contracts=94627.00
+04:47:47 INFO QUEUE_POSITION | side=no order_id=5cea88c9-c831-4d03-aa95-a1375b5be4d8 ahead_contracts=183571.00
+04:48:02 INFO QUEUE_POSITION | side=yes order_id=dab1f7a1-3b43-4ab0-80b7-8a9438a5d24b ahead_contracts=94627.00
+04:48:02 INFO QUEUE_POSITION | side=no order_id=5cea88c9-c831-4d03-aa95-a1375b5be4d8 ahead_contracts=183571.00
+04:48:17 INFO QUEUE_POSITION | side=yes order_id=dab1f7a1-3b43-4ab0-80b7-8a9438a5d24b ahead_contracts=94627.00
+04:48:17 INFO QUEUE_POSITION | side=no order_id=5cea88c9-c831-4d03-aa95-a1375b5be4d8 ahead_contracts=183571.00
+04:48:19 INFO AMEND_OK | side=yes price_dollars=0.4000 total_fillable_contracts=24.00 order_id=dab1f7a1-3b43-4ab0-80b7-8a9438a5d24b
+04:48:25 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=dab1f7a1-3b43-4ab0-80b7-8a9438a5d24b
+04:48:25 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=dab1f7a1-3b43-4ab0-80b7-8a9438a5d24b
+04:48:25 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=ac0f3b4d-0f7b-4cff-987a-c2a547b1bee7
+04:48:32 INFO QUEUE_POSITION | side=yes order_id=ac0f3b4d-0f7b-4cff-987a-c2a547b1bee7 ahead_contracts=703.00
+04:48:32 INFO QUEUE_POSITION | side=no order_id=5cea88c9-c831-4d03-aa95-a1375b5be4d8 ahead_contracts=183562.00
+04:48:37 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=5cea88c9-c831-4d03-aa95-a1375b5be4d8
+04:48:37 INFO CREATE_OK | side=no price_dollars=0.5800 remaining_contracts=17.00 order_id=7e39f38b-7888-48ff-976f-e946e5ce7c24
+04:48:38 INFO AMEND_OK | side=no price_dollars=0.5700 total_fillable_contracts=17.00 order_id=7e39f38b-7888-48ff-976f-e946e5ce7c24
+04:48:47 INFO QUEUE_POSITION | side=yes order_id=ac0f3b4d-0f7b-4cff-987a-c2a547b1bee7 ahead_contracts=703.00
+04:48:47 INFO QUEUE_POSITION | side=no order_id=7e39f38b-7888-48ff-976f-e946e5ce7c24 ahead_contracts=185449.00
+04:49:02 INFO QUEUE_POSITION | side=yes order_id=ac0f3b4d-0f7b-4cff-987a-c2a547b1bee7 ahead_contracts=703.00
+04:49:02 INFO QUEUE_POSITION | side=no order_id=7e39f38b-7888-48ff-976f-e946e5ce7c24 ahead_contracts=185449.00
+04:49:17 INFO QUEUE_POSITION | side=yes order_id=ac0f3b4d-0f7b-4cff-987a-c2a547b1bee7 ahead_contracts=703.00
+04:49:17 INFO QUEUE_POSITION | side=no order_id=7e39f38b-7888-48ff-976f-e946e5ce7c24 ahead_contracts=185449.00
+04:49:24 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=ac0f3b4d-0f7b-4cff-987a-c2a547b1bee7
+04:49:24 INFO CANCEL_SKIPPED_ORDER_MISSING | side=yes reason=refresh_expiring_quote order_id=ac0f3b4d-0f7b-4cff-987a-c2a547b1bee7
+04:49:24 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=8ef71c5d-b66a-4e2a-a0e6-48540a6d6aa8
+04:49:32 INFO QUEUE_POSITION | side=yes order_id=8ef71c5d-b66a-4e2a-a0e6-48540a6d6aa8 ahead_contracts=703.00
+04:49:32 INFO QUEUE_POSITION | side=no order_id=7e39f38b-7888-48ff-976f-e946e5ce7c24 ahead_contracts=185449.00
+04:49:36 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=7e39f38b-7888-48ff-976f-e946e5ce7c24
+04:49:36 INFO CREATE_OK | side=no price_dollars=0.5800 remaining_contracts=17.00 order_id=9c6ea582-c868-4c05-aabe-3b48b7a3b959
+04:49:37 INFO AMEND_OK | side=no price_dollars=0.5700 total_fillable_contracts=17.00 order_id=9c6ea582-c868-4c05-aabe-3b48b7a3b959
+04:49:47 INFO QUEUE_POSITION | side=yes order_id=8ef71c5d-b66a-4e2a-a0e6-48540a6d6aa8 ahead_contracts=703.00
+04:49:47 INFO QUEUE_POSITION | side=no order_id=9c6ea582-c868-4c05-aabe-3b48b7a3b959 ahead_contracts=185449.00
+04:50:02 INFO QUEUE_POSITION | side=yes order_id=8ef71c5d-b66a-4e2a-a0e6-48540a6d6aa8 ahead_contracts=703.00
+04:50:02 INFO QUEUE_POSITION | side=no order_id=9c6ea582-c868-4c05-aabe-3b48b7a3b959 ahead_contracts=185449.00
+04:50:18 INFO QUEUE_POSITION | side=yes order_id=8ef71c5d-b66a-4e2a-a0e6-48540a6d6aa8 ahead_contracts=703.00
+04:50:18 INFO QUEUE_POSITION | side=no order_id=9c6ea582-c868-4c05-aabe-3b48b7a3b959 ahead_contracts=185449.00
+04:50:23 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=8ef71c5d-b66a-4e2a-a0e6-48540a6d6aa8
+04:50:23 INFO CREATE_OK | side=yes price_dollars=0.4100 remaining_contracts=24.00 order_id=62636138-7ac2-42d5-b5c2-d3d1f38cf715
+04:50:24 INFO AMEND_OK | side=yes price_dollars=0.4000 total_fillable_contracts=24.00 order_id=62636138-7ac2-42d5-b5c2-d3d1f38cf715
+04:50:32 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=9c6ea582-c868-4c05-aabe-3b48b7a3b959
+04:50:32 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=9c6ea582-c868-4c05-aabe-3b48b7a3b959
+04:50:32 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=97d121f5-fcb6-4e00-b819-66f6e8ba892e
+04:50:33 INFO QUEUE_POSITION | side=yes order_id=62636138-7ac2-42d5-b5c2-d3d1f38cf715 ahead_contracts=715.00
+04:50:33 INFO QUEUE_POSITION | side=no order_id=97d121f5-fcb6-4e00-b819-66f6e8ba892e ahead_contracts=190935.00
+04:50:48 INFO QUEUE_POSITION | side=yes order_id=62636138-7ac2-42d5-b5c2-d3d1f38cf715 ahead_contracts=715.00
+04:50:48 INFO QUEUE_POSITION | side=no order_id=97d121f5-fcb6-4e00-b819-66f6e8ba892e ahead_contracts=190935.00
+04:51:03 INFO QUEUE_POSITION | side=yes order_id=62636138-7ac2-42d5-b5c2-d3d1f38cf715 ahead_contracts=715.00
+04:51:03 INFO QUEUE_POSITION | side=no order_id=97d121f5-fcb6-4e00-b819-66f6e8ba892e ahead_contracts=190935.00
+04:51:18 INFO QUEUE_POSITION | side=yes order_id=62636138-7ac2-42d5-b5c2-d3d1f38cf715 ahead_contracts=715.00
+04:51:18 INFO QUEUE_POSITION | side=no order_id=97d121f5-fcb6-4e00-b819-66f6e8ba892e ahead_contracts=190764.00
+04:51:22 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=62636138-7ac2-42d5-b5c2-d3d1f38cf715
+04:51:22 INFO CREATE_OK | side=yes price_dollars=0.4100 remaining_contracts=24.00 order_id=e9f505cf-901e-4dcb-84cb-3b96fe6ceb70
+04:51:23 INFO AMEND_OK | side=yes price_dollars=0.4000 total_fillable_contracts=24.00 order_id=e9f505cf-901e-4dcb-84cb-3b96fe6ceb70
+04:51:27 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=97d121f5-fcb6-4e00-b819-66f6e8ba892e
+04:51:27 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=97d121f5-fcb6-4e00-b819-66f6e8ba892e
+04:51:27 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:51:27 INFO CREATE_OK | side=no price_dollars=0.5800 remaining_contracts=17.00 order_id=3b0ec590-8b31-4466-ba4d-1c7ac687458c
+04:51:27 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/3b0ec590-8b31-4466-ba4d-1c7ac687458c/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/3b0ec590-8b31-4466-ba4d-1c7ac687458c/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:51:28 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/3b0ec590-8b31-4466-ba4d-1c7ac687458c/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/3b0ec590-8b31-4466-ba4d-1c7ac687458c/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:51:33 INFO QUEUE_POSITION | side=yes order_id=e9f505cf-901e-4dcb-84cb-3b96fe6ceb70 ahead_contracts=715.00
+04:51:33 INFO QUEUE_POSITION | side=no order_id=3b0ec590-8b31-4466-ba4d-1c7ac687458c ahead_contracts=179538.00
+04:51:37 INFO AMEND_OK | side=no price_dollars=0.5700 total_fillable_contracts=17.00 order_id=3b0ec590-8b31-4466-ba4d-1c7ac687458c
+04:51:48 INFO QUEUE_POSITION | side=yes order_id=e9f505cf-901e-4dcb-84cb-3b96fe6ceb70 ahead_contracts=715.00
+04:51:48 INFO QUEUE_POSITION | side=no order_id=3b0ec590-8b31-4466-ba4d-1c7ac687458c ahead_contracts=184418.00
+04:52:03 INFO QUEUE_POSITION | side=yes order_id=e9f505cf-901e-4dcb-84cb-3b96fe6ceb70 ahead_contracts=715.00
+04:52:03 INFO QUEUE_POSITION | side=no order_id=3b0ec590-8b31-4466-ba4d-1c7ac687458c ahead_contracts=184418.00
+04:52:17 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=e9f505cf-901e-4dcb-84cb-3b96fe6ceb70
+04:52:17 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=e9f505cf-901e-4dcb-84cb-3b96fe6ceb70
+04:52:17 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=bbbf4b57-7f42-4bb0-b523-50016b95d4c8
+04:52:18 INFO QUEUE_POSITION | side=yes order_id=bbbf4b57-7f42-4bb0-b523-50016b95d4c8 ahead_contracts=715.00
+04:52:18 INFO QUEUE_POSITION | side=no order_id=3b0ec590-8b31-4466-ba4d-1c7ac687458c ahead_contracts=184418.00
+04:52:26 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=3b0ec590-8b31-4466-ba4d-1c7ac687458c
+04:52:26 INFO CREATE_OK | side=no price_dollars=0.5800 remaining_contracts=17.00 order_id=6e07b141-cde8-4b85-9a00-c15ed60a31d4
+04:52:27 INFO AMEND_OK | side=no price_dollars=0.5700 total_fillable_contracts=17.00 order_id=6e07b141-cde8-4b85-9a00-c15ed60a31d4
+04:52:33 INFO QUEUE_POSITION | side=yes order_id=bbbf4b57-7f42-4bb0-b523-50016b95d4c8 ahead_contracts=715.00
+04:52:33 INFO QUEUE_POSITION | side=no order_id=6e07b141-cde8-4b85-9a00-c15ed60a31d4 ahead_contracts=184418.00
+04:52:48 INFO QUEUE_POSITION | side=yes order_id=bbbf4b57-7f42-4bb0-b523-50016b95d4c8 ahead_contracts=715.00
+04:52:48 INFO QUEUE_POSITION | side=no order_id=6e07b141-cde8-4b85-9a00-c15ed60a31d4 ahead_contracts=184418.00
+04:53:03 INFO QUEUE_POSITION | side=yes order_id=bbbf4b57-7f42-4bb0-b523-50016b95d4c8 ahead_contracts=715.00
+04:53:03 INFO QUEUE_POSITION | side=no order_id=6e07b141-cde8-4b85-9a00-c15ed60a31d4 ahead_contracts=184418.00
+04:53:16 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=bbbf4b57-7f42-4bb0-b523-50016b95d4c8
+04:53:16 INFO CREATE_OK | side=yes price_dollars=0.4100 remaining_contracts=24.00 order_id=e9be9843-f78a-48b3-89e4-3e5f0f35bfd5
+04:53:17 INFO AMEND_OK | side=yes price_dollars=0.4000 total_fillable_contracts=24.00 order_id=e9be9843-f78a-48b3-89e4-3e5f0f35bfd5
+04:53:18 INFO QUEUE_POSITION | side=yes order_id=e9be9843-f78a-48b3-89e4-3e5f0f35bfd5 ahead_contracts=715.00
+04:53:18 INFO QUEUE_POSITION | side=no order_id=6e07b141-cde8-4b85-9a00-c15ed60a31d4 ahead_contracts=184418.00
+04:53:25 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=6e07b141-cde8-4b85-9a00-c15ed60a31d4
+04:53:25 INFO CREATE_OK | side=no price_dollars=0.5800 remaining_contracts=17.00 order_id=e9a49d6f-e05c-4044-89e8-de5e3688fb1d
+04:53:26 INFO AMEND_OK | side=no price_dollars=0.5700 total_fillable_contracts=17.00 order_id=e9a49d6f-e05c-4044-89e8-de5e3688fb1d
+04:53:33 INFO QUEUE_POSITION | side=yes order_id=e9be9843-f78a-48b3-89e4-3e5f0f35bfd5 ahead_contracts=715.00
+04:53:33 INFO QUEUE_POSITION | side=no order_id=e9a49d6f-e05c-4044-89e8-de5e3688fb1d ahead_contracts=184418.00
+04:53:49 INFO QUEUE_POSITION | side=yes order_id=e9be9843-f78a-48b3-89e4-3e5f0f35bfd5 ahead_contracts=715.00
+04:53:49 INFO QUEUE_POSITION | side=no order_id=e9a49d6f-e05c-4044-89e8-de5e3688fb1d ahead_contracts=184418.00
+04:54:04 INFO QUEUE_POSITION | side=yes order_id=e9be9843-f78a-48b3-89e4-3e5f0f35bfd5 ahead_contracts=665.00
+04:54:04 INFO QUEUE_POSITION | side=no order_id=e9a49d6f-e05c-4044-89e8-de5e3688fb1d ahead_contracts=184418.00
+04:54:15 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=e9be9843-f78a-48b3-89e4-3e5f0f35bfd5
+04:54:15 INFO CREATE_OK | side=yes price_dollars=0.4100 remaining_contracts=24.00 order_id=9ab06f6e-853c-4851-b1cf-87861297b5a0
+04:54:16 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/9ab06f6e-853c-4851-b1cf-87861297b5a0/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/9ab06f6e-853c-4851-b1cf-87861297b5a0/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:54:19 INFO QUEUE_POSITION | side=yes order_id=9ab06f6e-853c-4851-b1cf-87861297b5a0 ahead_contracts=1218.00
+04:54:19 INFO QUEUE_POSITION | side=no order_id=e9a49d6f-e05c-4044-89e8-de5e3688fb1d ahead_contracts=184418.00
+04:54:24 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=e9a49d6f-e05c-4044-89e8-de5e3688fb1d
+04:54:24 INFO AMEND_OK | side=yes price_dollars=0.4000 total_fillable_contracts=24.00 order_id=9ab06f6e-853c-4851-b1cf-87861297b5a0
+04:54:24 INFO CREATE_OK | side=no price_dollars=0.5800 remaining_contracts=17.00 order_id=e8a34d31-7c46-41a6-a1ac-4f03dfc5cc0f
+04:54:25 INFO AMEND_OK | side=no price_dollars=0.5700 total_fillable_contracts=17.00 order_id=e8a34d31-7c46-41a6-a1ac-4f03dfc5cc0f
+04:54:34 INFO QUEUE_POSITION | side=yes order_id=9ab06f6e-853c-4851-b1cf-87861297b5a0 ahead_contracts=665.00
+04:54:34 INFO QUEUE_POSITION | side=no order_id=e8a34d31-7c46-41a6-a1ac-4f03dfc5cc0f ahead_contracts=184418.00
+04:54:49 INFO QUEUE_POSITION | side=yes order_id=9ab06f6e-853c-4851-b1cf-87861297b5a0 ahead_contracts=565.00
+04:54:49 INFO QUEUE_POSITION | side=no order_id=e8a34d31-7c46-41a6-a1ac-4f03dfc5cc0f ahead_contracts=184418.00
+04:55:04 INFO QUEUE_POSITION | side=yes order_id=9ab06f6e-853c-4851-b1cf-87861297b5a0 ahead_contracts=565.00
+04:55:04 INFO QUEUE_POSITION | side=no order_id=e8a34d31-7c46-41a6-a1ac-4f03dfc5cc0f ahead_contracts=184418.00
+04:55:14 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=9ab06f6e-853c-4851-b1cf-87861297b5a0
+04:55:14 INFO CREATE_OK | side=yes price_dollars=0.4100 remaining_contracts=24.00 order_id=b6404b03-c2df-4b58-9a78-599094ce8bae
+04:55:15 INFO AMEND_OK | side=yes price_dollars=0.4000 total_fillable_contracts=24.00 order_id=b6404b03-c2df-4b58-9a78-599094ce8bae
+04:55:19 INFO QUEUE_POSITION | side=yes order_id=b6404b03-c2df-4b58-9a78-599094ce8bae ahead_contracts=565.00
+04:55:19 INFO QUEUE_POSITION | side=no order_id=e8a34d31-7c46-41a6-a1ac-4f03dfc5cc0f ahead_contracts=184418.00
+04:55:19 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=e8a34d31-7c46-41a6-a1ac-4f03dfc5cc0f
+04:55:20 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=e8a34d31-7c46-41a6-a1ac-4f03dfc5cc0f
+04:55:20 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=6b2b5664-1918-4eec-8da4-e178bffc7e6c
+04:55:34 INFO QUEUE_POSITION | side=yes order_id=b6404b03-c2df-4b58-9a78-599094ce8bae ahead_contracts=565.00
+04:55:34 INFO QUEUE_POSITION | side=no order_id=6b2b5664-1918-4eec-8da4-e178bffc7e6c ahead_contracts=184418.00
+04:55:50 INFO QUEUE_POSITION | side=yes order_id=b6404b03-c2df-4b58-9a78-599094ce8bae ahead_contracts=565.00
+04:55:50 INFO QUEUE_POSITION | side=no order_id=6b2b5664-1918-4eec-8da4-e178bffc7e6c ahead_contracts=184418.00
+04:56:05 INFO QUEUE_POSITION | side=yes order_id=b6404b03-c2df-4b58-9a78-599094ce8bae ahead_contracts=565.00
+04:56:05 INFO QUEUE_POSITION | side=no order_id=6b2b5664-1918-4eec-8da4-e178bffc7e6c ahead_contracts=184418.00
+04:56:13 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=b6404b03-c2df-4b58-9a78-599094ce8bae
+04:56:13 INFO CREATE_OK | side=yes price_dollars=0.4100 remaining_contracts=24.00 order_id=3e08b45e-a802-4b2f-9bfc-96984f78fe0b
+04:56:14 INFO AMEND_OK | side=yes price_dollars=0.4000 total_fillable_contracts=24.00 order_id=3e08b45e-a802-4b2f-9bfc-96984f78fe0b
+04:56:14 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=6b2b5664-1918-4eec-8da4-e178bffc7e6c
+04:56:14 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=6b2b5664-1918-4eec-8da4-e178bffc7e6c
+04:56:14 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=fbfd4fc0-19cf-4e28-afbe-cfc1ddaba18e
+04:56:20 INFO QUEUE_POSITION | side=yes order_id=3e08b45e-a802-4b2f-9bfc-96984f78fe0b ahead_contracts=565.00
+04:56:20 INFO QUEUE_POSITION | side=no order_id=fbfd4fc0-19cf-4e28-afbe-cfc1ddaba18e ahead_contracts=184418.00
+04:56:35 INFO QUEUE_POSITION | side=yes order_id=3e08b45e-a802-4b2f-9bfc-96984f78fe0b ahead_contracts=565.00
+04:56:35 INFO QUEUE_POSITION | side=no order_id=fbfd4fc0-19cf-4e28-afbe-cfc1ddaba18e ahead_contracts=184418.00
+04:56:50 INFO QUEUE_POSITION | side=yes order_id=3e08b45e-a802-4b2f-9bfc-96984f78fe0b ahead_contracts=565.00
+04:56:50 INFO QUEUE_POSITION | side=no order_id=fbfd4fc0-19cf-4e28-afbe-cfc1ddaba18e ahead_contracts=184418.00
+04:57:05 INFO QUEUE_POSITION | side=yes order_id=3e08b45e-a802-4b2f-9bfc-96984f78fe0b ahead_contracts=565.00
+04:57:05 INFO QUEUE_POSITION | side=no order_id=fbfd4fc0-19cf-4e28-afbe-cfc1ddaba18e ahead_contracts=184418.00
+04:57:08 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=3e08b45e-a802-4b2f-9bfc-96984f78fe0b
+04:57:08 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=3e08b45e-a802-4b2f-9bfc-96984f78fe0b
+04:57:08 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=4d6b47e4-b500-451a-bf14-132849f8645a
+04:57:09 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=fbfd4fc0-19cf-4e28-afbe-cfc1ddaba18e
+04:57:09 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=fbfd4fc0-19cf-4e28-afbe-cfc1ddaba18e
+04:57:09 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=daefa7da-5144-439e-905b-9692fadfb64c
+04:57:20 INFO QUEUE_POSITION | side=yes order_id=4d6b47e4-b500-451a-bf14-132849f8645a ahead_contracts=565.00
+04:57:20 INFO QUEUE_POSITION | side=no order_id=daefa7da-5144-439e-905b-9692fadfb64c ahead_contracts=184418.00
+04:57:35 INFO QUEUE_POSITION | side=yes order_id=4d6b47e4-b500-451a-bf14-132849f8645a ahead_contracts=565.00
+04:57:35 INFO QUEUE_POSITION | side=no order_id=daefa7da-5144-439e-905b-9692fadfb64c ahead_contracts=184418.00
+04:57:50 INFO QUEUE_POSITION | side=yes order_id=4d6b47e4-b500-451a-bf14-132849f8645a ahead_contracts=565.00
+04:57:50 INFO QUEUE_POSITION | side=no order_id=daefa7da-5144-439e-905b-9692fadfb64c ahead_contracts=184418.00
+04:58:05 INFO QUEUE_POSITION | side=yes order_id=4d6b47e4-b500-451a-bf14-132849f8645a ahead_contracts=565.00
+04:58:05 INFO QUEUE_POSITION | side=no order_id=daefa7da-5144-439e-905b-9692fadfb64c ahead_contracts=184418.00
+04:58:07 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=4d6b47e4-b500-451a-bf14-132849f8645a
+04:58:07 INFO CREATE_OK | side=yes price_dollars=0.4100 remaining_contracts=24.00 order_id=273869b5-19ec-4b81-99cb-d6f95aac2398
+04:58:07 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=daefa7da-5144-439e-905b-9692fadfb64c
+04:58:07 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=daefa7da-5144-439e-905b-9692fadfb64c
+04:58:07 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=4a8884ee-8b70-4a51-bf58-779390698d8a
+04:58:08 INFO AMEND_OK | side=yes price_dollars=0.4000 total_fillable_contracts=24.00 order_id=273869b5-19ec-4b81-99cb-d6f95aac2398
+04:58:20 INFO QUEUE_POSITION | side=yes order_id=273869b5-19ec-4b81-99cb-d6f95aac2398 ahead_contracts=565.00
+04:58:20 INFO QUEUE_POSITION | side=no order_id=4a8884ee-8b70-4a51-bf58-779390698d8a ahead_contracts=184418.00
+04:58:35 INFO QUEUE_POSITION | side=yes order_id=273869b5-19ec-4b81-99cb-d6f95aac2398 ahead_contracts=565.00
+04:58:35 INFO QUEUE_POSITION | side=no order_id=4a8884ee-8b70-4a51-bf58-779390698d8a ahead_contracts=184418.00
+04:58:50 INFO QUEUE_POSITION | side=yes order_id=273869b5-19ec-4b81-99cb-d6f95aac2398 ahead_contracts=565.00
+04:58:50 INFO QUEUE_POSITION | side=no order_id=4a8884ee-8b70-4a51-bf58-779390698d8a ahead_contracts=184418.00
+04:59:05 INFO QUEUE_POSITION | side=yes order_id=273869b5-19ec-4b81-99cb-d6f95aac2398 ahead_contracts=565.00
+04:59:06 INFO QUEUE_POSITION | side=no order_id=4a8884ee-8b70-4a51-bf58-779390698d8a ahead_contracts=184418.00
+04:59:06 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=273869b5-19ec-4b81-99cb-d6f95aac2398
+04:59:06 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=4a8884ee-8b70-4a51-bf58-779390698d8a
+04:59:06 INFO CREATE_OK | side=yes price_dollars=0.4100 remaining_contracts=24.00 order_id=4609ba5b-701e-4254-833c-b25f29ee4b35
+04:59:06 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=5146031e-8360-4927-ac92-659410509301
+04:59:07 INFO AMEND_OK | side=yes price_dollars=0.4000 total_fillable_contracts=24.00 order_id=4609ba5b-701e-4254-833c-b25f29ee4b35
+04:59:21 INFO QUEUE_POSITION | side=yes order_id=4609ba5b-701e-4254-833c-b25f29ee4b35 ahead_contracts=565.00
+04:59:21 INFO QUEUE_POSITION | side=no order_id=5146031e-8360-4927-ac92-659410509301 ahead_contracts=184418.00
+04:59:36 INFO QUEUE_POSITION | side=yes order_id=4609ba5b-701e-4254-833c-b25f29ee4b35 ahead_contracts=565.00
+04:59:36 INFO QUEUE_POSITION | side=no order_id=5146031e-8360-4927-ac92-659410509301 ahead_contracts=184418.00
+04:59:51 INFO QUEUE_POSITION | side=yes order_id=4609ba5b-701e-4254-833c-b25f29ee4b35 ahead_contracts=565.00
+04:59:51 INFO QUEUE_POSITION | side=no order_id=5146031e-8360-4927-ac92-659410509301 ahead_contracts=184418.00
+04:59:59 INFO AMEND_OK | side=yes price_dollars=0.3900 total_fillable_contracts=25.00 order_id=4609ba5b-701e-4254-833c-b25f29ee4b35
+05:00:05 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=4609ba5b-701e-4254-833c-b25f29ee4b35
+05:00:05 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=5146031e-8360-4927-ac92-659410509301
+05:00:05 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=5194437a-cd9a-41b8-8848-5f78be0afd70
+05:00:05 INFO CREATE_OK | side=no price_dollars=0.5800 remaining_contracts=17.00 order_id=f653214d-5862-4ec3-910b-2d97fc04bc95
+05:00:06 INFO AMEND_OK | side=yes price_dollars=0.3900 total_fillable_contracts=25.00 order_id=5194437a-cd9a-41b8-8848-5f78be0afd70
+05:00:06 INFO AMEND_OK | side=no price_dollars=0.5700 total_fillable_contracts=17.00 order_id=f653214d-5862-4ec3-910b-2d97fc04bc95
+05:00:06 INFO QUEUE_POSITION | side=yes order_id=5194437a-cd9a-41b8-8848-5f78be0afd70 ahead_contracts=100229.00
+05:00:06 INFO QUEUE_POSITION | side=no order_id=f653214d-5862-4ec3-910b-2d97fc04bc95 ahead_contracts=184177.00
+05:00:21 INFO QUEUE_POSITION | side=yes order_id=5194437a-cd9a-41b8-8848-5f78be0afd70 ahead_contracts=100229.00
+05:00:21 INFO QUEUE_POSITION | side=no order_id=f653214d-5862-4ec3-910b-2d97fc04bc95 ahead_contracts=184177.00
+05:00:36 INFO QUEUE_POSITION | side=yes order_id=5194437a-cd9a-41b8-8848-5f78be0afd70 ahead_contracts=100229.00
+05:00:36 INFO QUEUE_POSITION | side=no order_id=f653214d-5862-4ec3-910b-2d97fc04bc95 ahead_contracts=184177.00
+05:00:51 INFO QUEUE_POSITION | side=yes order_id=5194437a-cd9a-41b8-8848-5f78be0afd70 ahead_contracts=100229.00
+05:00:51 INFO QUEUE_POSITION | side=no order_id=f653214d-5862-4ec3-910b-2d97fc04bc95 ahead_contracts=184177.00
+05:01:04 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=5194437a-cd9a-41b8-8848-5f78be0afd70
+05:01:04 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=f653214d-5862-4ec3-910b-2d97fc04bc95
+05:01:04 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=619fa28c-9713-436b-ae72-adc74e7acfc8
+05:01:04 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=d75b3730-b716-421c-933e-33dc22f48853
+05:01:05 INFO AMEND_OK | side=yes price_dollars=0.3900 total_fillable_contracts=25.00 order_id=619fa28c-9713-436b-ae72-adc74e7acfc8
+05:01:06 INFO QUEUE_POSITION | side=yes order_id=619fa28c-9713-436b-ae72-adc74e7acfc8 ahead_contracts=100229.00
+05:01:06 INFO QUEUE_POSITION | side=no order_id=d75b3730-b716-421c-933e-33dc22f48853 ahead_contracts=184177.00
+05:01:21 INFO QUEUE_POSITION | side=yes order_id=619fa28c-9713-436b-ae72-adc74e7acfc8 ahead_contracts=100229.00
+05:01:21 INFO QUEUE_POSITION | side=no order_id=d75b3730-b716-421c-933e-33dc22f48853 ahead_contracts=184177.00
+05:01:36 INFO QUEUE_POSITION | side=yes order_id=619fa28c-9713-436b-ae72-adc74e7acfc8 ahead_contracts=100229.00
+05:01:36 INFO QUEUE_POSITION | side=no order_id=d75b3730-b716-421c-933e-33dc22f48853 ahead_contracts=184177.00
+05:01:51 INFO QUEUE_POSITION | side=yes order_id=619fa28c-9713-436b-ae72-adc74e7acfc8 ahead_contracts=100229.00
+05:01:51 INFO QUEUE_POSITION | side=no order_id=d75b3730-b716-421c-933e-33dc22f48853 ahead_contracts=184177.00
+05:01:59 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=619fa28c-9713-436b-ae72-adc74e7acfc8
+05:01:59 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=619fa28c-9713-436b-ae72-adc74e7acfc8
+05:01:59 INFO CREATE_OK | side=yes price_dollars=0.3900 remaining_contracts=25.00 order_id=b2f35814-50ca-4d03-a3d3-f4247c32909d
+05:02:00 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=d75b3730-b716-421c-933e-33dc22f48853
+05:02:00 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=d75b3730-b716-421c-933e-33dc22f48853
+05:02:00 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=605c4deb-d423-40de-a074-0070e2e055b4
+05:02:06 INFO QUEUE_POSITION | side=yes order_id=b2f35814-50ca-4d03-a3d3-f4247c32909d ahead_contracts=100229.00
+05:02:06 INFO QUEUE_POSITION | side=no order_id=605c4deb-d423-40de-a074-0070e2e055b4 ahead_contracts=184177.00
+05:02:21 INFO QUEUE_POSITION | side=yes order_id=b2f35814-50ca-4d03-a3d3-f4247c32909d ahead_contracts=100229.00
+05:02:21 INFO QUEUE_POSITION | side=no order_id=605c4deb-d423-40de-a074-0070e2e055b4 ahead_contracts=184177.00
+05:02:36 INFO QUEUE_POSITION | side=yes order_id=b2f35814-50ca-4d03-a3d3-f4247c32909d ahead_contracts=100229.00
+05:02:37 INFO QUEUE_POSITION | side=no order_id=605c4deb-d423-40de-a074-0070e2e055b4 ahead_contracts=184177.00
+05:02:52 INFO QUEUE_POSITION | side=yes order_id=b2f35814-50ca-4d03-a3d3-f4247c32909d ahead_contracts=100229.00
+05:02:52 INFO QUEUE_POSITION | side=no order_id=605c4deb-d423-40de-a074-0070e2e055b4 ahead_contracts=184177.00
+05:02:58 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=b2f35814-50ca-4d03-a3d3-f4247c32909d
+05:02:58 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=e2475f08-1429-47f4-b37e-883968cdbbc7
+05:02:58 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=605c4deb-d423-40de-a074-0070e2e055b4
+05:02:58 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=605c4deb-d423-40de-a074-0070e2e055b4
+05:02:58 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+05:02:58 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/e2475f08-1429-47f4-b37e-883968cdbbc7/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/e2475f08-1429-47f4-b37e-883968cdbbc7/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+05:03:07 INFO QUEUE_POSITION | side=yes order_id=e2475f08-1429-47f4-b37e-883968cdbbc7 ahead_contracts=546.00
+05:03:09 INFO AMEND_OK | side=yes price_dollars=0.3900 total_fillable_contracts=25.00 order_id=e2475f08-1429-47f4-b37e-883968cdbbc7
+05:03:09 INFO CREATE_OK | side=no price_dollars=0.5800 remaining_contracts=17.00 order_id=66d6fc5c-3df2-4201-b865-e13ff835514b
+05:03:09 INFO AMEND_OK | side=no price_dollars=0.5700 total_fillable_contracts=17.00 order_id=66d6fc5c-3df2-4201-b865-e13ff835514b
+05:03:22 INFO QUEUE_POSITION | side=yes order_id=e2475f08-1429-47f4-b37e-883968cdbbc7 ahead_contracts=100229.00
+05:03:22 INFO QUEUE_POSITION | side=no order_id=66d6fc5c-3df2-4201-b865-e13ff835514b ahead_contracts=184102.00
+05:03:37 INFO QUEUE_POSITION | side=yes order_id=e2475f08-1429-47f4-b37e-883968cdbbc7 ahead_contracts=100229.00
+05:03:37 INFO QUEUE_POSITION | side=no order_id=66d6fc5c-3df2-4201-b865-e13ff835514b ahead_contracts=184102.00
+05:03:52 INFO QUEUE_POSITION | side=yes order_id=e2475f08-1429-47f4-b37e-883968cdbbc7 ahead_contracts=100229.00
+05:03:52 INFO QUEUE_POSITION | side=no order_id=66d6fc5c-3df2-4201-b865-e13ff835514b ahead_contracts=183112.00
+05:03:57 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=e2475f08-1429-47f4-b37e-883968cdbbc7
+05:03:57 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=c4a59818-3c52-4a2c-a8d7-1ae15afe8748
+05:03:58 INFO AMEND_OK | side=yes price_dollars=0.3900 total_fillable_contracts=25.00 order_id=c4a59818-3c52-4a2c-a8d7-1ae15afe8748
+05:04:07 INFO QUEUE_POSITION | side=yes order_id=c4a59818-3c52-4a2c-a8d7-1ae15afe8748 ahead_contracts=100229.00
+05:04:07 INFO QUEUE_POSITION | side=no order_id=66d6fc5c-3df2-4201-b865-e13ff835514b ahead_contracts=180071.00
+05:04:08 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=66d6fc5c-3df2-4201-b865-e13ff835514b
+05:04:08 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=66d6fc5c-3df2-4201-b865-e13ff835514b
+05:04:08 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=7634ee4b-5e84-4d4e-b6c9-33cb9d23ab78
+05:04:22 INFO QUEUE_POSITION | side=yes order_id=c4a59818-3c52-4a2c-a8d7-1ae15afe8748 ahead_contracts=100229.00
+05:04:22 INFO QUEUE_POSITION | side=no order_id=7634ee4b-5e84-4d4e-b6c9-33cb9d23ab78 ahead_contracts=179979.00
+05:04:37 INFO QUEUE_POSITION | side=yes order_id=c4a59818-3c52-4a2c-a8d7-1ae15afe8748 ahead_contracts=100229.00
+05:04:37 INFO QUEUE_POSITION | side=no order_id=7634ee4b-5e84-4d4e-b6c9-33cb9d23ab78 ahead_contracts=179979.00
+05:04:52 INFO QUEUE_POSITION | side=yes order_id=c4a59818-3c52-4a2c-a8d7-1ae15afe8748 ahead_contracts=100229.00
+05:04:52 INFO QUEUE_POSITION | side=no order_id=7634ee4b-5e84-4d4e-b6c9-33cb9d23ab78 ahead_contracts=179979.00
+05:04:56 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=c4a59818-3c52-4a2c-a8d7-1ae15afe8748
+05:04:56 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=3e7b01ec-2788-4875-a8bb-539a48632b3a
+05:04:57 INFO AMEND_OK | side=yes price_dollars=0.3900 total_fillable_contracts=25.00 order_id=3e7b01ec-2788-4875-a8bb-539a48632b3a
+05:05:07 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=7634ee4b-5e84-4d4e-b6c9-33cb9d23ab78
+05:05:07 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=7634ee4b-5e84-4d4e-b6c9-33cb9d23ab78
+05:05:07 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=9fcf1736-0478-47f4-aaa0-c1e434ec0e8c
+05:05:07 INFO QUEUE_POSITION | side=yes order_id=3e7b01ec-2788-4875-a8bb-539a48632b3a ahead_contracts=100229.00
+05:05:07 INFO QUEUE_POSITION | side=no order_id=9fcf1736-0478-47f4-aaa0-c1e434ec0e8c ahead_contracts=179979.00
+05:05:22 INFO QUEUE_POSITION | side=yes order_id=3e7b01ec-2788-4875-a8bb-539a48632b3a ahead_contracts=100229.00
+05:05:22 INFO QUEUE_POSITION | side=no order_id=9fcf1736-0478-47f4-aaa0-c1e434ec0e8c ahead_contracts=179979.00
+05:05:37 INFO QUEUE_POSITION | side=yes order_id=3e7b01ec-2788-4875-a8bb-539a48632b3a ahead_contracts=100229.00
+05:05:37 INFO QUEUE_POSITION | side=no order_id=9fcf1736-0478-47f4-aaa0-c1e434ec0e8c ahead_contracts=179979.00
+05:05:52 INFO QUEUE_POSITION | side=yes order_id=3e7b01ec-2788-4875-a8bb-539a48632b3a ahead_contracts=100229.00
+05:05:52 INFO QUEUE_POSITION | side=no order_id=9fcf1736-0478-47f4-aaa0-c1e434ec0e8c ahead_contracts=179979.00
+05:05:55 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=3e7b01ec-2788-4875-a8bb-539a48632b3a
+05:05:55 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=ad803674-f6b2-4cb9-928a-edddb03adf7b
+05:05:56 INFO AMEND_OK | side=yes price_dollars=0.3900 total_fillable_contracts=25.00 order_id=ad803674-f6b2-4cb9-928a-edddb03adf7b
+05:06:06 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=9fcf1736-0478-47f4-aaa0-c1e434ec0e8c
+05:06:06 INFO CREATE_OK | side=no price_dollars=0.5800 remaining_contracts=17.00 order_id=cc1825e7-4318-46b6-838e-4b42e2f911e0
+05:06:07 INFO AMEND_OK | side=no price_dollars=0.5700 total_fillable_contracts=17.00 order_id=cc1825e7-4318-46b6-838e-4b42e2f911e0
+05:06:07 INFO QUEUE_POSITION | side=yes order_id=ad803674-f6b2-4cb9-928a-edddb03adf7b ahead_contracts=109471.00
+05:06:07 INFO QUEUE_POSITION | side=no order_id=cc1825e7-4318-46b6-838e-4b42e2f911e0 ahead_contracts=179979.00
+05:06:23 INFO QUEUE_POSITION | side=yes order_id=ad803674-f6b2-4cb9-928a-edddb03adf7b ahead_contracts=109471.00
+05:06:23 INFO QUEUE_POSITION | side=no order_id=cc1825e7-4318-46b6-838e-4b42e2f911e0 ahead_contracts=179979.00
+05:06:38 INFO QUEUE_POSITION | side=yes order_id=ad803674-f6b2-4cb9-928a-edddb03adf7b ahead_contracts=109471.00
+05:06:38 INFO QUEUE_POSITION | side=no order_id=cc1825e7-4318-46b6-838e-4b42e2f911e0 ahead_contracts=179979.00
+05:06:53 INFO QUEUE_POSITION | side=yes order_id=ad803674-f6b2-4cb9-928a-edddb03adf7b ahead_contracts=109471.00
+05:06:53 INFO QUEUE_POSITION | side=no order_id=cc1825e7-4318-46b6-838e-4b42e2f911e0 ahead_contracts=179979.00
+05:06:54 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=ad803674-f6b2-4cb9-928a-edddb03adf7b
+05:06:54 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=ee535d1c-a973-4c3c-bebe-5ab5639b5880
+05:06:55 INFO AMEND_OK | side=yes price_dollars=0.3900 total_fillable_contracts=25.00 order_id=ee535d1c-a973-4c3c-bebe-5ab5639b5880
+05:07:03 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=cc1825e7-4318-46b6-838e-4b42e2f911e0
+05:07:03 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=cc1825e7-4318-46b6-838e-4b42e2f911e0
+05:07:03 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=82dc72d4-7ec5-4729-8444-7e33a2357c07
+05:07:08 INFO QUEUE_POSITION | side=yes order_id=ee535d1c-a973-4c3c-bebe-5ab5639b5880 ahead_contracts=109471.00
+05:07:08 INFO QUEUE_POSITION | side=no order_id=82dc72d4-7ec5-4729-8444-7e33a2357c07 ahead_contracts=179979.00
+05:07:23 INFO QUEUE_POSITION | side=yes order_id=ee535d1c-a973-4c3c-bebe-5ab5639b5880 ahead_contracts=109471.00
+05:07:23 INFO QUEUE_POSITION | side=no order_id=82dc72d4-7ec5-4729-8444-7e33a2357c07 ahead_contracts=179979.00
+05:07:38 INFO QUEUE_POSITION | side=yes order_id=ee535d1c-a973-4c3c-bebe-5ab5639b5880 ahead_contracts=109471.00
+05:07:38 INFO QUEUE_POSITION | side=no order_id=82dc72d4-7ec5-4729-8444-7e33a2357c07 ahead_contracts=179979.00
+05:07:49 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=ee535d1c-a973-4c3c-bebe-5ab5639b5880
+05:07:49 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=ee535d1c-a973-4c3c-bebe-5ab5639b5880
+05:07:49 INFO CREATE_OK | side=yes price_dollars=0.3900 remaining_contracts=25.00 order_id=b3097cd9-5cde-4525-abb1-df8226448b44
+05:07:53 INFO QUEUE_POSITION | side=yes order_id=b3097cd9-5cde-4525-abb1-df8226448b44 ahead_contracts=109471.00
+05:07:53 INFO QUEUE_POSITION | side=no order_id=82dc72d4-7ec5-4729-8444-7e33a2357c07 ahead_contracts=179979.00
+05:07:59 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=82dc72d4-7ec5-4729-8444-7e33a2357c07
+05:07:59 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=82dc72d4-7ec5-4729-8444-7e33a2357c07
+05:07:59 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=d1aa6908-2c57-4d3b-a509-efb07e5b7120
+05:08:08 INFO QUEUE_POSITION | side=yes order_id=b3097cd9-5cde-4525-abb1-df8226448b44 ahead_contracts=109471.00
+05:08:08 INFO QUEUE_POSITION | side=no order_id=d1aa6908-2c57-4d3b-a509-efb07e5b7120 ahead_contracts=181154.00
+05:08:23 INFO QUEUE_POSITION | side=yes order_id=b3097cd9-5cde-4525-abb1-df8226448b44 ahead_contracts=109471.00
+05:08:23 INFO QUEUE_POSITION | side=no order_id=d1aa6908-2c57-4d3b-a509-efb07e5b7120 ahead_contracts=181154.00
+05:08:38 INFO QUEUE_POSITION | side=yes order_id=b3097cd9-5cde-4525-abb1-df8226448b44 ahead_contracts=109471.00
+05:08:38 INFO QUEUE_POSITION | side=no order_id=d1aa6908-2c57-4d3b-a509-efb07e5b7120 ahead_contracts=181154.00
+05:08:46 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=b3097cd9-5cde-4525-abb1-df8226448b44
+05:08:46 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=b3097cd9-5cde-4525-abb1-df8226448b44
+05:08:46 INFO CREATE_OK | side=yes price_dollars=0.3900 remaining_contracts=25.00 order_id=2e516ef3-f4c4-4254-b550-34f13de6e31e
+05:08:53 INFO QUEUE_POSITION | side=yes order_id=2e516ef3-f4c4-4254-b550-34f13de6e31e ahead_contracts=108976.00
+05:08:53 INFO QUEUE_POSITION | side=no order_id=d1aa6908-2c57-4d3b-a509-efb07e5b7120 ahead_contracts=181154.00
+05:08:57 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=d1aa6908-2c57-4d3b-a509-efb07e5b7120
+05:08:57 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=d1aa6908-2c57-4d3b-a509-efb07e5b7120
+05:08:57 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=d500ad60-59d3-401e-90ae-1c64c5795ee2
+05:09:08 INFO QUEUE_POSITION | side=yes order_id=2e516ef3-f4c4-4254-b550-34f13de6e31e ahead_contracts=108976.00
+05:09:08 INFO QUEUE_POSITION | side=no order_id=d500ad60-59d3-401e-90ae-1c64c5795ee2 ahead_contracts=181154.00
+05:09:23 INFO QUEUE_POSITION | side=yes order_id=2e516ef3-f4c4-4254-b550-34f13de6e31e ahead_contracts=108976.00
+05:09:23 INFO QUEUE_POSITION | side=no order_id=d500ad60-59d3-401e-90ae-1c64c5795ee2 ahead_contracts=181154.00
+05:09:38 INFO QUEUE_POSITION | side=yes order_id=2e516ef3-f4c4-4254-b550-34f13de6e31e ahead_contracts=108976.00
+05:09:38 INFO QUEUE_POSITION | side=no order_id=d500ad60-59d3-401e-90ae-1c64c5795ee2 ahead_contracts=181154.00
+05:09:45 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=2e516ef3-f4c4-4254-b550-34f13de6e31e
+05:09:45 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=2e516ef3-f4c4-4254-b550-34f13de6e31e
+05:09:45 INFO CREATE_OK | side=yes price_dollars=0.3900 remaining_contracts=25.00 order_id=e4782c44-6e43-4d32-ad1d-2ed690f6d183
+05:09:53 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=d500ad60-59d3-401e-90ae-1c64c5795ee2
+05:09:53 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=d500ad60-59d3-401e-90ae-1c64c5795ee2
+05:09:53 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=c94a4009-fa07-4034-872b-40f5cb2d0e3c
+05:09:54 INFO QUEUE_POSITION | side=yes order_id=e4782c44-6e43-4d32-ad1d-2ed690f6d183 ahead_contracts=108976.00
+05:09:54 INFO QUEUE_POSITION | side=no order_id=c94a4009-fa07-4034-872b-40f5cb2d0e3c ahead_contracts=189736.00
+05:10:09 INFO QUEUE_POSITION | side=yes order_id=e4782c44-6e43-4d32-ad1d-2ed690f6d183 ahead_contracts=108976.00
+05:10:09 INFO QUEUE_POSITION | side=no order_id=c94a4009-fa07-4034-872b-40f5cb2d0e3c ahead_contracts=189736.00
+05:10:24 INFO QUEUE_POSITION | side=yes order_id=e4782c44-6e43-4d32-ad1d-2ed690f6d183 ahead_contracts=104083.00
+05:10:24 INFO QUEUE_POSITION | side=no order_id=c94a4009-fa07-4034-872b-40f5cb2d0e3c ahead_contracts=189736.00
+05:10:39 INFO QUEUE_POSITION | side=yes order_id=e4782c44-6e43-4d32-ad1d-2ed690f6d183 ahead_contracts=104083.00
+05:10:39 INFO QUEUE_POSITION | side=no order_id=c94a4009-fa07-4034-872b-40f5cb2d0e3c ahead_contracts=189736.00
+05:10:44 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=e4782c44-6e43-4d32-ad1d-2ed690f6d183
+05:10:44 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=5556d8dd-9d27-47db-a96e-a7c24423ceac
+05:10:45 INFO AMEND_OK | side=yes price_dollars=0.3900 total_fillable_contracts=25.00 order_id=5556d8dd-9d27-47db-a96e-a7c24423ceac
+05:10:49 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=c94a4009-fa07-4034-872b-40f5cb2d0e3c
+05:10:49 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=c94a4009-fa07-4034-872b-40f5cb2d0e3c
+05:10:50 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=e4191e08-1f56-43c1-bcd5-2e9eeadb38b1
+05:10:54 INFO QUEUE_POSITION | side=yes order_id=5556d8dd-9d27-47db-a96e-a7c24423ceac ahead_contracts=104083.00
+05:10:54 INFO QUEUE_POSITION | side=no order_id=e4191e08-1f56-43c1-bcd5-2e9eeadb38b1 ahead_contracts=190330.00
+05:11:09 INFO QUEUE_POSITION | side=yes order_id=5556d8dd-9d27-47db-a96e-a7c24423ceac ahead_contracts=104083.00
+05:11:09 INFO QUEUE_POSITION | side=no order_id=e4191e08-1f56-43c1-bcd5-2e9eeadb38b1 ahead_contracts=190330.00
+05:11:24 INFO QUEUE_POSITION | side=yes order_id=5556d8dd-9d27-47db-a96e-a7c24423ceac ahead_contracts=104083.00
+05:11:24 INFO QUEUE_POSITION | side=no order_id=e4191e08-1f56-43c1-bcd5-2e9eeadb38b1 ahead_contracts=190330.00
+05:11:39 INFO QUEUE_POSITION | side=yes order_id=5556d8dd-9d27-47db-a96e-a7c24423ceac ahead_contracts=104083.00
+05:11:39 INFO QUEUE_POSITION | side=no order_id=e4191e08-1f56-43c1-bcd5-2e9eeadb38b1 ahead_contracts=190330.00
+05:11:43 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=5556d8dd-9d27-47db-a96e-a7c24423ceac
+05:11:43 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=09f8aef2-afdc-4841-bcac-9f83fb53a5ec
+05:11:44 INFO AMEND_OK | side=yes price_dollars=0.3900 total_fillable_contracts=25.00 order_id=09f8aef2-afdc-4841-bcac-9f83fb53a5ec
+05:11:44 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=e4191e08-1f56-43c1-bcd5-2e9eeadb38b1
+05:11:44 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=e4191e08-1f56-43c1-bcd5-2e9eeadb38b1
+05:11:44 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=6b66b359-cef6-4ea7-b195-4c8dd86af77f
+05:11:54 INFO QUEUE_POSITION | side=yes order_id=09f8aef2-afdc-4841-bcac-9f83fb53a5ec ahead_contracts=104083.00
+05:11:54 INFO QUEUE_POSITION | side=no order_id=6b66b359-cef6-4ea7-b195-4c8dd86af77f ahead_contracts=190330.00
+05:12:09 INFO QUEUE_POSITION | side=yes order_id=09f8aef2-afdc-4841-bcac-9f83fb53a5ec ahead_contracts=104083.00
+05:12:09 INFO QUEUE_POSITION | side=no order_id=6b66b359-cef6-4ea7-b195-4c8dd86af77f ahead_contracts=190330.00
+05:12:24 INFO QUEUE_POSITION | side=yes order_id=09f8aef2-afdc-4841-bcac-9f83fb53a5ec ahead_contracts=104083.00
+05:12:24 INFO QUEUE_POSITION | side=no order_id=6b66b359-cef6-4ea7-b195-4c8dd86af77f ahead_contracts=190330.00
+05:12:38 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=09f8aef2-afdc-4841-bcac-9f83fb53a5ec
+05:12:38 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=09f8aef2-afdc-4841-bcac-9f83fb53a5ec
+05:12:38 INFO CREATE_OK | side=yes price_dollars=0.3900 remaining_contracts=25.00 order_id=e4ce243c-ac28-4f5a-86c9-290c9784f6da
+05:12:39 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=6b66b359-cef6-4ea7-b195-4c8dd86af77f
+05:12:39 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=6b66b359-cef6-4ea7-b195-4c8dd86af77f
+05:12:39 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=1e00f8df-01da-4962-bd4f-8dc9fbcaf12d
+05:12:39 INFO QUEUE_POSITION | side=yes order_id=e4ce243c-ac28-4f5a-86c9-290c9784f6da ahead_contracts=104083.00
+05:12:39 INFO QUEUE_POSITION | side=no order_id=1e00f8df-01da-4962-bd4f-8dc9fbcaf12d ahead_contracts=190519.00
+05:12:54 INFO QUEUE_POSITION | side=yes order_id=e4ce243c-ac28-4f5a-86c9-290c9784f6da ahead_contracts=104083.00
+05:12:54 INFO QUEUE_POSITION | side=no order_id=1e00f8df-01da-4962-bd4f-8dc9fbcaf12d ahead_contracts=190519.00
+05:13:09 INFO QUEUE_POSITION | side=yes order_id=e4ce243c-ac28-4f5a-86c9-290c9784f6da ahead_contracts=104083.00
+05:13:09 INFO QUEUE_POSITION | side=no order_id=1e00f8df-01da-4962-bd4f-8dc9fbcaf12d ahead_contracts=190519.00
+05:13:24 INFO QUEUE_POSITION | side=yes order_id=e4ce243c-ac28-4f5a-86c9-290c9784f6da ahead_contracts=104083.00
+05:13:25 INFO QUEUE_POSITION | side=no order_id=1e00f8df-01da-4962-bd4f-8dc9fbcaf12d ahead_contracts=190519.00
+05:13:33 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=e4ce243c-ac28-4f5a-86c9-290c9784f6da
+05:13:33 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=e4ce243c-ac28-4f5a-86c9-290c9784f6da
+05:13:33 INFO CREATE_OK | side=yes price_dollars=0.3900 remaining_contracts=25.00 order_id=f172ef39-18df-425b-a9c7-32a89f134fd4
+05:13:34 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=1e00f8df-01da-4962-bd4f-8dc9fbcaf12d
+05:13:34 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=1e00f8df-01da-4962-bd4f-8dc9fbcaf12d
+05:13:34 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=a487c692-ee44-4e6a-9fa2-76ce93eddd2c
+05:13:40 INFO QUEUE_POSITION | side=yes order_id=f172ef39-18df-425b-a9c7-32a89f134fd4 ahead_contracts=103364.00
+05:13:40 INFO QUEUE_POSITION | side=no order_id=a487c692-ee44-4e6a-9fa2-76ce93eddd2c ahead_contracts=191107.00
+05:13:55 INFO QUEUE_POSITION | side=yes order_id=f172ef39-18df-425b-a9c7-32a89f134fd4 ahead_contracts=103364.00
+05:13:55 INFO QUEUE_POSITION | side=no order_id=a487c692-ee44-4e6a-9fa2-76ce93eddd2c ahead_contracts=191107.00
+05:14:10 INFO QUEUE_POSITION | side=yes order_id=f172ef39-18df-425b-a9c7-32a89f134fd4 ahead_contracts=103364.00
+05:14:10 INFO QUEUE_POSITION | side=no order_id=a487c692-ee44-4e6a-9fa2-76ce93eddd2c ahead_contracts=191107.00
+05:14:25 INFO QUEUE_POSITION | side=yes order_id=f172ef39-18df-425b-a9c7-32a89f134fd4 ahead_contracts=103364.00
+05:14:25 INFO QUEUE_POSITION | side=no order_id=a487c692-ee44-4e6a-9fa2-76ce93eddd2c ahead_contracts=190922.00
+05:14:28 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=f172ef39-18df-425b-a9c7-32a89f134fd4
+05:14:28 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=f172ef39-18df-425b-a9c7-32a89f134fd4
+05:14:28 INFO CREATE_OK | side=yes price_dollars=0.3900 remaining_contracts=25.00 order_id=7677cd16-8e4b-4175-bbe6-d34c17b75662
+05:14:29 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=a487c692-ee44-4e6a-9fa2-76ce93eddd2c
+05:14:29 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=a487c692-ee44-4e6a-9fa2-76ce93eddd2c
+05:14:29 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=334e73fa-0f91-466a-8e33-c6be5b3ea9a3
+05:14:40 INFO QUEUE_POSITION | side=yes order_id=7677cd16-8e4b-4175-bbe6-d34c17b75662 ahead_contracts=103385.00
+05:14:40 INFO QUEUE_POSITION | side=no order_id=334e73fa-0f91-466a-8e33-c6be5b3ea9a3 ahead_contracts=192442.00
+05:14:55 INFO QUEUE_POSITION | side=yes order_id=7677cd16-8e4b-4175-bbe6-d34c17b75662 ahead_contracts=103385.00
+05:14:55 INFO QUEUE_POSITION | side=no order_id=334e73fa-0f91-466a-8e33-c6be5b3ea9a3 ahead_contracts=192442.00
+05:15:10 INFO QUEUE_POSITION | side=yes order_id=7677cd16-8e4b-4175-bbe6-d34c17b75662 ahead_contracts=103364.00
+05:15:10 INFO QUEUE_POSITION | side=no order_id=334e73fa-0f91-466a-8e33-c6be5b3ea9a3 ahead_contracts=192292.00
+05:15:24 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=7677cd16-8e4b-4175-bbe6-d34c17b75662
+05:15:24 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=7677cd16-8e4b-4175-bbe6-d34c17b75662
+05:15:24 INFO CREATE_OK | side=yes price_dollars=0.3900 remaining_contracts=25.00 order_id=d1a5066d-f383-4b96-af0d-a6bd4817b001
+05:15:24 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=334e73fa-0f91-466a-8e33-c6be5b3ea9a3
+05:15:24 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=334e73fa-0f91-466a-8e33-c6be5b3ea9a3
+05:15:24 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=2d247964-b663-4ec8-92aa-edbfa0d5ac6c
+05:15:25 INFO QUEUE_POSITION | side=yes order_id=d1a5066d-f383-4b96-af0d-a6bd4817b001 ahead_contracts=103364.00
+05:15:25 INFO QUEUE_POSITION | side=no order_id=2d247964-b663-4ec8-92aa-edbfa0d5ac6c ahead_contracts=196883.00
+05:15:40 INFO QUEUE_POSITION | side=yes order_id=d1a5066d-f383-4b96-af0d-a6bd4817b001 ahead_contracts=103364.00
+05:15:40 INFO QUEUE_POSITION | side=no order_id=2d247964-b663-4ec8-92aa-edbfa0d5ac6c ahead_contracts=196883.00
+05:15:55 INFO QUEUE_POSITION | side=yes order_id=d1a5066d-f383-4b96-af0d-a6bd4817b001 ahead_contracts=103364.00
+05:15:55 INFO QUEUE_POSITION | side=no order_id=2d247964-b663-4ec8-92aa-edbfa0d5ac6c ahead_contracts=196883.00
+05:16:10 INFO QUEUE_POSITION | side=yes order_id=d1a5066d-f383-4b96-af0d-a6bd4817b001 ahead_contracts=103364.00
+05:16:10 INFO QUEUE_POSITION | side=no order_id=2d247964-b663-4ec8-92aa-edbfa0d5ac6c ahead_contracts=196883.00
+05:16:19 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=d1a5066d-f383-4b96-af0d-a6bd4817b001
+05:16:20 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=d1a5066d-f383-4b96-af0d-a6bd4817b001
+05:16:20 INFO CREATE_OK | side=yes price_dollars=0.3900 remaining_contracts=25.00 order_id=8830d7b0-59e3-4463-9ec8-3208c89fbd9e
+05:16:20 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=2d247964-b663-4ec8-92aa-edbfa0d5ac6c
+05:16:20 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=2d247964-b663-4ec8-92aa-edbfa0d5ac6c
+05:16:20 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=200d63ca-4ede-4de5-b7dc-758c841de5fa
+05:16:25 INFO QUEUE_POSITION | side=yes order_id=8830d7b0-59e3-4463-9ec8-3208c89fbd9e ahead_contracts=103364.00
+05:16:25 INFO QUEUE_POSITION | side=no order_id=200d63ca-4ede-4de5-b7dc-758c841de5fa ahead_contracts=197814.00
+05:16:40 INFO QUEUE_POSITION | side=yes order_id=8830d7b0-59e3-4463-9ec8-3208c89fbd9e ahead_contracts=103364.00
+05:16:40 INFO QUEUE_POSITION | side=no order_id=200d63ca-4ede-4de5-b7dc-758c841de5fa ahead_contracts=197814.00
+05:16:55 INFO QUEUE_POSITION | side=yes order_id=8830d7b0-59e3-4463-9ec8-3208c89fbd9e ahead_contracts=103364.00
+05:16:56 INFO QUEUE_POSITION | side=no order_id=200d63ca-4ede-4de5-b7dc-758c841de5fa ahead_contracts=197814.00
+05:17:11 INFO QUEUE_POSITION | side=yes order_id=8830d7b0-59e3-4463-9ec8-3208c89fbd9e ahead_contracts=103364.00
+05:17:11 INFO QUEUE_POSITION | side=no order_id=200d63ca-4ede-4de5-b7dc-758c841de5fa ahead_contracts=197814.00
+05:17:18 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=8830d7b0-59e3-4463-9ec8-3208c89fbd9e
+05:17:18 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=cf78a8dc-4037-47bc-bc09-8a0bf5c58162
+05:17:18 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=200d63ca-4ede-4de5-b7dc-758c841de5fa
+05:17:18 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=200d63ca-4ede-4de5-b7dc-758c841de5fa
+05:17:18 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=84f54f9a-54ca-4dea-9d3b-64600c0ed913
+05:17:19 INFO AMEND_OK | side=yes price_dollars=0.3900 total_fillable_contracts=25.00 order_id=cf78a8dc-4037-47bc-bc09-8a0bf5c58162
+05:17:26 INFO QUEUE_POSITION | side=yes order_id=cf78a8dc-4037-47bc-bc09-8a0bf5c58162 ahead_contracts=103364.00
+05:17:26 INFO QUEUE_POSITION | side=no order_id=84f54f9a-54ca-4dea-9d3b-64600c0ed913 ahead_contracts=200328.00
+05:17:41 INFO QUEUE_POSITION | side=yes order_id=cf78a8dc-4037-47bc-bc09-8a0bf5c58162 ahead_contracts=103364.00
+05:17:41 INFO QUEUE_POSITION | side=no order_id=84f54f9a-54ca-4dea-9d3b-64600c0ed913 ahead_contracts=200328.00
+05:17:56 INFO QUEUE_POSITION | side=yes order_id=cf78a8dc-4037-47bc-bc09-8a0bf5c58162 ahead_contracts=103364.00
+05:17:56 INFO QUEUE_POSITION | side=no order_id=84f54f9a-54ca-4dea-9d3b-64600c0ed913 ahead_contracts=200328.00
+05:18:11 INFO QUEUE_POSITION | side=yes order_id=cf78a8dc-4037-47bc-bc09-8a0bf5c58162 ahead_contracts=44581.00
+05:18:11 INFO QUEUE_POSITION | side=no order_id=84f54f9a-54ca-4dea-9d3b-64600c0ed913 ahead_contracts=77395.00
+05:18:17 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=84f54f9a-54ca-4dea-9d3b-64600c0ed913
+05:18:17 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=cf78a8dc-4037-47bc-bc09-8a0bf5c58162
+05:18:17 INFO CANCEL_SKIPPED_ORDER_MISSING | side=yes reason=refresh_expiring_quote order_id=cf78a8dc-4037-47bc-bc09-8a0bf5c58162
+05:18:17 INFO CREATE_OK | side=yes price_dollars=0.3900 remaining_contracts=25.00 order_id=dad6d357-ed53-43f9-a884-8fbdf041c529
+05:18:17 INFO CREATE_OK | side=no price_dollars=0.5800 remaining_contracts=17.00 order_id=60dd8ff5-6dde-43a4-9001-840bf3041916
+05:18:18 INFO AMEND_OK | side=no price_dollars=0.5700 total_fillable_contracts=17.00 order_id=60dd8ff5-6dde-43a4-9001-840bf3041916
+05:18:26 INFO QUEUE_POSITION | side=yes order_id=dad6d357-ed53-43f9-a884-8fbdf041c529 ahead_contracts=103364.00
+05:18:26 INFO QUEUE_POSITION | side=no order_id=60dd8ff5-6dde-43a4-9001-840bf3041916 ahead_contracts=81298.00
+05:18:38 INFO AMEND_OK | side=yes price_dollars=0.4000 total_fillable_contracts=24.00 order_id=dad6d357-ed53-43f9-a884-8fbdf041c529
+05:18:39 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/dad6d357-ed53-43f9-a884-8fbdf041c529/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/dad6d357-ed53-43f9-a884-8fbdf041c529/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+05:18:39 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/dad6d357-ed53-43f9-a884-8fbdf041c529/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/dad6d357-ed53-43f9-a884-8fbdf041c529/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+05:18:39 INFO AMEND_OK | side=yes price_dollars=0.3900 total_fillable_contracts=25.00 order_id=dad6d357-ed53-43f9-a884-8fbdf041c529
+05:18:41 INFO QUEUE_POSITION | side=yes order_id=dad6d357-ed53-43f9-a884-8fbdf041c529 ahead_contracts=44830.00
+05:18:41 INFO QUEUE_POSITION | side=no order_id=60dd8ff5-6dde-43a4-9001-840bf3041916 ahead_contracts=76212.00
+05:18:56 INFO QUEUE_POSITION | side=yes order_id=dad6d357-ed53-43f9-a884-8fbdf041c529 ahead_contracts=44830.00
+05:18:56 INFO QUEUE_POSITION | side=no order_id=60dd8ff5-6dde-43a4-9001-840bf3041916 ahead_contracts=76212.00
+05:19:11 INFO QUEUE_POSITION | side=yes order_id=dad6d357-ed53-43f9-a884-8fbdf041c529 ahead_contracts=44830.00
+05:19:11 INFO QUEUE_POSITION | side=no order_id=60dd8ff5-6dde-43a4-9001-840bf3041916 ahead_contracts=76212.00
+05:19:16 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=60dd8ff5-6dde-43a4-9001-840bf3041916
+05:19:16 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=dad6d357-ed53-43f9-a884-8fbdf041c529
+05:19:16 INFO CANCEL_SKIPPED_ORDER_MISSING | side=yes reason=refresh_expiring_quote order_id=dad6d357-ed53-43f9-a884-8fbdf041c529
+05:19:16 INFO CREATE_OK | side=yes price_dollars=0.3900 remaining_contracts=25.00 order_id=7b19ce29-7013-46d0-86f1-a23e50155d7d
+05:19:16 INFO CREATE_OK | side=no price_dollars=0.5800 remaining_contracts=17.00 order_id=f1cef75c-ed46-436f-89c0-1dc24d68678f
+05:19:17 INFO AMEND_OK | side=no price_dollars=0.5700 total_fillable_contracts=17.00 order_id=f1cef75c-ed46-436f-89c0-1dc24d68678f
+05:19:26 INFO QUEUE_POSITION | side=yes order_id=7b19ce29-7013-46d0-86f1-a23e50155d7d ahead_contracts=103363.00
+05:19:26 INFO QUEUE_POSITION | side=no order_id=f1cef75c-ed46-436f-89c0-1dc24d68678f ahead_contracts=77873.00
+05:19:41 INFO QUEUE_POSITION | side=yes order_id=7b19ce29-7013-46d0-86f1-a23e50155d7d ahead_contracts=103363.00
+05:19:41 INFO QUEUE_POSITION | side=no order_id=f1cef75c-ed46-436f-89c0-1dc24d68678f ahead_contracts=77873.00
+05:19:56 INFO QUEUE_POSITION | side=yes order_id=7b19ce29-7013-46d0-86f1-a23e50155d7d ahead_contracts=103363.00
+05:19:56 INFO QUEUE_POSITION | side=no order_id=f1cef75c-ed46-436f-89c0-1dc24d68678f ahead_contracts=77873.00
+05:20:11 INFO QUEUE_POSITION | side=yes order_id=7b19ce29-7013-46d0-86f1-a23e50155d7d ahead_contracts=103363.00
+05:20:11 INFO QUEUE_POSITION | side=no order_id=f1cef75c-ed46-436f-89c0-1dc24d68678f ahead_contracts=77873.00
+05:20:15 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=7b19ce29-7013-46d0-86f1-a23e50155d7d
+05:20:15 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=f1cef75c-ed46-436f-89c0-1dc24d68678f
+05:20:15 INFO CANCEL_SKIPPED_ORDER_MISSING | side=yes reason=refresh_expiring_quote order_id=7b19ce29-7013-46d0-86f1-a23e50155d7d
+05:20:15 INFO CREATE_OK | side=yes price_dollars=0.3900 remaining_contracts=25.00 order_id=bb3667fc-e67b-4229-b66e-2a932eaf373d
+05:20:15 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=3297adf6-1119-4a50-b683-f7a2da85e7be
+05:20:27 INFO QUEUE_POSITION | side=yes order_id=bb3667fc-e67b-4229-b66e-2a932eaf373d ahead_contracts=103363.00
+05:20:27 INFO QUEUE_POSITION | side=no order_id=3297adf6-1119-4a50-b683-f7a2da85e7be ahead_contracts=77379.00
+05:20:42 INFO QUEUE_POSITION | side=yes order_id=bb3667fc-e67b-4229-b66e-2a932eaf373d ahead_contracts=103363.00
+05:20:42 INFO QUEUE_POSITION | side=no order_id=3297adf6-1119-4a50-b683-f7a2da85e7be ahead_contracts=77354.00
+05:20:57 INFO QUEUE_POSITION | side=yes order_id=bb3667fc-e67b-4229-b66e-2a932eaf373d ahead_contracts=44830.00
+05:20:57 INFO QUEUE_POSITION | side=no order_id=3297adf6-1119-4a50-b683-f7a2da85e7be ahead_contracts=75702.00
+05:21:10 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=bb3667fc-e67b-4229-b66e-2a932eaf373d
+05:21:10 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=bb3667fc-e67b-4229-b66e-2a932eaf373d
+05:21:10 INFO CREATE_OK | side=yes price_dollars=0.3900 remaining_contracts=25.00 order_id=09e355a3-255d-4efe-8a02-3e6d557aaa9a
+05:21:10 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=3297adf6-1119-4a50-b683-f7a2da85e7be
+05:21:10 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=3297adf6-1119-4a50-b683-f7a2da85e7be
+05:21:10 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=2d2a9497-221e-4d0e-a614-d9854cc67e46
+05:21:12 INFO QUEUE_POSITION | side=yes order_id=09e355a3-255d-4efe-8a02-3e6d557aaa9a ahead_contracts=45631.00
+05:21:12 INFO QUEUE_POSITION | side=no order_id=2d2a9497-221e-4d0e-a614-d9854cc67e46 ahead_contracts=77635.00
+05:21:27 INFO QUEUE_POSITION | side=yes order_id=09e355a3-255d-4efe-8a02-3e6d557aaa9a ahead_contracts=45631.00
+05:21:27 INFO QUEUE_POSITION | side=no order_id=2d2a9497-221e-4d0e-a614-d9854cc67e46 ahead_contracts=77585.00
+05:21:42 INFO QUEUE_POSITION | side=yes order_id=09e355a3-255d-4efe-8a02-3e6d557aaa9a ahead_contracts=45631.00
+05:21:42 INFO QUEUE_POSITION | side=no order_id=2d2a9497-221e-4d0e-a614-d9854cc67e46 ahead_contracts=77585.00
+05:21:57 INFO QUEUE_POSITION | side=yes order_id=09e355a3-255d-4efe-8a02-3e6d557aaa9a ahead_contracts=45631.00
+05:21:57 INFO QUEUE_POSITION | side=no order_id=2d2a9497-221e-4d0e-a614-d9854cc67e46 ahead_contracts=77585.00
+05:22:09 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=09e355a3-255d-4efe-8a02-3e6d557aaa9a
+05:22:09 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=09e355a3-255d-4efe-8a02-3e6d557aaa9a
+05:22:09 INFO CREATE_OK | side=yes price_dollars=0.3900 remaining_contracts=25.00 order_id=8738bc5d-4ac8-42a5-ad99-d4523dd8d4ca
+05:22:09 INFO REQUOTE_ERROR | error=DELETE /trade-api/v2/portfolio/orders/2d2a9497-221e-4d0e-a614-d9854cc67e46 failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1406, in ensure_side_quote
+    await self.cancel_side_quote(side, reason="refresh_expiring_quote", reset_quote_cycle=False)
+  File "/workspaces/Kalshi_alg/V1.py", line 1383, in cancel_side_quote
+    await asyncio.to_thread(self.api_client.cancel_order, order_id=order_id)
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 848, in cancel_order
+    return self.rest_delete(
+           ^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 688, in rest_delete
+    raise RuntimeError(f"DELETE {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: DELETE /trade-api/v2/portfolio/orders/2d2a9497-221e-4d0e-a614-d9854cc67e46 failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+05:22:09 INFO REQUOTE_ERROR | error=DELETE /trade-api/v2/portfolio/orders/2d2a9497-221e-4d0e-a614-d9854cc67e46 failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1406, in ensure_side_quote
+    await self.cancel_side_quote(side, reason="refresh_expiring_quote", reset_quote_cycle=False)
+  File "/workspaces/Kalshi_alg/V1.py", line 1383, in cancel_side_quote
+    await asyncio.to_thread(self.api_client.cancel_order, order_id=order_id)
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 848, in cancel_order
+    return self.rest_delete(
+           ^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 688, in rest_delete
+    raise RuntimeError(f"DELETE {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: DELETE /trade-api/v2/portfolio/orders/2d2a9497-221e-4d0e-a614-d9854cc67e46 failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+05:22:09 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=2d2a9497-221e-4d0e-a614-d9854cc67e46
+05:22:09 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+05:22:12 INFO QUEUE_POSITION | side=yes order_id=8738bc5d-4ac8-42a5-ad99-d4523dd8d4ca ahead_contracts=45631.00
+05:22:19 INFO CREATE_OK | side=no price_dollars=0.5800 remaining_contracts=17.00 order_id=3cc08cfd-6b87-404d-ab6b-36635ba1d4ea
+05:22:20 INFO AMEND_OK | side=no price_dollars=0.5700 total_fillable_contracts=17.00 order_id=3cc08cfd-6b87-404d-ab6b-36635ba1d4ea
+05:22:27 INFO QUEUE_POSITION | side=yes order_id=8738bc5d-4ac8-42a5-ad99-d4523dd8d4ca ahead_contracts=45631.00
+05:22:27 INFO QUEUE_POSITION | side=no order_id=3cc08cfd-6b87-404d-ab6b-36635ba1d4ea ahead_contracts=77634.00
+05:22:42 INFO QUEUE_POSITION | side=yes order_id=8738bc5d-4ac8-42a5-ad99-d4523dd8d4ca ahead_contracts=45631.00
+05:22:42 INFO QUEUE_POSITION | side=no order_id=3cc08cfd-6b87-404d-ab6b-36635ba1d4ea ahead_contracts=77634.00
+05:22:57 INFO QUEUE_POSITION | side=yes order_id=8738bc5d-4ac8-42a5-ad99-d4523dd8d4ca ahead_contracts=45631.00
+05:22:57 INFO QUEUE_POSITION | side=no order_id=3cc08cfd-6b87-404d-ab6b-36635ba1d4ea ahead_contracts=77634.00
+05:23:08 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=8738bc5d-4ac8-42a5-ad99-d4523dd8d4ca
+05:23:08 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=8738bc5d-4ac8-42a5-ad99-d4523dd8d4ca
+05:23:08 INFO CREATE_OK | side=yes price_dollars=0.3900 remaining_contracts=25.00 order_id=921844ad-e3c4-4c25-826f-095194924a09
+05:23:12 INFO QUEUE_POSITION | side=yes order_id=921844ad-e3c4-4c25-826f-095194924a09 ahead_contracts=49633.00
+05:23:12 INFO QUEUE_POSITION | side=no order_id=3cc08cfd-6b87-404d-ab6b-36635ba1d4ea ahead_contracts=77634.00
+05:23:18 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=3cc08cfd-6b87-404d-ab6b-36635ba1d4ea
+05:23:18 INFO CREATE_OK | side=no price_dollars=0.5800 remaining_contracts=17.00 order_id=68251332-46ba-41db-b329-009c1d9fdc7c
+05:23:19 INFO AMEND_OK | side=no price_dollars=0.5700 total_fillable_contracts=17.00 order_id=68251332-46ba-41db-b329-009c1d9fdc7c
+05:23:27 INFO QUEUE_POSITION | side=yes order_id=921844ad-e3c4-4c25-826f-095194924a09 ahead_contracts=49633.00
+05:23:27 INFO QUEUE_POSITION | side=no order_id=68251332-46ba-41db-b329-009c1d9fdc7c ahead_contracts=77634.00
+05:23:42 INFO QUEUE_POSITION | side=yes order_id=921844ad-e3c4-4c25-826f-095194924a09 ahead_contracts=49633.00
+05:23:42 INFO QUEUE_POSITION | side=no order_id=68251332-46ba-41db-b329-009c1d9fdc7c ahead_contracts=77634.00
+05:23:57 INFO QUEUE_POSITION | side=yes order_id=921844ad-e3c4-4c25-826f-095194924a09 ahead_contracts=49633.00
+05:23:57 INFO QUEUE_POSITION | side=no order_id=68251332-46ba-41db-b329-009c1d9fdc7c ahead_contracts=77546.00
+05:24:07 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=921844ad-e3c4-4c25-826f-095194924a09
+05:24:07 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=6985d327-89e9-412b-aed3-f50bdee5f55f
+05:24:08 INFO AMEND_OK | side=yes price_dollars=0.3900 total_fillable_contracts=25.00 order_id=6985d327-89e9-412b-aed3-f50bdee5f55f
+05:24:13 INFO QUEUE_POSITION | side=yes order_id=6985d327-89e9-412b-aed3-f50bdee5f55f ahead_contracts=49633.00
+05:24:13 INFO QUEUE_POSITION | side=no order_id=68251332-46ba-41db-b329-009c1d9fdc7c ahead_contracts=77546.00
+05:24:17 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=68251332-46ba-41db-b329-009c1d9fdc7c
+05:24:17 INFO CREATE_OK | side=no price_dollars=0.5800 remaining_contracts=17.00 order_id=1aa18045-5b6d-4100-a135-10666eb0f164
+05:24:18 INFO AMEND_OK | side=no price_dollars=0.5700 total_fillable_contracts=17.00 order_id=1aa18045-5b6d-4100-a135-10666eb0f164
+05:24:28 INFO QUEUE_POSITION | side=yes order_id=6985d327-89e9-412b-aed3-f50bdee5f55f ahead_contracts=49633.00
+05:24:28 INFO QUEUE_POSITION | side=no order_id=1aa18045-5b6d-4100-a135-10666eb0f164 ahead_contracts=84114.00
+05:24:43 INFO QUEUE_POSITION | side=yes order_id=6985d327-89e9-412b-aed3-f50bdee5f55f ahead_contracts=49633.00
+05:24:43 INFO QUEUE_POSITION | side=no order_id=1aa18045-5b6d-4100-a135-10666eb0f164 ahead_contracts=84114.00
+05:24:58 INFO QUEUE_POSITION | side=yes order_id=6985d327-89e9-412b-aed3-f50bdee5f55f ahead_contracts=49633.00
+05:24:58 INFO QUEUE_POSITION | side=no order_id=1aa18045-5b6d-4100-a135-10666eb0f164 ahead_contracts=84114.00
+05:25:06 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=6985d327-89e9-412b-aed3-f50bdee5f55f
+05:25:06 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=9f5b04ed-aece-47a7-8676-1f32c70c0c4d
+05:25:07 INFO AMEND_OK | side=yes price_dollars=0.3900 total_fillable_contracts=25.00 order_id=9f5b04ed-aece-47a7-8676-1f32c70c0c4d
+05:25:13 INFO QUEUE_POSITION | side=yes order_id=9f5b04ed-aece-47a7-8676-1f32c70c0c4d ahead_contracts=49633.00
+05:25:13 INFO QUEUE_POSITION | side=no order_id=1aa18045-5b6d-4100-a135-10666eb0f164 ahead_contracts=84114.00
+05:25:16 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=1aa18045-5b6d-4100-a135-10666eb0f164
+05:25:16 INFO CREATE_OK | side=no price_dollars=0.5800 remaining_contracts=17.00 order_id=294377e9-2342-49b7-aef7-a82d113f3c29
+05:25:17 INFO AMEND_OK | side=no price_dollars=0.5700 total_fillable_contracts=17.00 order_id=294377e9-2342-49b7-aef7-a82d113f3c29
+05:25:28 INFO QUEUE_POSITION | side=yes order_id=9f5b04ed-aece-47a7-8676-1f32c70c0c4d ahead_contracts=49633.00
+05:25:28 INFO QUEUE_POSITION | side=no order_id=294377e9-2342-49b7-aef7-a82d113f3c29 ahead_contracts=84114.00
+05:25:43 INFO QUEUE_POSITION | side=yes order_id=9f5b04ed-aece-47a7-8676-1f32c70c0c4d ahead_contracts=49633.00
+05:25:43 INFO QUEUE_POSITION | side=no order_id=294377e9-2342-49b7-aef7-a82d113f3c29 ahead_contracts=84114.00
+05:25:58 INFO QUEUE_POSITION | side=yes order_id=9f5b04ed-aece-47a7-8676-1f32c70c0c4d ahead_contracts=49633.00
+05:25:58 INFO QUEUE_POSITION | side=no order_id=294377e9-2342-49b7-aef7-a82d113f3c29 ahead_contracts=84114.00
+05:26:03 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=9f5b04ed-aece-47a7-8676-1f32c70c0c4d
+05:26:03 INFO CREATE_OK | side=yes price_dollars=0.3900 remaining_contracts=25.00 order_id=e27d3c3a-9ebf-4ab5-8b71-8d01033ade0c
+05:26:03 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=9f5b04ed-aece-47a7-8676-1f32c70c0c4d
+05:26:11 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=294377e9-2342-49b7-aef7-a82d113f3c29
+05:26:11 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=9989dfa9-543a-4824-8516-0df3880179b7
+05:26:11 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=294377e9-2342-49b7-aef7-a82d113f3c29
+05:26:11 INFO AMEND_OK | side=no price_dollars=0.5800 total_fillable_contracts=17.00 order_id=9989dfa9-543a-4824-8516-0df3880179b7
+05:26:11 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/9989dfa9-543a-4824-8516-0df3880179b7/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/9989dfa9-543a-4824-8516-0df3880179b7/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+05:26:11 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/9989dfa9-543a-4824-8516-0df3880179b7/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/9989dfa9-543a-4824-8516-0df3880179b7/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+05:26:13 INFO QUEUE_POSITION | side=yes order_id=e27d3c3a-9ebf-4ab5-8b71-8d01033ade0c ahead_contracts=49633.00
+05:26:13 INFO QUEUE_POSITION | side=no order_id=9989dfa9-543a-4824-8516-0df3880179b7 ahead_contracts=229531.00
+05:26:17 INFO AMEND_OK | side=no price_dollars=0.5700 total_fillable_contracts=17.00 order_id=9989dfa9-543a-4824-8516-0df3880179b7
+05:26:27 INFO AMEND_OK | side=yes price_dollars=0.4000 total_fillable_contracts=24.00 order_id=e27d3c3a-9ebf-4ab5-8b71-8d01033ade0c
+05:26:28 INFO QUEUE_POSITION | side=yes order_id=e27d3c3a-9ebf-4ab5-8b71-8d01033ade0c ahead_contracts=58895.00
+05:26:28 INFO QUEUE_POSITION | side=no order_id=9989dfa9-543a-4824-8516-0df3880179b7 ahead_contracts=84105.00
+05:26:43 INFO QUEUE_POSITION | side=yes order_id=e27d3c3a-9ebf-4ab5-8b71-8d01033ade0c ahead_contracts=58895.00
+05:26:43 INFO QUEUE_POSITION | side=no order_id=9989dfa9-543a-4824-8516-0df3880179b7 ahead_contracts=83215.00
+05:26:58 INFO QUEUE_POSITION | side=yes order_id=e27d3c3a-9ebf-4ab5-8b71-8d01033ade0c ahead_contracts=58895.00
+05:26:58 INFO QUEUE_POSITION | side=no order_id=9989dfa9-543a-4824-8516-0df3880179b7 ahead_contracts=83215.00
+05:26:58 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=e27d3c3a-9ebf-4ab5-8b71-8d01033ade0c
+05:26:58 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=e27d3c3a-9ebf-4ab5-8b71-8d01033ade0c
+05:26:58 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=41746095-badb-438d-ae02-3ef0895318bb
+05:27:06 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=9989dfa9-543a-4824-8516-0df3880179b7
+05:27:06 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=9989dfa9-543a-4824-8516-0df3880179b7
+05:27:06 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=5c014513-bdb1-49f6-a36c-fecc1691396a
+05:27:13 INFO QUEUE_POSITION | side=yes order_id=41746095-badb-438d-ae02-3ef0895318bb ahead_contracts=60615.00
+05:27:13 INFO QUEUE_POSITION | side=no order_id=5c014513-bdb1-49f6-a36c-fecc1691396a ahead_contracts=83465.00
+05:27:28 INFO QUEUE_POSITION | side=yes order_id=41746095-badb-438d-ae02-3ef0895318bb ahead_contracts=60615.00
+05:27:28 INFO QUEUE_POSITION | side=no order_id=5c014513-bdb1-49f6-a36c-fecc1691396a ahead_contracts=83465.00
+05:27:43 INFO QUEUE_POSITION | side=yes order_id=41746095-badb-438d-ae02-3ef0895318bb ahead_contracts=60615.00
+05:27:44 INFO QUEUE_POSITION | side=no order_id=5c014513-bdb1-49f6-a36c-fecc1691396a ahead_contracts=83465.00
+05:27:53 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=41746095-badb-438d-ae02-3ef0895318bb
+05:27:53 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=41746095-badb-438d-ae02-3ef0895318bb
+05:27:53 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=a15a37a8-a5e7-4e94-ad58-8fd61897e171
+05:27:59 INFO QUEUE_POSITION | side=yes order_id=a15a37a8-a5e7-4e94-ad58-8fd61897e171 ahead_contracts=9135.00
+05:27:59 INFO QUEUE_POSITION | side=no order_id=5c014513-bdb1-49f6-a36c-fecc1691396a ahead_contracts=81939.00
+05:28:03 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=5c014513-bdb1-49f6-a36c-fecc1691396a
+05:28:03 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=5c014513-bdb1-49f6-a36c-fecc1691396a
+05:28:03 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=fad96d55-e772-4de6-bb00-1430c6063c3e
+05:28:14 INFO QUEUE_POSITION | side=yes order_id=a15a37a8-a5e7-4e94-ad58-8fd61897e171 ahead_contracts=9135.00
+05:28:14 INFO QUEUE_POSITION | side=no order_id=fad96d55-e772-4de6-bb00-1430c6063c3e ahead_contracts=98700.00
+05:28:29 INFO QUEUE_POSITION | side=yes order_id=a15a37a8-a5e7-4e94-ad58-8fd61897e171 ahead_contracts=9135.00
+05:28:29 INFO QUEUE_POSITION | side=no order_id=fad96d55-e772-4de6-bb00-1430c6063c3e ahead_contracts=98630.00
+05:28:44 INFO QUEUE_POSITION | side=yes order_id=a15a37a8-a5e7-4e94-ad58-8fd61897e171 ahead_contracts=9135.00
+05:28:44 INFO QUEUE_POSITION | side=no order_id=fad96d55-e772-4de6-bb00-1430c6063c3e ahead_contracts=98630.00
+05:28:48 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=a15a37a8-a5e7-4e94-ad58-8fd61897e171
+05:28:48 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=a15a37a8-a5e7-4e94-ad58-8fd61897e171
+05:28:48 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=b20d3096-f77d-4406-9992-22c83b7eadaa
+05:28:59 INFO QUEUE_POSITION | side=yes order_id=b20d3096-f77d-4406-9992-22c83b7eadaa ahead_contracts=76933.00
+05:28:59 INFO QUEUE_POSITION | side=no order_id=fad96d55-e772-4de6-bb00-1430c6063c3e ahead_contracts=96693.00
+05:28:59 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=fad96d55-e772-4de6-bb00-1430c6063c3e
+05:28:59 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=fad96d55-e772-4de6-bb00-1430c6063c3e
+05:28:59 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=f7f03660-9465-4f8c-96d3-327ff16be7cb
+05:29:14 INFO QUEUE_POSITION | side=yes order_id=b20d3096-f77d-4406-9992-22c83b7eadaa ahead_contracts=76933.00
+05:29:14 INFO QUEUE_POSITION | side=no order_id=f7f03660-9465-4f8c-96d3-327ff16be7cb ahead_contracts=96693.00
+05:29:29 INFO QUEUE_POSITION | side=yes order_id=b20d3096-f77d-4406-9992-22c83b7eadaa ahead_contracts=76933.00
+05:29:29 INFO QUEUE_POSITION | side=no order_id=f7f03660-9465-4f8c-96d3-327ff16be7cb ahead_contracts=96693.00
+05:29:44 INFO QUEUE_POSITION | side=yes order_id=b20d3096-f77d-4406-9992-22c83b7eadaa ahead_contracts=76933.00
+05:29:44 INFO QUEUE_POSITION | side=no order_id=f7f03660-9465-4f8c-96d3-327ff16be7cb ahead_contracts=96693.00
+05:29:47 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=b20d3096-f77d-4406-9992-22c83b7eadaa
+05:29:47 INFO CREATE_OK | side=yes price_dollars=0.4100 remaining_contracts=24.00 order_id=73638483-9821-4bc8-a765-e8d7d9ba6844
+05:29:48 INFO AMEND_OK | side=yes price_dollars=0.4000 total_fillable_contracts=24.00 order_id=73638483-9821-4bc8-a765-e8d7d9ba6844
+05:29:58 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=f7f03660-9465-4f8c-96d3-327ff16be7cb
+05:29:58 INFO CREATE_OK | side=no price_dollars=0.5800 remaining_contracts=17.00 order_id=4f5a44fe-c37f-4482-ae88-4cefa58732cf
+05:29:59 INFO AMEND_OK | side=no price_dollars=0.5700 total_fillable_contracts=17.00 order_id=4f5a44fe-c37f-4482-ae88-4cefa58732cf
+05:29:59 INFO QUEUE_POSITION | side=yes order_id=73638483-9821-4bc8-a765-e8d7d9ba6844 ahead_contracts=76933.00
+05:29:59 INFO QUEUE_POSITION | side=no order_id=4f5a44fe-c37f-4482-ae88-4cefa58732cf ahead_contracts=96693.00
+05:30:14 INFO QUEUE_POSITION | side=yes order_id=73638483-9821-4bc8-a765-e8d7d9ba6844 ahead_contracts=76933.00
+05:30:14 INFO QUEUE_POSITION | side=no order_id=4f5a44fe-c37f-4482-ae88-4cefa58732cf ahead_contracts=96693.00
+05:30:29 INFO QUEUE_POSITION | side=yes order_id=73638483-9821-4bc8-a765-e8d7d9ba6844 ahead_contracts=76933.00
+05:30:29 INFO QUEUE_POSITION | side=no order_id=4f5a44fe-c37f-4482-ae88-4cefa58732cf ahead_contracts=96693.00
+05:30:44 INFO QUEUE_POSITION | side=yes order_id=73638483-9821-4bc8-a765-e8d7d9ba6844 ahead_contracts=76933.00
+05:30:44 INFO QUEUE_POSITION | side=no order_id=4f5a44fe-c37f-4482-ae88-4cefa58732cf ahead_contracts=96693.00
+05:30:46 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=73638483-9821-4bc8-a765-e8d7d9ba6844
+05:30:46 INFO CREATE_OK | side=yes price_dollars=0.4100 remaining_contracts=24.00 order_id=6b9450a0-fcb4-4d0d-9306-859b1ff12a55
+05:30:47 INFO AMEND_OK | side=yes price_dollars=0.4000 total_fillable_contracts=24.00 order_id=6b9450a0-fcb4-4d0d-9306-859b1ff12a55
+05:30:57 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=4f5a44fe-c37f-4482-ae88-4cefa58732cf
+05:30:57 INFO CREATE_OK | side=no price_dollars=0.5800 remaining_contracts=17.00 order_id=062b74ab-04c7-4ac7-a981-01524cd23239
+05:30:58 INFO AMEND_OK | side=no price_dollars=0.5700 total_fillable_contracts=17.00 order_id=062b74ab-04c7-4ac7-a981-01524cd23239
+05:30:59 INFO QUEUE_POSITION | side=yes order_id=6b9450a0-fcb4-4d0d-9306-859b1ff12a55 ahead_contracts=76933.00
+05:30:59 INFO QUEUE_POSITION | side=no order_id=062b74ab-04c7-4ac7-a981-01524cd23239 ahead_contracts=96693.00
+05:31:14 INFO QUEUE_POSITION | side=yes order_id=6b9450a0-fcb4-4d0d-9306-859b1ff12a55 ahead_contracts=76933.00
+05:31:14 INFO QUEUE_POSITION | side=no order_id=062b74ab-04c7-4ac7-a981-01524cd23239 ahead_contracts=96693.00
+05:31:30 INFO QUEUE_POSITION | side=yes order_id=6b9450a0-fcb4-4d0d-9306-859b1ff12a55 ahead_contracts=76933.00
+05:31:30 INFO QUEUE_POSITION | side=no order_id=062b74ab-04c7-4ac7-a981-01524cd23239 ahead_contracts=73786.00
+05:31:41 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=6b9450a0-fcb4-4d0d-9306-859b1ff12a55
+05:31:41 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=6b9450a0-fcb4-4d0d-9306-859b1ff12a55
+05:31:41 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=6516b67b-696e-41a8-a82d-4622c73460cf
+05:31:45 INFO QUEUE_POSITION | side=yes order_id=6516b67b-696e-41a8-a82d-4622c73460cf ahead_contracts=100745.00
+05:31:45 INFO QUEUE_POSITION | side=no order_id=062b74ab-04c7-4ac7-a981-01524cd23239 ahead_contracts=54326.00
+05:31:53 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=062b74ab-04c7-4ac7-a981-01524cd23239
+05:31:53 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=062b74ab-04c7-4ac7-a981-01524cd23239
+05:31:53 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=3f5d4d38-d2d0-4a55-a72e-3e65583b425b
+05:32:00 INFO QUEUE_POSITION | side=yes order_id=6516b67b-696e-41a8-a82d-4622c73460cf ahead_contracts=100745.00
+05:32:00 INFO QUEUE_POSITION | side=no order_id=3f5d4d38-d2d0-4a55-a72e-3e65583b425b ahead_contracts=177179.00
+05:32:15 INFO QUEUE_POSITION | side=yes order_id=6516b67b-696e-41a8-a82d-4622c73460cf ahead_contracts=100745.00
+05:32:15 INFO QUEUE_POSITION | side=no order_id=3f5d4d38-d2d0-4a55-a72e-3e65583b425b ahead_contracts=177174.00
+05:32:30 INFO QUEUE_POSITION | side=yes order_id=6516b67b-696e-41a8-a82d-4622c73460cf ahead_contracts=100745.00
+05:32:30 INFO QUEUE_POSITION | side=no order_id=3f5d4d38-d2d0-4a55-a72e-3e65583b425b ahead_contracts=177174.00
+05:32:40 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=6516b67b-696e-41a8-a82d-4622c73460cf
+05:32:40 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=6516b67b-696e-41a8-a82d-4622c73460cf
+05:32:40 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=b7f3866b-74a7-401c-9e30-4b10107340c5
+05:32:45 INFO QUEUE_POSITION | side=yes order_id=b7f3866b-74a7-401c-9e30-4b10107340c5 ahead_contracts=100745.00
+05:32:45 INFO QUEUE_POSITION | side=no order_id=3f5d4d38-d2d0-4a55-a72e-3e65583b425b ahead_contracts=177174.00
+05:32:48 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=3f5d4d38-d2d0-4a55-a72e-3e65583b425b
+05:32:48 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=3f5d4d38-d2d0-4a55-a72e-3e65583b425b
+05:32:48 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=58f70192-2d64-42af-ae34-aeb89249f63b
+05:32:54 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=b7f3866b-74a7-401c-9e30-4b10107340c5
+05:32:54 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=58f70192-2d64-42af-ae34-aeb89249f63b
+05:32:54 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+05:32:54 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+05:32:56 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+05:33:00 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+05:33:07 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+05:33:07 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+05:33:10 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+05:33:23 INFO CREATE_OK | side=yes price_dollars=0.4100 remaining_contracts=24.00 order_id=daba3e2a-7a50-4665-9770-1a3f60ed3ce4
+05:33:23 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=5c4f2ed4-b079-486b-99c3-2a59d5e75179
+05:33:23 INFO AMEND_OK | side=yes price_dollars=0.4000 total_fillable_contracts=24.00 order_id=daba3e2a-7a50-4665-9770-1a3f60ed3ce4
+05:33:30 INFO QUEUE_POSITION | side=yes order_id=daba3e2a-7a50-4665-9770-1a3f60ed3ce4 ahead_contracts=126220.00
+05:33:30 INFO QUEUE_POSITION | side=no order_id=5c4f2ed4-b079-486b-99c3-2a59d5e75179 ahead_contracts=164378.00
+05:33:45 INFO QUEUE_POSITION | side=yes order_id=daba3e2a-7a50-4665-9770-1a3f60ed3ce4 ahead_contracts=126220.00
+05:33:45 INFO QUEUE_POSITION | side=no order_id=5c4f2ed4-b079-486b-99c3-2a59d5e75179 ahead_contracts=164378.00
+05:34:00 INFO QUEUE_POSITION | side=yes order_id=daba3e2a-7a50-4665-9770-1a3f60ed3ce4 ahead_contracts=126220.00
+05:34:00 INFO QUEUE_POSITION | side=no order_id=5c4f2ed4-b079-486b-99c3-2a59d5e75179 ahead_contracts=164378.00
+05:34:15 INFO QUEUE_POSITION | side=yes order_id=daba3e2a-7a50-4665-9770-1a3f60ed3ce4 ahead_contracts=126220.00
+05:34:15 INFO QUEUE_POSITION | side=no order_id=5c4f2ed4-b079-486b-99c3-2a59d5e75179 ahead_contracts=164378.00
+05:34:20 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=daba3e2a-7a50-4665-9770-1a3f60ed3ce4
+05:34:20 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=daba3e2a-7a50-4665-9770-1a3f60ed3ce4
+05:34:20 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=76bd1811-5645-47e1-a238-a658b8313ea9
+05:34:20 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=5c4f2ed4-b079-486b-99c3-2a59d5e75179
+05:34:20 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=5c4f2ed4-b079-486b-99c3-2a59d5e75179
+05:34:20 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=feefb4cc-6eb6-4509-a6e9-036dcf4d871d
+05:34:30 INFO QUEUE_POSITION | side=yes order_id=76bd1811-5645-47e1-a238-a658b8313ea9 ahead_contracts=126220.00
+05:34:30 INFO QUEUE_POSITION | side=no order_id=feefb4cc-6eb6-4509-a6e9-036dcf4d871d ahead_contracts=164810.00
+05:34:45 INFO QUEUE_POSITION | side=yes order_id=76bd1811-5645-47e1-a238-a658b8313ea9 ahead_contracts=126220.00
+05:34:45 INFO QUEUE_POSITION | side=no order_id=feefb4cc-6eb6-4509-a6e9-036dcf4d871d ahead_contracts=164810.00
+05:35:00 INFO QUEUE_POSITION | side=yes order_id=76bd1811-5645-47e1-a238-a658b8313ea9 ahead_contracts=125970.00
+05:35:00 INFO QUEUE_POSITION | side=no order_id=feefb4cc-6eb6-4509-a6e9-036dcf4d871d ahead_contracts=164560.00
+05:35:15 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=76bd1811-5645-47e1-a238-a658b8313ea9
+05:35:15 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=76bd1811-5645-47e1-a238-a658b8313ea9
+05:35:15 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=81a168c9-733e-4bab-8560-e5966db14a94
+05:35:15 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=feefb4cc-6eb6-4509-a6e9-036dcf4d871d
+05:35:15 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=feefb4cc-6eb6-4509-a6e9-036dcf4d871d
+05:35:15 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=f8c3fc3f-c1d2-4324-943e-9882e6ac3535
+05:35:15 INFO QUEUE_POSITION | side=yes order_id=81a168c9-733e-4bab-8560-e5966db14a94 ahead_contracts=125970.00
+05:35:15 INFO QUEUE_POSITION | side=no order_id=f8c3fc3f-c1d2-4324-943e-9882e6ac3535 ahead_contracts=174939.00
+05:35:30 INFO QUEUE_POSITION | side=yes order_id=81a168c9-733e-4bab-8560-e5966db14a94 ahead_contracts=125970.00
+05:35:31 INFO QUEUE_POSITION | side=no order_id=f8c3fc3f-c1d2-4324-943e-9882e6ac3535 ahead_contracts=174939.00
+05:35:46 INFO QUEUE_POSITION | side=yes order_id=81a168c9-733e-4bab-8560-e5966db14a94 ahead_contracts=125970.00
+05:35:46 INFO QUEUE_POSITION | side=no order_id=f8c3fc3f-c1d2-4324-943e-9882e6ac3535 ahead_contracts=174939.00
+05:35:48 INFO AMEND_OK | side=no price_dollars=0.5600 total_fillable_contracts=17.00 order_id=f8c3fc3f-c1d2-4324-943e-9882e6ac3535
+05:35:48 INFO AMEND_OK | side=no price_dollars=0.5700 total_fillable_contracts=17.00 order_id=f8c3fc3f-c1d2-4324-943e-9882e6ac3535
+05:36:01 INFO QUEUE_POSITION | side=yes order_id=81a168c9-733e-4bab-8560-e5966db14a94 ahead_contracts=125970.00
+05:36:01 INFO QUEUE_POSITION | side=no order_id=f8c3fc3f-c1d2-4324-943e-9882e6ac3535 ahead_contracts=179435.00
+05:36:10 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=81a168c9-733e-4bab-8560-e5966db14a94
+05:36:10 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=81a168c9-733e-4bab-8560-e5966db14a94
+05:36:10 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=67fa3668-848a-4185-aceb-5021ab7bb584
+05:36:10 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=f8c3fc3f-c1d2-4324-943e-9882e6ac3535
+05:36:10 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=f8c3fc3f-c1d2-4324-943e-9882e6ac3535
+05:36:10 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=2ab106a9-6105-4d9f-9fed-f7b1fe008728
+05:36:16 INFO QUEUE_POSITION | side=yes order_id=67fa3668-848a-4185-aceb-5021ab7bb584 ahead_contracts=126220.00
+05:36:16 INFO QUEUE_POSITION | side=no order_id=2ab106a9-6105-4d9f-9fed-f7b1fe008728 ahead_contracts=179685.00
+05:36:31 INFO QUEUE_POSITION | side=yes order_id=67fa3668-848a-4185-aceb-5021ab7bb584 ahead_contracts=126220.00
+05:36:31 INFO QUEUE_POSITION | side=no order_id=2ab106a9-6105-4d9f-9fed-f7b1fe008728 ahead_contracts=179659.00
+05:36:46 INFO QUEUE_POSITION | side=yes order_id=67fa3668-848a-4185-aceb-5021ab7bb584 ahead_contracts=103015.00
+05:36:46 INFO QUEUE_POSITION | side=no order_id=2ab106a9-6105-4d9f-9fed-f7b1fe008728 ahead_contracts=179523.00
+05:37:01 INFO QUEUE_POSITION | side=yes order_id=67fa3668-848a-4185-aceb-5021ab7bb584 ahead_contracts=103015.00
+05:37:01 INFO QUEUE_POSITION | side=no order_id=2ab106a9-6105-4d9f-9fed-f7b1fe008728 ahead_contracts=179523.00
+05:37:08 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=67fa3668-848a-4185-aceb-5021ab7bb584
+05:37:08 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=67fa3668-848a-4185-aceb-5021ab7bb584
+05:37:08 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=24.00 order_id=1bed0cec-00ae-482b-94ad-af71d6aaac15
+05:37:08 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=2ab106a9-6105-4d9f-9fed-f7b1fe008728
+05:37:08 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=2ab106a9-6105-4d9f-9fed-f7b1fe008728
+05:37:08 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=b24e6e17-4ba3-4020-bef5-abefffc4e217
+05:37:16 INFO QUEUE_POSITION | side=yes order_id=1bed0cec-00ae-482b-94ad-af71d6aaac15 ahead_contracts=103015.00
+05:37:16 INFO QUEUE_POSITION | side=no order_id=b24e6e17-4ba3-4020-bef5-abefffc4e217 ahead_contracts=179604.00
+05:37:31 INFO QUEUE_POSITION | side=yes order_id=1bed0cec-00ae-482b-94ad-af71d6aaac15 ahead_contracts=103015.00
+05:37:31 INFO QUEUE_POSITION | side=no order_id=b24e6e17-4ba3-4020-bef5-abefffc4e217 ahead_contracts=179604.00
+05:37:46 INFO QUEUE_POSITION | side=yes order_id=1bed0cec-00ae-482b-94ad-af71d6aaac15 ahead_contracts=103015.00
+05:37:46 INFO QUEUE_POSITION | side=no order_id=b24e6e17-4ba3-4020-bef5-abefffc4e217 ahead_contracts=179604.00
+05:38:01 INFO QUEUE_POSITION | side=yes order_id=1bed0cec-00ae-482b-94ad-af71d6aaac15 ahead_contracts=103015.00
+05:38:01 INFO QUEUE_POSITION | side=no order_id=b24e6e17-4ba3-4020-bef5-abefffc4e217 ahead_contracts=179604.00
+05:38:07 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=1bed0cec-00ae-482b-94ad-af71d6aaac15
+05:38:07 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=b24e6e17-4ba3-4020-bef5-abefffc4e217
+05:38:07 INFO CREATE_OK | side=yes price_dollars=0.4100 remaining_contracts=24.00 order_id=a7dc18d5-b4fe-4a49-8319-dfcb12bfd771
+05:38:07 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=17.00 order_id=8fedadd0-1122-455a-9e6d-dddc6bcd9ce9
+05:38:08 INFO AMEND_OK | side=yes price_dollars=0.4000 total_fillable_contracts=24.00 order_id=a7dc18d5-b4fe-4a49-8319-dfcb12bfd771
+05:38:16 INFO QUEUE_POSITION | side=yes order_id=a7dc18d5-b4fe-4a49-8319-dfcb12bfd771 ahead_contracts=103115.00
+05:38:16 INFO QUEUE_POSITION | side=no order_id=8fedadd0-1122-455a-9e6d-dddc6bcd9ce9 ahead_contracts=179612.00
+05:38:31 INFO QUEUE_POSITION | side=yes order_id=a7dc18d5-b4fe-4a49-8319-dfcb12bfd771 ahead_contracts=57552.00
+05:38:31 INFO QUEUE_POSITION | side=no order_id=8fedadd0-1122-455a-9e6d-dddc6bcd9ce9 ahead_contracts=179612.00

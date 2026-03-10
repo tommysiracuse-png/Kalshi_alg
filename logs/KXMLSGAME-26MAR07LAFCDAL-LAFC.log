@@ -1,0 +1,1151 @@
+
+=== START 2026-03-08 04:23:51 ===
+CMD: /home/codespace/.python/current/bin/python3 /workspaces/Kalshi_alg/V1.py --ticker KXMLSGAME-26MAR07LAFCDAL-LAFC --yes-budget-cents 1000 --no-budget-cents 1000
+04:23:52 INFO START | environment=PROD ticker=KXMLSGAME-26MAR07LAFCDAL-LAFC yes_budget_cents=1000 no_budget_cents=1000 price_structure=linear_cent fractional_trading=False dry_run=False websocket=wss://api.elections.kalshi.com/trade-api/ws/v2
+04:23:52 INFO STARTUP_POSITION | contracts=0.00
+04:23:52 INFO WS_CONNECTED_AND_SUBSCRIBED
+04:23:52 INFO CREATE_OK | side=yes price_dollars=0.6000 remaining_contracts=16.00 order_id=d91e2c2b-f39f-4d42-ab06-203feb4de4ab
+04:23:52 INFO CREATE_OK | side=no price_dollars=0.3800 remaining_contracts=26.00 order_id=572fbbf4-3f8d-4b4b-b371-eab9ca448b68
+04:23:52 INFO AMEND_OK | side=no price_dollars=0.3700 total_fillable_contracts=26.00 order_id=572fbbf4-3f8d-4b4b-b371-eab9ca448b68
+04:24:07 INFO QUEUE_POSITION | side=yes order_id=d91e2c2b-f39f-4d42-ab06-203feb4de4ab ahead_contracts=2419.00
+04:24:07 INFO QUEUE_POSITION | side=no order_id=572fbbf4-3f8d-4b4b-b371-eab9ca448b68 ahead_contracts=304.00
+04:24:22 INFO QUEUE_POSITION | side=yes order_id=d91e2c2b-f39f-4d42-ab06-203feb4de4ab ahead_contracts=2419.00
+04:24:22 INFO QUEUE_POSITION | side=no order_id=572fbbf4-3f8d-4b4b-b371-eab9ca448b68 ahead_contracts=304.00
+04:24:37 INFO QUEUE_POSITION | side=yes order_id=d91e2c2b-f39f-4d42-ab06-203feb4de4ab ahead_contracts=248.00
+04:24:37 INFO QUEUE_POSITION | side=no order_id=572fbbf4-3f8d-4b4b-b371-eab9ca448b68 ahead_contracts=21.00
+04:24:39 INFO AMEND_OK | side=yes price_dollars=0.5900 total_fillable_contracts=16.00 order_id=d91e2c2b-f39f-4d42-ab06-203feb4de4ab
+04:24:47 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=d91e2c2b-f39f-4d42-ab06-203feb4de4ab
+04:24:47 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=d91e2c2b-f39f-4d42-ab06-203feb4de4ab
+04:24:47 INFO CREATE_OK | side=yes price_dollars=0.5900 remaining_contracts=16.00 order_id=c11e4522-537d-4390-a0fb-1e087c672b12
+04:24:47 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=572fbbf4-3f8d-4b4b-b371-eab9ca448b68
+04:24:47 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=572fbbf4-3f8d-4b4b-b371-eab9ca448b68
+04:24:47 INFO CREATE_OK | side=no price_dollars=0.3700 remaining_contracts=26.00 order_id=c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9
+04:24:52 INFO QUEUE_POSITION | side=yes order_id=c11e4522-537d-4390-a0fb-1e087c672b12 ahead_contracts=2418.00
+04:24:52 INFO QUEUE_POSITION | side=no order_id=c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9 ahead_contracts=6283.00
+04:24:58 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:24:58 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:24:58 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:24:58 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:25:01 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:25:01 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:25:02 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:25:02 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:25:03 INFO AMEND_OK | side=no price_dollars=0.3800 total_fillable_contracts=26.00 order_id=c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9
+04:25:03 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:25:03 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:25:05 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:25:05 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:25:05 INFO AMEND_OK | side=no price_dollars=0.3700 total_fillable_contracts=26.00 order_id=c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9
+04:25:07 INFO QUEUE_POSITION | side=yes order_id=c11e4522-537d-4390-a0fb-1e087c672b12 ahead_contracts=2397.00
+04:25:07 INFO QUEUE_POSITION | side=no order_id=c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9 ahead_contracts=989.00
+04:25:22 INFO QUEUE_POSITION | side=yes order_id=c11e4522-537d-4390-a0fb-1e087c672b12 ahead_contracts=2397.00
+04:25:22 INFO QUEUE_POSITION | side=no order_id=c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9 ahead_contracts=989.00
+04:25:23 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:25:23 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:25:23 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:25:26 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:25:26 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:25:26 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:25:28 INFO AMEND_OK | side=no price_dollars=0.3800 total_fillable_contracts=26.00 order_id=c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9
+04:25:37 INFO QUEUE_POSITION | side=yes order_id=c11e4522-537d-4390-a0fb-1e087c672b12 ahead_contracts=2397.00
+04:25:37 INFO QUEUE_POSITION | side=no order_id=c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9 ahead_contracts=2322.00
+04:25:44 INFO REQUOTE_ERROR | error=DELETE /trade-api/v2/portfolio/orders/c11e4522-537d-4390-a0fb-1e087c672b12 failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1406, in ensure_side_quote
+    await self.cancel_side_quote(side, reason="refresh_expiring_quote", reset_quote_cycle=False)
+  File "/workspaces/Kalshi_alg/V1.py", line 1383, in cancel_side_quote
+    await asyncio.to_thread(self.api_client.cancel_order, order_id=order_id)
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 848, in cancel_order
+    return self.rest_delete(
+           ^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 688, in rest_delete
+    raise RuntimeError(f"DELETE {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: DELETE /trade-api/v2/portfolio/orders/c11e4522-537d-4390-a0fb-1e087c672b12 failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:25:46 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=c9ee91c0-c8cf-4ac3-9c07-b141d29c36a9
+04:25:46 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=c11e4522-537d-4390-a0fb-1e087c672b12
+04:25:46 INFO REQUOTE_ERROR | error=DELETE /trade-api/v2/portfolio/orders/c11e4522-537d-4390-a0fb-1e087c672b12 failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1406, in ensure_side_quote
+    await self.cancel_side_quote(side, reason="refresh_expiring_quote", reset_quote_cycle=False)
+  File "/workspaces/Kalshi_alg/V1.py", line 1383, in cancel_side_quote
+    await asyncio.to_thread(self.api_client.cancel_order, order_id=order_id)
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 848, in cancel_order
+    return self.rest_delete(
+           ^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 688, in rest_delete
+    raise RuntimeError(f"DELETE {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: DELETE /trade-api/v2/portfolio/orders/c11e4522-537d-4390-a0fb-1e087c672b12 failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:25:46 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:25:49 INFO CREATE_OK | side=yes price_dollars=0.5900 remaining_contracts=16.00 order_id=6c23f4d9-a303-442b-93c3-9971509ff06e
+04:25:49 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:25:49 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:25:50 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:25:52 INFO QUEUE_POSITION | side=yes order_id=6c23f4d9-a303-442b-93c3-9971509ff06e ahead_contracts=2417.00
+04:25:52 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:26:07 INFO QUEUE_POSITION | side=yes order_id=6c23f4d9-a303-442b-93c3-9971509ff06e ahead_contracts=2417.00
+04:26:10 INFO CREATE_OK | side=no price_dollars=0.3900 remaining_contracts=25.00 order_id=1b44c8df-e510-4586-9093-224dec52a215
+04:26:10 INFO AMEND_OK | side=no price_dollars=0.3800 total_fillable_contracts=26.00 order_id=1b44c8df-e510-4586-9093-224dec52a215
+04:26:22 INFO QUEUE_POSITION | side=yes order_id=6c23f4d9-a303-442b-93c3-9971509ff06e ahead_contracts=2417.00
+04:26:23 INFO QUEUE_POSITION | side=no order_id=1b44c8df-e510-4586-9093-224dec52a215 ahead_contracts=2347.00
+04:26:38 INFO QUEUE_POSITION | side=yes order_id=6c23f4d9-a303-442b-93c3-9971509ff06e ahead_contracts=2417.00
+04:26:38 INFO QUEUE_POSITION | side=no order_id=1b44c8df-e510-4586-9093-224dec52a215 ahead_contracts=2347.00
+04:26:41 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/1b44c8df-e510-4586-9093-224dec52a215/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/1b44c8df-e510-4586-9093-224dec52a215/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:26:41 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/1b44c8df-e510-4586-9093-224dec52a215/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/1b44c8df-e510-4586-9093-224dec52a215/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:26:41 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/1b44c8df-e510-4586-9093-224dec52a215/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/1b44c8df-e510-4586-9093-224dec52a215/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:26:45 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=6c23f4d9-a303-442b-93c3-9971509ff06e
+04:26:45 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=6c23f4d9-a303-442b-93c3-9971509ff06e
+04:26:45 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:26:45 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:26:45 INFO CREATE_OK | side=yes price_dollars=0.6000 remaining_contracts=16.00 order_id=4e7e30ce-a671-4d2a-9d2f-7547875d0282
+04:26:45 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/1b44c8df-e510-4586-9093-224dec52a215/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/1b44c8df-e510-4586-9093-224dec52a215/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:26:45 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/4e7e30ce-a671-4d2a-9d2f-7547875d0282/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/4e7e30ce-a671-4d2a-9d2f-7547875d0282/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:26:45 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/4e7e30ce-a671-4d2a-9d2f-7547875d0282/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/4e7e30ce-a671-4d2a-9d2f-7547875d0282/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:26:45 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/4e7e30ce-a671-4d2a-9d2f-7547875d0282/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/4e7e30ce-a671-4d2a-9d2f-7547875d0282/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:26:45 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/4e7e30ce-a671-4d2a-9d2f-7547875d0282/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/4e7e30ce-a671-4d2a-9d2f-7547875d0282/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:26:46 INFO AMEND_OK | side=yes price_dollars=0.5900 total_fillable_contracts=16.00 order_id=4e7e30ce-a671-4d2a-9d2f-7547875d0282
+04:26:46 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/1b44c8df-e510-4586-9093-224dec52a215/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/1b44c8df-e510-4586-9093-224dec52a215/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:26:46 INFO AMEND_OK | side=no price_dollars=0.3700 total_fillable_contracts=26.00 order_id=1b44c8df-e510-4586-9093-224dec52a215
+04:26:48 INFO AMEND_OK | side=no price_dollars=0.3800 total_fillable_contracts=26.00 order_id=1b44c8df-e510-4586-9093-224dec52a215
+04:26:53 INFO QUEUE_POSITION | side=yes order_id=4e7e30ce-a671-4d2a-9d2f-7547875d0282 ahead_contracts=2417.00
+04:26:53 INFO QUEUE_POSITION | side=no order_id=1b44c8df-e510-4586-9093-224dec52a215 ahead_contracts=4025.00
+04:26:58 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=1b44c8df-e510-4586-9093-224dec52a215
+04:26:58 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+04:27:04 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:27:04 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:27:08 INFO QUEUE_POSITION | side=yes order_id=4e7e30ce-a671-4d2a-9d2f-7547875d0282 ahead_contracts=2417.00
+04:27:13 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:27:13 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:27:13 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:27:13 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:27:14 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:27:19 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:27:19 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:27:20 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:27:20 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:27:21 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:27:23 INFO QUEUE_POSITION | side=yes order_id=4e7e30ce-a671-4d2a-9d2f-7547875d0282 ahead_contracts=296.00
+04:27:27 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=4e7e30ce-a671-4d2a-9d2f-7547875d0282
+04:27:27 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+04:27:31 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+04:27:31 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:27:36 INFO CREATE_OK | side=yes price_dollars=0.5900 remaining_contracts=16.00 order_id=e5f91dbf-2dcd-4dea-9bc8-1fd75d76f239
+04:27:36 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:27:36 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:27:36 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:27:38 INFO CREATE_OK | side=no price_dollars=0.3900 remaining_contracts=25.00 order_id=894c7b32-1b79-41d5-bce0-a5e34c54b12d
+04:27:38 INFO QUEUE_POSITION | side=yes order_id=e5f91dbf-2dcd-4dea-9bc8-1fd75d76f239 ahead_contracts=604.00
+04:27:38 INFO QUEUE_POSITION | side=no order_id=894c7b32-1b79-41d5-bce0-a5e34c54b12d ahead_contracts=2588.00
+04:27:38 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/894c7b32-1b79-41d5-bce0-a5e34c54b12d/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/894c7b32-1b79-41d5-bce0-a5e34c54b12d/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:27:41 INFO AMEND_OK | side=no price_dollars=0.3800 total_fillable_contracts=26.00 order_id=894c7b32-1b79-41d5-bce0-a5e34c54b12d
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1870, in <module>
+    main()
+  File "/workspaces/Kalshi_alg/V1.py", line 1866, in main
+    asyncio.run(bot.run())
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/base_events.py", line 671, in run_until_complete
+    self.run_forever()
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/base_events.py", line 638, in run_forever
+    self._run_once()
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/base_events.py", line 1933, in _run_once
+    event_list = self._selector.select(timeout)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/selectors.py", line 468, in select
+    fd_event_list = self._selector.poll(timeout, max_ev)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/runners.py", line 157, in _on_sigint
+    raise KeyboardInterrupt()
+KeyboardInterrupt

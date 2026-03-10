@@ -1,0 +1,1687 @@
+
+=== START 2026-03-08 03:11:43 ===
+CMD: /home/codespace/.python/current/bin/python3 /workspaces/Kalshi_alg/V1.py --ticker KXNCAAMBTOTAL-26MAR07SACIDHO-158 --yes-budget-cents 1000 --no-budget-cents 100
+03:11:44 INFO START | environment=PROD ticker=KXNCAAMBTOTAL-26MAR07SACIDHO-158 yes_budget_cents=1000 no_budget_cents=100 price_structure=linear_cent fractional_trading=False dry_run=False websocket=wss://api.elections.kalshi.com/trade-api/ws/v2
+03:11:44 INFO STARTUP_POSITION | contracts=0.00
+03:11:44 INFO WS_CONNECTED_AND_SUBSCRIBED
+03:11:44 INFO CREATE_OK | side=yes price_dollars=0.3800 remaining_contracts=26.00 order_id=d0c182e5-2a06-43f5-80fa-83ebe29de669
+03:11:44 INFO CREATE_OK | side=no price_dollars=0.5500 remaining_contracts=1.00 order_id=ca974f14-b432-4bf8-93e4-d7b46bca1d01
+03:11:44 INFO AMEND_OK | side=yes price_dollars=0.3700 total_fillable_contracts=26.00 order_id=d0c182e5-2a06-43f5-80fa-83ebe29de669
+03:11:44 INFO AMEND_OK | side=no price_dollars=0.5400 total_fillable_contracts=1.00 order_id=ca974f14-b432-4bf8-93e4-d7b46bca1d01
+03:11:51 INFO AMEND_OK | side=no price_dollars=0.5500 total_fillable_contracts=1.00 order_id=ca974f14-b432-4bf8-93e4-d7b46bca1d01
+03:11:59 INFO QUEUE_POSITION | side=yes order_id=d0c182e5-2a06-43f5-80fa-83ebe29de669 ahead_contracts=50.00
+03:11:59 INFO QUEUE_POSITION | side=no order_id=ca974f14-b432-4bf8-93e4-d7b46bca1d01 ahead_contracts=2231.00
+03:12:00 INFO AMEND_OK | side=yes price_dollars=0.4100 total_fillable_contracts=24.00 order_id=d0c182e5-2a06-43f5-80fa-83ebe29de669
+03:12:05 INFO AMEND_OK | side=yes price_dollars=0.4200 total_fillable_contracts=23.00 order_id=d0c182e5-2a06-43f5-80fa-83ebe29de669
+03:12:05 INFO AMEND_OK | side=yes price_dollars=0.4100 total_fillable_contracts=24.00 order_id=d0c182e5-2a06-43f5-80fa-83ebe29de669
+03:12:07 INFO AMEND_OK | side=no price_dollars=0.5600 total_fillable_contracts=1.00 order_id=ca974f14-b432-4bf8-93e4-d7b46bca1d01
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1870, in <module>
+    main()
+  File "/workspaces/Kalshi_alg/V1.py", line 1866, in main
+    asyncio.run(bot.run())
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/base_events.py", line 671, in run_until_complete
+    self.run_forever()
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/base_events.py", line 638, in run_forever
+    self._run_once()
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/base_events.py", line 1933, in _run_once
+    event_list = self._selector.select(timeout)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/selectors.py", line 468, in select
+    fd_event_list = self._selector.poll(timeout, max_ev)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/runners.py", line 157, in _on_sigint
+    raise KeyboardInterrupt()
+KeyboardInterrupt
+
+=== START 2026-03-08 03:14:12 ===
+CMD: /home/codespace/.python/current/bin/python3 /workspaces/Kalshi_alg/V1.py --ticker KXNCAAMBTOTAL-26MAR07SACIDHO-158 --yes-budget-cents 1000 --no-budget-cents 1000
+03:14:13 INFO START | environment=PROD ticker=KXNCAAMBTOTAL-26MAR07SACIDHO-158 yes_budget_cents=1000 no_budget_cents=1000 price_structure=linear_cent fractional_trading=False dry_run=False websocket=wss://api.elections.kalshi.com/trade-api/ws/v2
+03:14:13 INFO STARTUP_POSITION | contracts=0.00
+03:14:13 INFO WS_CONNECTED_AND_SUBSCRIBED
+03:14:13 INFO CREATE_OK | side=yes price_dollars=0.2500 remaining_contracts=39.00 order_id=64736685-e14e-4f8d-a4e6-154bb8d87941
+03:14:13 INFO CREATE_OK | side=no price_dollars=0.6700 remaining_contracts=14.00 order_id=0f414c3d-8be6-4beb-86bb-367b881e38ae
+03:14:13 INFO AMEND_OK | side=yes price_dollars=0.2400 total_fillable_contracts=41.00 order_id=64736685-e14e-4f8d-a4e6-154bb8d87941
+03:14:13 INFO AMEND_OK | side=no price_dollars=0.6600 total_fillable_contracts=15.00 order_id=0f414c3d-8be6-4beb-86bb-367b881e38ae
+03:14:28 INFO QUEUE_POSITION | side=yes order_id=64736685-e14e-4f8d-a4e6-154bb8d87941 ahead_contracts=50.00
+03:14:28 INFO QUEUE_POSITION | side=no order_id=0f414c3d-8be6-4beb-86bb-367b881e38ae ahead_contracts=150.00
+03:14:43 INFO QUEUE_POSITION | side=yes order_id=64736685-e14e-4f8d-a4e6-154bb8d87941 ahead_contracts=50.00
+03:14:43 INFO QUEUE_POSITION | side=no order_id=0f414c3d-8be6-4beb-86bb-367b881e38ae ahead_contracts=150.00
+03:14:45 INFO AMEND_OK | side=no price_dollars=0.6800 total_fillable_contracts=14.00 order_id=0f414c3d-8be6-4beb-86bb-367b881e38ae
+03:14:58 INFO QUEUE_POSITION | side=yes order_id=64736685-e14e-4f8d-a4e6-154bb8d87941 ahead_contracts=0.00
+03:14:58 INFO QUEUE_POSITION | side=no order_id=0f414c3d-8be6-4beb-86bb-367b881e38ae ahead_contracts=0.00
+03:15:00 INFO AMEND_OK | side=no price_dollars=0.7000 total_fillable_contracts=14.00 order_id=0f414c3d-8be6-4beb-86bb-367b881e38ae
+03:15:02 INFO AMEND_OK | side=no price_dollars=0.6800 total_fillable_contracts=14.00 order_id=0f414c3d-8be6-4beb-86bb-367b881e38ae
+03:15:02 INFO AMEND_OK | side=no price_dollars=0.7000 total_fillable_contracts=14.00 order_id=0f414c3d-8be6-4beb-86bb-367b881e38ae
+03:15:07 INFO AMEND_OK | side=no price_dollars=0.7100 total_fillable_contracts=14.00 order_id=0f414c3d-8be6-4beb-86bb-367b881e38ae
+03:15:08 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=64736685-e14e-4f8d-a4e6-154bb8d87941
+03:15:08 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=64736685-e14e-4f8d-a4e6-154bb8d87941
+03:15:08 INFO CREATE_OK | side=yes price_dollars=0.2400 remaining_contracts=41.00 order_id=11ebdee7-d668-4779-9baf-6280ec6159fa
+03:15:08 INFO REQUOTE_ERROR | error=DELETE /trade-api/v2/portfolio/orders/0f414c3d-8be6-4beb-86bb-367b881e38ae failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1406, in ensure_side_quote
+    await self.cancel_side_quote(side, reason="refresh_expiring_quote", reset_quote_cycle=False)
+  File "/workspaces/Kalshi_alg/V1.py", line 1383, in cancel_side_quote
+    await asyncio.to_thread(self.api_client.cancel_order, order_id=order_id)
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 848, in cancel_order
+    return self.rest_delete(
+           ^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 688, in rest_delete
+    raise RuntimeError(f"DELETE {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: DELETE /trade-api/v2/portfolio/orders/0f414c3d-8be6-4beb-86bb-367b881e38ae failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:15:08 INFO REQUOTE_ERROR | error=DELETE /trade-api/v2/portfolio/orders/0f414c3d-8be6-4beb-86bb-367b881e38ae failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1406, in ensure_side_quote
+    await self.cancel_side_quote(side, reason="refresh_expiring_quote", reset_quote_cycle=False)
+  File "/workspaces/Kalshi_alg/V1.py", line 1383, in cancel_side_quote
+    await asyncio.to_thread(self.api_client.cancel_order, order_id=order_id)
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 848, in cancel_order
+    return self.rest_delete(
+           ^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 688, in rest_delete
+    raise RuntimeError(f"DELETE {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: DELETE /trade-api/v2/portfolio/orders/0f414c3d-8be6-4beb-86bb-367b881e38ae failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:15:09 INFO REQUOTE_ERROR | error=DELETE /trade-api/v2/portfolio/orders/0f414c3d-8be6-4beb-86bb-367b881e38ae failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1406, in ensure_side_quote
+    await self.cancel_side_quote(side, reason="refresh_expiring_quote", reset_quote_cycle=False)
+  File "/workspaces/Kalshi_alg/V1.py", line 1383, in cancel_side_quote
+    await asyncio.to_thread(self.api_client.cancel_order, order_id=order_id)
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 848, in cancel_order
+    return self.rest_delete(
+           ^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 688, in rest_delete
+    raise RuntimeError(f"DELETE {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: DELETE /trade-api/v2/portfolio/orders/0f414c3d-8be6-4beb-86bb-367b881e38ae failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:15:09 INFO REQUOTE_ERROR | error=DELETE /trade-api/v2/portfolio/orders/11ebdee7-d668-4779-9baf-6280ec6159fa failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1397, in ensure_side_quote
+    await self.cancel_side_quote(side, reason="quote_disabled", reset_quote_cycle=True)
+  File "/workspaces/Kalshi_alg/V1.py", line 1383, in cancel_side_quote
+    await asyncio.to_thread(self.api_client.cancel_order, order_id=order_id)
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 848, in cancel_order
+    return self.rest_delete(
+           ^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 688, in rest_delete
+    raise RuntimeError(f"DELETE {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: DELETE /trade-api/v2/portfolio/orders/11ebdee7-d668-4779-9baf-6280ec6159fa failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:15:11 INFO REQUOTE_ERROR | error=DELETE /trade-api/v2/portfolio/orders/11ebdee7-d668-4779-9baf-6280ec6159fa failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1674, in requote_worker
+    await self.ensure_side_quote("yes", desired_yes_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1397, in ensure_side_quote
+    await self.cancel_side_quote(side, reason="quote_disabled", reset_quote_cycle=True)
+  File "/workspaces/Kalshi_alg/V1.py", line 1383, in cancel_side_quote
+    await asyncio.to_thread(self.api_client.cancel_order, order_id=order_id)
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 848, in cancel_order
+    return self.rest_delete(
+           ^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 688, in rest_delete
+    raise RuntimeError(f"DELETE {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: DELETE /trade-api/v2/portfolio/orders/11ebdee7-d668-4779-9baf-6280ec6159fa failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:15:11 INFO CANCEL_REQUESTED | side=yes reason=quote_disabled order_id=11ebdee7-d668-4779-9baf-6280ec6159fa
+03:15:11 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=11ebdee7-d668-4779-9baf-6280ec6159fa
+03:15:11 INFO REQUOTE_ERROR | error=DELETE /trade-api/v2/portfolio/orders/0f414c3d-8be6-4beb-86bb-367b881e38ae failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1406, in ensure_side_quote
+    await self.cancel_side_quote(side, reason="refresh_expiring_quote", reset_quote_cycle=False)
+  File "/workspaces/Kalshi_alg/V1.py", line 1383, in cancel_side_quote
+    await asyncio.to_thread(self.api_client.cancel_order, order_id=order_id)
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 848, in cancel_order
+    return self.rest_delete(
+           ^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 688, in rest_delete
+    raise RuntimeError(f"DELETE {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: DELETE /trade-api/v2/portfolio/orders/0f414c3d-8be6-4beb-86bb-367b881e38ae failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:15:11 INFO REQUOTE_ERROR | error=DELETE /trade-api/v2/portfolio/orders/0f414c3d-8be6-4beb-86bb-367b881e38ae failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1406, in ensure_side_quote
+    await self.cancel_side_quote(side, reason="refresh_expiring_quote", reset_quote_cycle=False)
+  File "/workspaces/Kalshi_alg/V1.py", line 1383, in cancel_side_quote
+    await asyncio.to_thread(self.api_client.cancel_order, order_id=order_id)
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 848, in cancel_order
+    return self.rest_delete(
+           ^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 688, in rest_delete
+    raise RuntimeError(f"DELETE {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: DELETE /trade-api/v2/portfolio/orders/0f414c3d-8be6-4beb-86bb-367b881e38ae failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:15:12 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=0f414c3d-8be6-4beb-86bb-367b881e38ae
+03:15:12 INFO CREATE_OK | side=no price_dollars=0.7200 remaining_contracts=13.00 order_id=964121a7-5edf-4390-86f5-d325e2efe0c9
+03:15:13 INFO AMEND_OK | side=no price_dollars=0.7100 total_fillable_contracts=14.00 order_id=964121a7-5edf-4390-86f5-d325e2efe0c9
+03:15:13 INFO QUEUE_POSITION | side=no order_id=964121a7-5edf-4390-86f5-d325e2efe0c9 ahead_contracts=50.00
+03:15:28 INFO QUEUE_POSITION | side=no order_id=964121a7-5edf-4390-86f5-d325e2efe0c9 ahead_contracts=50.00
+03:15:32 INFO AMEND_OK | side=no price_dollars=0.7200 total_fillable_contracts=13.00 order_id=964121a7-5edf-4390-86f5-d325e2efe0c9
+03:15:43 INFO QUEUE_POSITION | side=no order_id=964121a7-5edf-4390-86f5-d325e2efe0c9 ahead_contracts=50.00
+03:15:44 INFO AMEND_OK | side=no price_dollars=0.7400 total_fillable_contracts=13.00 order_id=964121a7-5edf-4390-86f5-d325e2efe0c9
+03:15:58 INFO QUEUE_POSITION | side=no order_id=964121a7-5edf-4390-86f5-d325e2efe0c9 ahead_contracts=0.00
+03:15:59 INFO AMEND_OK | side=no price_dollars=0.7600 total_fillable_contracts=13.00 order_id=964121a7-5edf-4390-86f5-d325e2efe0c9
+03:16:10 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=964121a7-5edf-4390-86f5-d325e2efe0c9
+03:16:10 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=964121a7-5edf-4390-86f5-d325e2efe0c9
+03:16:10 INFO CREATE_OK | side=no price_dollars=0.7600 remaining_contracts=13.00 order_id=196b060c-eff7-4b57-938a-e9719f0eae2f
+03:16:10 INFO AMEND_OK | side=no price_dollars=0.7700 total_fillable_contracts=12.00 order_id=196b060c-eff7-4b57-938a-e9719f0eae2f
+03:16:13 INFO QUEUE_POSITION | side=no order_id=196b060c-eff7-4b57-938a-e9719f0eae2f ahead_contracts=50.00
+03:16:25 INFO AMEND_OK | side=no price_dollars=0.7900 total_fillable_contracts=12.00 order_id=196b060c-eff7-4b57-938a-e9719f0eae2f
+03:16:28 INFO QUEUE_POSITION | side=no order_id=196b060c-eff7-4b57-938a-e9719f0eae2f ahead_contracts=0.00
+03:16:34 INFO AMEND_OK | side=no price_dollars=0.8000 total_fillable_contracts=12.00 order_id=196b060c-eff7-4b57-938a-e9719f0eae2f
+03:16:43 INFO QUEUE_POSITION | side=no order_id=196b060c-eff7-4b57-938a-e9719f0eae2f ahead_contracts=50.00
+03:16:50 INFO AMEND_OK | side=no price_dollars=0.8100 total_fillable_contracts=12.00 order_id=196b060c-eff7-4b57-938a-e9719f0eae2f
+03:16:58 INFO AMEND_OK | side=no price_dollars=0.8200 total_fillable_contracts=12.00 order_id=196b060c-eff7-4b57-938a-e9719f0eae2f
+03:16:58 INFO QUEUE_POSITION | side=no order_id=196b060c-eff7-4b57-938a-e9719f0eae2f ahead_contracts=50.00
+03:17:05 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=196b060c-eff7-4b57-938a-e9719f0eae2f
+03:17:05 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=196b060c-eff7-4b57-938a-e9719f0eae2f
+03:17:05 INFO CREATE_OK | side=no price_dollars=0.8200 remaining_contracts=12.00 order_id=7839f8c9-d55f-47d8-803b-b808b1d43727
+03:17:08 INFO AMEND_OK | side=no price_dollars=0.8300 total_fillable_contracts=11.00 order_id=7839f8c9-d55f-47d8-803b-b808b1d43727
+03:17:10 INFO AMEND_OK | side=no price_dollars=0.8400 total_fillable_contracts=11.00 order_id=7839f8c9-d55f-47d8-803b-b808b1d43727
+03:17:13 INFO QUEUE_POSITION | side=no order_id=7839f8c9-d55f-47d8-803b-b808b1d43727 ahead_contracts=1150.00
+03:17:17 INFO AMEND_OK | side=no price_dollars=0.8500 total_fillable_contracts=11.00 order_id=7839f8c9-d55f-47d8-803b-b808b1d43727
+03:17:28 INFO QUEUE_POSITION | side=no order_id=7839f8c9-d55f-47d8-803b-b808b1d43727 ahead_contracts=0.00
+03:17:43 INFO QUEUE_POSITION | side=no order_id=7839f8c9-d55f-47d8-803b-b808b1d43727 ahead_contracts=0.00
+03:17:59 INFO QUEUE_POSITION | side=no order_id=7839f8c9-d55f-47d8-803b-b808b1d43727 ahead_contracts=0.00
+03:18:04 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=7839f8c9-d55f-47d8-803b-b808b1d43727
+03:18:04 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=7839f8c9-d55f-47d8-803b-b808b1d43727
+03:18:04 INFO CREATE_OK | side=no price_dollars=0.8500 remaining_contracts=11.00 order_id=db931cbb-2a06-403a-8d38-f159e75ab3a9
+03:18:04 INFO AMEND_OK | side=no price_dollars=0.8300 total_fillable_contracts=11.00 order_id=db931cbb-2a06-403a-8d38-f159e75ab3a9
+03:18:14 INFO QUEUE_POSITION | side=no order_id=db931cbb-2a06-403a-8d38-f159e75ab3a9 ahead_contracts=1150.00
+03:18:29 INFO QUEUE_POSITION | side=no order_id=db931cbb-2a06-403a-8d38-f159e75ab3a9 ahead_contracts=1150.00
+03:18:44 INFO QUEUE_POSITION | side=no order_id=db931cbb-2a06-403a-8d38-f159e75ab3a9 ahead_contracts=0.00
+03:18:59 INFO QUEUE_POSITION | side=no order_id=db931cbb-2a06-403a-8d38-f159e75ab3a9 ahead_contracts=0.00
+03:19:03 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=db931cbb-2a06-403a-8d38-f159e75ab3a9
+03:19:03 INFO CANCEL_SKIPPED_ORDER_MISSING | side=no reason=refresh_expiring_quote order_id=db931cbb-2a06-403a-8d38-f159e75ab3a9
+03:19:04 INFO CREATE_OK | side=no price_dollars=0.8300 remaining_contracts=11.00 order_id=3a5c0d0c-7092-4ba7-90b3-1da779d02cdd
+03:19:14 INFO QUEUE_POSITION | side=no order_id=3a5c0d0c-7092-4ba7-90b3-1da779d02cdd ahead_contracts=100.00
+03:19:29 INFO QUEUE_POSITION | side=no order_id=3a5c0d0c-7092-4ba7-90b3-1da779d02cdd ahead_contracts=100.00
+03:19:36 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=3a5c0d0c-7092-4ba7-90b3-1da779d02cdd
+03:19:37 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:19:37 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:19:37 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:19:38 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+03:19:39 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:19:47 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:19:47 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:19:48 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+03:19:48 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:19:48 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:19:49 INFO CREATE_OK | side=no price_dollars=0.7400 remaining_contracts=13.00 order_id=d6a5b1db-ff87-4fe7-bf52-1593445cb4c1
+03:19:50 INFO AMEND_OK | side=no price_dollars=0.7300 total_fillable_contracts=13.00 order_id=d6a5b1db-ff87-4fe7-bf52-1593445cb4c1
+03:19:58 INFO AMEND_OK | side=no price_dollars=0.8400 total_fillable_contracts=11.00 order_id=d6a5b1db-ff87-4fe7-bf52-1593445cb4c1
+03:19:59 INFO QUEUE_POSITION | side=no order_id=d6a5b1db-ff87-4fe7-bf52-1593445cb4c1 ahead_contracts=572.00
+03:20:03 INFO AMEND_OK | side=no price_dollars=0.8500 total_fillable_contracts=11.00 order_id=d6a5b1db-ff87-4fe7-bf52-1593445cb4c1
+03:20:03 INFO AMEND_OK | side=no price_dollars=0.8400 total_fillable_contracts=11.00 order_id=d6a5b1db-ff87-4fe7-bf52-1593445cb4c1
+03:20:14 INFO QUEUE_POSITION | side=no order_id=d6a5b1db-ff87-4fe7-bf52-1593445cb4c1 ahead_contracts=572.00
+03:20:22 INFO AMEND_OK | side=no price_dollars=0.8500 total_fillable_contracts=11.00 order_id=d6a5b1db-ff87-4fe7-bf52-1593445cb4c1
+03:20:29 INFO QUEUE_POSITION | side=no order_id=d6a5b1db-ff87-4fe7-bf52-1593445cb4c1 ahead_contracts=1013.00
+03:20:31 INFO AMEND_OK | side=no price_dollars=0.8600 total_fillable_contracts=11.00 order_id=d6a5b1db-ff87-4fe7-bf52-1593445cb4c1
+03:20:44 INFO QUEUE_POSITION | side=no order_id=d6a5b1db-ff87-4fe7-bf52-1593445cb4c1 ahead_contracts=1610.00
+03:20:44 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=d6a5b1db-ff87-4fe7-bf52-1593445cb4c1
+03:20:44 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=d6a5b1db-ff87-4fe7-bf52-1593445cb4c1
+03:20:44 INFO CREATE_OK | side=no price_dollars=0.8600 remaining_contracts=11.00 order_id=57a82c4d-4d68-4ddb-90b3-39ebe85aad24
+03:20:59 INFO QUEUE_POSITION | side=no order_id=57a82c4d-4d68-4ddb-90b3-39ebe85aad24 ahead_contracts=0.00
+03:21:08 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=57a82c4d-4d68-4ddb-90b3-39ebe85aad24
+03:21:08 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:21:08 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+03:21:08 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:21:08 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:21:09 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:21:12 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:21:13 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:21:13 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:21:18 INFO CREATE_OK | side=no price_dollars=0.7200 remaining_contracts=13.00 order_id=54f528bc-e50a-4c54-a898-1405f1bd2250
+03:21:19 INFO AMEND_OK | side=no price_dollars=0.8200 total_fillable_contracts=12.00 order_id=54f528bc-e50a-4c54-a898-1405f1bd2250
+03:21:23 INFO AMEND_OK | side=no price_dollars=0.8300 total_fillable_contracts=11.00 order_id=54f528bc-e50a-4c54-a898-1405f1bd2250
+03:21:24 INFO AMEND_OK | side=no price_dollars=0.8200 total_fillable_contracts=12.00 order_id=54f528bc-e50a-4c54-a898-1405f1bd2250
+03:21:29 INFO QUEUE_POSITION | side=no order_id=54f528bc-e50a-4c54-a898-1405f1bd2250 ahead_contracts=0.00
+03:21:44 INFO QUEUE_POSITION | side=no order_id=54f528bc-e50a-4c54-a898-1405f1bd2250 ahead_contracts=0.00
+03:21:59 INFO QUEUE_POSITION | side=no order_id=54f528bc-e50a-4c54-a898-1405f1bd2250 ahead_contracts=0.00
+03:22:14 INFO QUEUE_POSITION | side=no order_id=54f528bc-e50a-4c54-a898-1405f1bd2250 ahead_contracts=0.00
+03:22:16 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=54f528bc-e50a-4c54-a898-1405f1bd2250
+03:22:16 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=54f528bc-e50a-4c54-a898-1405f1bd2250
+03:22:16 INFO CREATE_OK | side=no price_dollars=0.8200 remaining_contracts=12.00 order_id=f6e8f28d-2741-4a44-9891-208e82a44129
+03:22:17 INFO AMEND_OK | side=no price_dollars=0.8100 total_fillable_contracts=12.00 order_id=f6e8f28d-2741-4a44-9891-208e82a44129
+03:22:29 INFO QUEUE_POSITION | side=no order_id=f6e8f28d-2741-4a44-9891-208e82a44129 ahead_contracts=50.00
+03:22:31 INFO AMEND_OK | side=no price_dollars=0.8200 total_fillable_contracts=12.00 order_id=f6e8f28d-2741-4a44-9891-208e82a44129
+03:22:32 INFO AMEND_OK | side=no price_dollars=0.8300 total_fillable_contracts=11.00 order_id=f6e8f28d-2741-4a44-9891-208e82a44129
+03:22:32 INFO AMEND_OK | side=no price_dollars=0.8400 total_fillable_contracts=11.00 order_id=f6e8f28d-2741-4a44-9891-208e82a44129
+03:22:44 INFO QUEUE_POSITION | side=no order_id=f6e8f28d-2741-4a44-9891-208e82a44129 ahead_contracts=13.00
+03:22:59 INFO QUEUE_POSITION | side=no order_id=f6e8f28d-2741-4a44-9891-208e82a44129 ahead_contracts=13.00
+03:23:14 INFO QUEUE_POSITION | side=no order_id=f6e8f28d-2741-4a44-9891-208e82a44129 ahead_contracts=13.00
+03:23:15 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=f6e8f28d-2741-4a44-9891-208e82a44129
+03:23:15 INFO CREATE_OK | side=no price_dollars=0.8500 remaining_contracts=11.00 order_id=50e46234-485a-4503-9725-102a095228bb
+03:23:16 INFO AMEND_OK | side=no price_dollars=0.8400 total_fillable_contracts=11.00 order_id=50e46234-485a-4503-9725-102a095228bb
+03:23:24 INFO AMEND_OK | side=no price_dollars=0.8600 total_fillable_contracts=11.00 order_id=50e46234-485a-4503-9725-102a095228bb
+03:23:29 INFO QUEUE_POSITION | side=no order_id=50e46234-485a-4503-9725-102a095228bb ahead_contracts=13.00
+03:23:44 INFO QUEUE_POSITION | side=no order_id=50e46234-485a-4503-9725-102a095228bb ahead_contracts=13.00
+03:23:59 INFO QUEUE_POSITION | side=no order_id=50e46234-485a-4503-9725-102a095228bb ahead_contracts=13.00
+03:24:10 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=50e46234-485a-4503-9725-102a095228bb
+03:24:10 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=50e46234-485a-4503-9725-102a095228bb
+03:24:10 INFO CREATE_OK | side=no price_dollars=0.8600 remaining_contracts=11.00 order_id=ca6aa43e-96e4-4b32-878e-12f4abf76405
+03:24:14 INFO QUEUE_POSITION | side=no order_id=ca6aa43e-96e4-4b32-878e-12f4abf76405 ahead_contracts=1163.00
+03:24:29 INFO QUEUE_POSITION | side=no order_id=ca6aa43e-96e4-4b32-878e-12f4abf76405 ahead_contracts=13.00
+03:24:31 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=ca6aa43e-96e4-4b32-878e-12f4abf76405
+03:24:31 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+03:24:41 INFO CREATE_OK | side=no price_dollars=0.8700 remaining_contracts=11.00 order_id=2c5d1108-d76b-4db4-bf4f-d194a8947125
+03:24:42 INFO AMEND_OK | side=no price_dollars=0.8600 total_fillable_contracts=11.00 order_id=2c5d1108-d76b-4db4-bf4f-d194a8947125
+03:24:44 INFO QUEUE_POSITION | side=no order_id=2c5d1108-d76b-4db4-bf4f-d194a8947125 ahead_contracts=63.00
+03:24:53 INFO AMEND_OK | side=no price_dollars=0.8700 total_fillable_contracts=11.00 order_id=2c5d1108-d76b-4db4-bf4f-d194a8947125
+03:24:53 INFO AMEND_OK | side=no price_dollars=0.8800 total_fillable_contracts=11.00 order_id=2c5d1108-d76b-4db4-bf4f-d194a8947125
+03:24:59 INFO QUEUE_POSITION | side=no order_id=2c5d1108-d76b-4db4-bf4f-d194a8947125 ahead_contracts=150.00
+03:25:14 INFO QUEUE_POSITION | side=no order_id=2c5d1108-d76b-4db4-bf4f-d194a8947125 ahead_contracts=0.00
+03:25:16 INFO AMEND_OK | side=no price_dollars=0.8900 total_fillable_contracts=11.00 order_id=2c5d1108-d76b-4db4-bf4f-d194a8947125
+03:25:16 INFO AMEND_OK | side=no price_dollars=0.9000 total_fillable_contracts=11.00 order_id=2c5d1108-d76b-4db4-bf4f-d194a8947125
+03:25:21 INFO AMEND_OK | side=no price_dollars=0.9100 total_fillable_contracts=10.00 order_id=2c5d1108-d76b-4db4-bf4f-d194a8947125
+03:25:21 INFO AMEND_OK | side=no price_dollars=0.9000 total_fillable_contracts=11.00 order_id=2c5d1108-d76b-4db4-bf4f-d194a8947125
+03:25:30 INFO QUEUE_POSITION | side=no order_id=2c5d1108-d76b-4db4-bf4f-d194a8947125 ahead_contracts=571.00
+03:25:36 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=2c5d1108-d76b-4db4-bf4f-d194a8947125
+03:25:36 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=2c5d1108-d76b-4db4-bf4f-d194a8947125
+03:25:36 INFO CREATE_OK | side=no price_dollars=0.9000 remaining_contracts=11.00 order_id=a7497ca2-241f-4ae4-bab5-74f478a28235
+03:25:45 INFO QUEUE_POSITION | side=no order_id=a7497ca2-241f-4ae4-bab5-74f478a28235 ahead_contracts=571.00
+03:26:00 INFO QUEUE_POSITION | side=no order_id=a7497ca2-241f-4ae4-bab5-74f478a28235 ahead_contracts=571.00
+03:26:15 INFO QUEUE_POSITION | side=no order_id=a7497ca2-241f-4ae4-bab5-74f478a28235 ahead_contracts=571.00
+03:26:30 INFO QUEUE_POSITION | side=no order_id=a7497ca2-241f-4ae4-bab5-74f478a28235 ahead_contracts=571.00
+03:26:35 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=a7497ca2-241f-4ae4-bab5-74f478a28235
+03:26:35 INFO CREATE_OK | side=no price_dollars=0.9100 remaining_contracts=10.00 order_id=f3c93592-ba16-4380-9e1d-736413582c95
+03:26:36 INFO AMEND_OK | side=no price_dollars=0.9000 total_fillable_contracts=11.00 order_id=f3c93592-ba16-4380-9e1d-736413582c95
+03:26:45 INFO QUEUE_POSITION | side=no order_id=f3c93592-ba16-4380-9e1d-736413582c95 ahead_contracts=571.00
+03:27:00 INFO QUEUE_POSITION | side=no order_id=f3c93592-ba16-4380-9e1d-736413582c95 ahead_contracts=571.00
+03:27:15 INFO QUEUE_POSITION | side=no order_id=f3c93592-ba16-4380-9e1d-736413582c95 ahead_contracts=571.00
+03:27:30 INFO QUEUE_POSITION | side=no order_id=f3c93592-ba16-4380-9e1d-736413582c95 ahead_contracts=571.00
+03:27:30 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=f3c93592-ba16-4380-9e1d-736413582c95
+03:27:30 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=f3c93592-ba16-4380-9e1d-736413582c95
+03:27:30 INFO CREATE_OK | side=no price_dollars=0.9000 remaining_contracts=11.00 order_id=76d4898e-8253-4869-8113-0330885c0c1f
+03:27:31 INFO AMEND_OK | side=no price_dollars=0.9100 total_fillable_contracts=10.00 order_id=76d4898e-8253-4869-8113-0330885c0c1f
+03:27:31 INFO AMEND_OK | side=no price_dollars=0.9200 total_fillable_contracts=10.00 order_id=76d4898e-8253-4869-8113-0330885c0c1f
+03:27:45 INFO QUEUE_POSITION | side=no order_id=76d4898e-8253-4869-8113-0330885c0c1f ahead_contracts=1222.00
+03:28:00 INFO QUEUE_POSITION | side=no order_id=76d4898e-8253-4869-8113-0330885c0c1f ahead_contracts=1222.00
+03:28:15 INFO QUEUE_POSITION | side=no order_id=76d4898e-8253-4869-8113-0330885c0c1f ahead_contracts=1222.00
+03:28:27 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=76d4898e-8253-4869-8113-0330885c0c1f
+03:28:27 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=76d4898e-8253-4869-8113-0330885c0c1f
+03:28:27 INFO CREATE_OK | side=no price_dollars=0.9200 remaining_contracts=10.00 order_id=c4b579f9-abb1-4987-9db0-b52933d315ef
+03:28:30 INFO QUEUE_POSITION | side=no order_id=c4b579f9-abb1-4987-9db0-b52933d315ef ahead_contracts=1222.00
+03:28:45 INFO QUEUE_POSITION | side=no order_id=c4b579f9-abb1-4987-9db0-b52933d315ef ahead_contracts=1222.00
+03:28:53 INFO AMEND_OK | side=no price_dollars=0.9300 total_fillable_contracts=10.00 order_id=c4b579f9-abb1-4987-9db0-b52933d315ef
+03:28:53 INFO AMEND_OK | side=no price_dollars=0.9400 total_fillable_contracts=10.00 order_id=c4b579f9-abb1-4987-9db0-b52933d315ef
+03:29:00 INFO QUEUE_POSITION | side=no order_id=c4b579f9-abb1-4987-9db0-b52933d315ef ahead_contracts=3600.00
+03:29:15 INFO QUEUE_POSITION | side=no order_id=c4b579f9-abb1-4987-9db0-b52933d315ef ahead_contracts=3600.00
+03:29:26 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=c4b579f9-abb1-4987-9db0-b52933d315ef
+03:29:26 INFO CREATE_OK | side=no price_dollars=0.9500 remaining_contracts=10.00 order_id=62f3e41a-0b47-4139-95e9-8e0a03039e9e
+03:29:27 INFO AMEND_OK | side=no price_dollars=0.9400 total_fillable_contracts=10.00 order_id=62f3e41a-0b47-4139-95e9-8e0a03039e9e
+03:29:30 INFO QUEUE_POSITION | side=no order_id=62f3e41a-0b47-4139-95e9-8e0a03039e9e ahead_contracts=3600.00
+03:29:45 INFO QUEUE_POSITION | side=no order_id=62f3e41a-0b47-4139-95e9-8e0a03039e9e ahead_contracts=3600.00
+03:30:00 INFO QUEUE_POSITION | side=no order_id=62f3e41a-0b47-4139-95e9-8e0a03039e9e ahead_contracts=3600.00
+03:30:15 INFO QUEUE_POSITION | side=no order_id=62f3e41a-0b47-4139-95e9-8e0a03039e9e ahead_contracts=3600.00
+03:30:25 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=62f3e41a-0b47-4139-95e9-8e0a03039e9e
+03:30:25 INFO CREATE_OK | side=no price_dollars=0.9500 remaining_contracts=10.00 order_id=3c7922c3-978c-4b2c-96fb-1f47ba6246e5
+03:30:26 INFO AMEND_OK | side=no price_dollars=0.9400 total_fillable_contracts=10.00 order_id=3c7922c3-978c-4b2c-96fb-1f47ba6246e5
+03:30:30 INFO QUEUE_POSITION | side=no order_id=3c7922c3-978c-4b2c-96fb-1f47ba6246e5 ahead_contracts=3600.00
+03:30:45 INFO QUEUE_POSITION | side=no order_id=3c7922c3-978c-4b2c-96fb-1f47ba6246e5 ahead_contracts=3600.00
+03:31:00 INFO QUEUE_POSITION | side=no order_id=3c7922c3-978c-4b2c-96fb-1f47ba6246e5 ahead_contracts=3600.00
+03:31:15 INFO QUEUE_POSITION | side=no order_id=3c7922c3-978c-4b2c-96fb-1f47ba6246e5 ahead_contracts=3600.00
+03:31:24 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=3c7922c3-978c-4b2c-96fb-1f47ba6246e5
+03:31:24 INFO CREATE_OK | side=no price_dollars=0.9500 remaining_contracts=10.00 order_id=94a35b20-c4e1-4684-bf40-a5823e29dab0
+03:31:25 INFO AMEND_OK | side=no price_dollars=0.9400 total_fillable_contracts=10.00 order_id=94a35b20-c4e1-4684-bf40-a5823e29dab0
+03:31:30 INFO QUEUE_POSITION | side=no order_id=94a35b20-c4e1-4684-bf40-a5823e29dab0 ahead_contracts=0.00
+03:31:45 INFO QUEUE_POSITION | side=no order_id=94a35b20-c4e1-4684-bf40-a5823e29dab0 ahead_contracts=0.00
+03:31:46 INFO AMEND_OK | side=no price_dollars=0.9500 total_fillable_contracts=10.00 order_id=94a35b20-c4e1-4684-bf40-a5823e29dab0
+03:32:00 INFO QUEUE_POSITION | side=no order_id=94a35b20-c4e1-4684-bf40-a5823e29dab0 ahead_contracts=0.00
+03:32:15 INFO QUEUE_POSITION | side=no order_id=94a35b20-c4e1-4684-bf40-a5823e29dab0 ahead_contracts=0.00
+03:32:23 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=94a35b20-c4e1-4684-bf40-a5823e29dab0
+03:32:23 INFO CREATE_OK | side=no price_dollars=0.9600 remaining_contracts=10.00 order_id=e6ac7c28-16f9-41aa-8806-ff5c629848d3
+03:32:24 INFO AMEND_OK | side=no price_dollars=0.9500 total_fillable_contracts=10.00 order_id=e6ac7c28-16f9-41aa-8806-ff5c629848d3
+03:32:31 INFO QUEUE_POSITION | side=no order_id=e6ac7c28-16f9-41aa-8806-ff5c629848d3 ahead_contracts=1615.00
+03:32:46 INFO QUEUE_POSITION | side=no order_id=e6ac7c28-16f9-41aa-8806-ff5c629848d3 ahead_contracts=1615.00
+03:33:01 INFO QUEUE_POSITION | side=no order_id=e6ac7c28-16f9-41aa-8806-ff5c629848d3 ahead_contracts=0.00
+03:33:16 INFO QUEUE_POSITION | side=no order_id=e6ac7c28-16f9-41aa-8806-ff5c629848d3 ahead_contracts=0.00
+03:33:22 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=e6ac7c28-16f9-41aa-8806-ff5c629848d3
+03:33:22 INFO CREATE_OK | side=no price_dollars=0.9600 remaining_contracts=10.00 order_id=9b1d948c-2352-46bc-a620-1d0a1c1eef04
+03:33:23 INFO AMEND_OK | side=no price_dollars=0.9100 total_fillable_contracts=10.00 order_id=9b1d948c-2352-46bc-a620-1d0a1c1eef04
+03:33:31 INFO QUEUE_POSITION | side=no order_id=9b1d948c-2352-46bc-a620-1d0a1c1eef04 ahead_contracts=1230.00
+03:33:46 INFO QUEUE_POSITION | side=no order_id=9b1d948c-2352-46bc-a620-1d0a1c1eef04 ahead_contracts=1230.00
+03:33:50 INFO AMEND_OK | side=no price_dollars=0.9200 total_fillable_contracts=10.00 order_id=9b1d948c-2352-46bc-a620-1d0a1c1eef04
+03:33:51 INFO AMEND_OK | side=no price_dollars=0.9300 total_fillable_contracts=10.00 order_id=9b1d948c-2352-46bc-a620-1d0a1c1eef04
+03:33:51 INFO AMEND_OK | side=no price_dollars=0.9400 total_fillable_contracts=10.00 order_id=9b1d948c-2352-46bc-a620-1d0a1c1eef04
+03:34:01 INFO QUEUE_POSITION | side=no order_id=9b1d948c-2352-46bc-a620-1d0a1c1eef04 ahead_contracts=1213.00
+03:34:16 INFO QUEUE_POSITION | side=no order_id=9b1d948c-2352-46bc-a620-1d0a1c1eef04 ahead_contracts=1213.00
+03:34:21 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=9b1d948c-2352-46bc-a620-1d0a1c1eef04
+03:34:21 INFO CREATE_OK | side=no price_dollars=0.9500 remaining_contracts=10.00 order_id=396ac4fd-398b-423d-bb42-9556a101fdc6
+03:34:22 INFO AMEND_OK | side=no price_dollars=0.9400 total_fillable_contracts=10.00 order_id=396ac4fd-398b-423d-bb42-9556a101fdc6
+03:34:31 INFO QUEUE_POSITION | side=no order_id=396ac4fd-398b-423d-bb42-9556a101fdc6 ahead_contracts=1213.00
+03:34:46 INFO QUEUE_POSITION | side=no order_id=396ac4fd-398b-423d-bb42-9556a101fdc6 ahead_contracts=1213.00
+03:35:01 INFO QUEUE_POSITION | side=no order_id=396ac4fd-398b-423d-bb42-9556a101fdc6 ahead_contracts=1213.00
+03:35:16 INFO QUEUE_POSITION | side=no order_id=396ac4fd-398b-423d-bb42-9556a101fdc6 ahead_contracts=1213.00
+03:35:18 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=396ac4fd-398b-423d-bb42-9556a101fdc6
+03:35:18 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=396ac4fd-398b-423d-bb42-9556a101fdc6
+03:35:18 INFO CREATE_OK | side=no price_dollars=0.9400 remaining_contracts=10.00 order_id=9e43d285-0e62-43a8-81c8-1808c863cfd2
+03:35:31 INFO QUEUE_POSITION | side=no order_id=9e43d285-0e62-43a8-81c8-1808c863cfd2 ahead_contracts=1213.00
+03:35:46 INFO QUEUE_POSITION | side=no order_id=9e43d285-0e62-43a8-81c8-1808c863cfd2 ahead_contracts=1213.00
+03:36:01 INFO QUEUE_POSITION | side=no order_id=9e43d285-0e62-43a8-81c8-1808c863cfd2 ahead_contracts=1213.00
+03:36:16 INFO QUEUE_POSITION | side=no order_id=9e43d285-0e62-43a8-81c8-1808c863cfd2 ahead_contracts=1213.00
+03:36:17 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=9e43d285-0e62-43a8-81c8-1808c863cfd2
+03:36:17 INFO CREATE_OK | side=no price_dollars=0.9500 remaining_contracts=10.00 order_id=0b486e47-6b08-4a4d-bd22-aedf9a7d8a20
+03:36:18 INFO AMEND_OK | side=no price_dollars=0.9400 total_fillable_contracts=10.00 order_id=0b486e47-6b08-4a4d-bd22-aedf9a7d8a20
+03:36:31 INFO QUEUE_POSITION | side=no order_id=0b486e47-6b08-4a4d-bd22-aedf9a7d8a20 ahead_contracts=1213.00
+03:36:46 INFO QUEUE_POSITION | side=no order_id=0b486e47-6b08-4a4d-bd22-aedf9a7d8a20 ahead_contracts=1213.00
+03:37:01 INFO QUEUE_POSITION | side=no order_id=0b486e47-6b08-4a4d-bd22-aedf9a7d8a20 ahead_contracts=1213.00
+03:37:16 INFO QUEUE_POSITION | side=no order_id=0b486e47-6b08-4a4d-bd22-aedf9a7d8a20 ahead_contracts=1213.00
+03:37:16 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=0b486e47-6b08-4a4d-bd22-aedf9a7d8a20
+03:37:16 INFO CREATE_OK | side=no price_dollars=0.9500 remaining_contracts=10.00 order_id=da6403e9-e69e-4bc8-9178-aaae19c9c724
+03:37:17 INFO AMEND_OK | side=no price_dollars=0.9400 total_fillable_contracts=10.00 order_id=da6403e9-e69e-4bc8-9178-aaae19c9c724
+03:37:31 INFO QUEUE_POSITION | side=no order_id=da6403e9-e69e-4bc8-9178-aaae19c9c724 ahead_contracts=1213.00
+03:37:46 INFO QUEUE_POSITION | side=no order_id=da6403e9-e69e-4bc8-9178-aaae19c9c724 ahead_contracts=1213.00
+03:37:56 INFO AMEND_OK | side=no price_dollars=0.9500 total_fillable_contracts=10.00 order_id=da6403e9-e69e-4bc8-9178-aaae19c9c724
+03:38:01 INFO QUEUE_POSITION | side=no order_id=da6403e9-e69e-4bc8-9178-aaae19c9c724 ahead_contracts=0.00
+03:38:12 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=da6403e9-e69e-4bc8-9178-aaae19c9c724
+03:38:12 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=da6403e9-e69e-4bc8-9178-aaae19c9c724
+03:38:12 INFO CREATE_OK | side=no price_dollars=0.9500 remaining_contracts=10.00 order_id=53fbe9a9-7c80-4299-bcdf-638f32a3220a
+03:38:16 INFO QUEUE_POSITION | side=no order_id=53fbe9a9-7c80-4299-bcdf-638f32a3220a ahead_contracts=0.00
+03:38:22 INFO AMEND_OK | side=no price_dollars=0.9000 total_fillable_contracts=11.00 order_id=53fbe9a9-7c80-4299-bcdf-638f32a3220a
+03:38:30 INFO AMEND_OK | side=no price_dollars=0.9100 total_fillable_contracts=10.00 order_id=53fbe9a9-7c80-4299-bcdf-638f32a3220a
+03:38:32 INFO QUEUE_POSITION | side=no order_id=53fbe9a9-7c80-4299-bcdf-638f32a3220a ahead_contracts=50.00
+03:38:47 INFO QUEUE_POSITION | side=no order_id=53fbe9a9-7c80-4299-bcdf-638f32a3220a ahead_contracts=50.00
+03:39:02 INFO QUEUE_POSITION | side=no order_id=53fbe9a9-7c80-4299-bcdf-638f32a3220a ahead_contracts=50.00
+03:39:09 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=53fbe9a9-7c80-4299-bcdf-638f32a3220a
+03:39:09 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=53fbe9a9-7c80-4299-bcdf-638f32a3220a
+03:39:09 INFO CREATE_OK | side=no price_dollars=0.9200 remaining_contracts=10.00 order_id=cbb858d5-43cf-46ce-8012-fbccc9c1909e
+03:39:17 INFO QUEUE_POSITION | side=no order_id=cbb858d5-43cf-46ce-8012-fbccc9c1909e ahead_contracts=63.00
+03:39:32 INFO QUEUE_POSITION | side=no order_id=cbb858d5-43cf-46ce-8012-fbccc9c1909e ahead_contracts=63.00
+03:39:47 INFO QUEUE_POSITION | side=no order_id=cbb858d5-43cf-46ce-8012-fbccc9c1909e ahead_contracts=63.00
+03:40:02 INFO QUEUE_POSITION | side=no order_id=cbb858d5-43cf-46ce-8012-fbccc9c1909e ahead_contracts=63.00
+03:40:08 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=cbb858d5-43cf-46ce-8012-fbccc9c1909e
+03:40:08 INFO CREATE_OK | side=no price_dollars=0.9300 remaining_contracts=10.00 order_id=bc5346f0-355d-4d5a-9dd1-359d0d80e4ec
+03:40:09 INFO AMEND_OK | side=no price_dollars=0.9200 total_fillable_contracts=10.00 order_id=bc5346f0-355d-4d5a-9dd1-359d0d80e4ec
+03:40:17 INFO QUEUE_POSITION | side=no order_id=bc5346f0-355d-4d5a-9dd1-359d0d80e4ec ahead_contracts=63.00
+03:40:32 INFO QUEUE_POSITION | side=no order_id=bc5346f0-355d-4d5a-9dd1-359d0d80e4ec ahead_contracts=63.00
+03:40:47 INFO QUEUE_POSITION | side=no order_id=bc5346f0-355d-4d5a-9dd1-359d0d80e4ec ahead_contracts=63.00
+03:41:02 INFO QUEUE_POSITION | side=no order_id=bc5346f0-355d-4d5a-9dd1-359d0d80e4ec ahead_contracts=63.00
+03:41:07 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=bc5346f0-355d-4d5a-9dd1-359d0d80e4ec
+03:41:07 INFO CREATE_OK | side=no price_dollars=0.9300 remaining_contracts=10.00 order_id=62a346c2-04b7-4be0-b064-e0ebb59057ba
+03:41:08 INFO AMEND_OK | side=no price_dollars=0.9200 total_fillable_contracts=10.00 order_id=62a346c2-04b7-4be0-b064-e0ebb59057ba
+03:41:17 INFO QUEUE_POSITION | side=no order_id=62a346c2-04b7-4be0-b064-e0ebb59057ba ahead_contracts=63.00
+03:41:27 INFO AMEND_OK | side=no price_dollars=0.9100 total_fillable_contracts=10.00 order_id=62a346c2-04b7-4be0-b064-e0ebb59057ba
+03:41:32 INFO QUEUE_POSITION | side=no order_id=62a346c2-04b7-4be0-b064-e0ebb59057ba ahead_contracts=0.00
+03:41:36 INFO AMEND_OK | side=no price_dollars=0.9200 total_fillable_contracts=10.00 order_id=62a346c2-04b7-4be0-b064-e0ebb59057ba
+03:41:47 INFO QUEUE_POSITION | side=no order_id=62a346c2-04b7-4be0-b064-e0ebb59057ba ahead_contracts=13.00
+03:42:01 INFO AMEND_OK | side=no price_dollars=0.9100 total_fillable_contracts=10.00 order_id=62a346c2-04b7-4be0-b064-e0ebb59057ba
+03:42:02 INFO QUEUE_POSITION | side=no order_id=62a346c2-04b7-4be0-b064-e0ebb59057ba ahead_contracts=0.00
+03:42:05 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=62a346c2-04b7-4be0-b064-e0ebb59057ba
+03:42:05 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=62a346c2-04b7-4be0-b064-e0ebb59057ba
+03:42:05 INFO CREATE_OK | side=no price_dollars=0.9200 remaining_contracts=10.00 order_id=ac5d67d4-0c9f-4837-b407-618e3213dfe0
+03:42:16 INFO AMEND_OK | side=no price_dollars=0.9100 total_fillable_contracts=10.00 order_id=ac5d67d4-0c9f-4837-b407-618e3213dfe0
+03:42:17 INFO AMEND_OK | side=no price_dollars=0.7100 total_fillable_contracts=14.00 order_id=ac5d67d4-0c9f-4837-b407-618e3213dfe0
+03:42:17 INFO QUEUE_POSITION | side=no order_id=ac5d67d4-0c9f-4837-b407-618e3213dfe0 ahead_contracts=5.00
+03:42:32 INFO QUEUE_POSITION | side=no order_id=ac5d67d4-0c9f-4837-b407-618e3213dfe0 ahead_contracts=5.00
+03:42:47 INFO QUEUE_POSITION | side=no order_id=ac5d67d4-0c9f-4837-b407-618e3213dfe0 ahead_contracts=5.00
+03:42:52 INFO AMEND_OK | side=no price_dollars=0.9300 total_fillable_contracts=10.00 order_id=ac5d67d4-0c9f-4837-b407-618e3213dfe0
+03:42:52 INFO AMEND_OK | side=no price_dollars=0.9400 total_fillable_contracts=10.00 order_id=ac5d67d4-0c9f-4837-b407-618e3213dfe0
+03:43:00 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=ac5d67d4-0c9f-4837-b407-618e3213dfe0
+03:43:00 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=ac5d67d4-0c9f-4837-b407-618e3213dfe0
+03:43:00 INFO CREATE_OK | side=no price_dollars=0.9400 remaining_contracts=10.00 order_id=9ec8ca73-cc65-4901-972a-b335cd10fe5b
+03:43:02 INFO QUEUE_POSITION | side=no order_id=9ec8ca73-cc65-4901-972a-b335cd10fe5b ahead_contracts=5500.00
+03:43:05 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=9ec8ca73-cc65-4901-972a-b335cd10fe5b
+03:43:05 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+03:43:20 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+03:43:20 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+03:43:20 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:43:21 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+03:43:21 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+03:43:21 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+03:43:23 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:43:26 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+03:43:39 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:43:39 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+03:43:39 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:43:39 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:43:40 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+03:43:49 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+03:43:50 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:43:50 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+03:43:50 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+03:43:52 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+03:43:52 INFO CREATE_OK | side=no price_dollars=0.9200 remaining_contracts=10.00 order_id=56d77d3b-8bc9-4a55-84b8-d8e3038e524f
+03:44:02 INFO QUEUE_POSITION | side=no order_id=56d77d3b-8bc9-4a55-84b8-d8e3038e524f ahead_contracts=0.00
+03:44:17 INFO QUEUE_POSITION | side=no order_id=56d77d3b-8bc9-4a55-84b8-d8e3038e524f ahead_contracts=0.00
+03:44:25 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/56d77d3b-8bc9-4a55-84b8-d8e3038e524f/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/56d77d3b-8bc9-4a55-84b8-d8e3038e524f/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:44:25 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders/56d77d3b-8bc9-4a55-84b8-d8e3038e524f/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1468, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 820, in amend_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders/56d77d3b-8bc9-4a55-84b8-d8e3038e524f/amend failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:44:30 INFO AMEND_OK | side=no price_dollars=0.9400 total_fillable_contracts=10.00 order_id=56d77d3b-8bc9-4a55-84b8-d8e3038e524f
+03:44:30 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=56d77d3b-8bc9-4a55-84b8-d8e3038e524f
+03:44:30 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+03:44:30 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+03:44:36 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:44:36 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+03:44:36 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:44:38 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:44:41 INFO CREATE_OK | side=no price_dollars=0.9600 remaining_contracts=10.00 order_id=98c960d6-b2a4-424a-8b91-cf3b0f870cbb
+03:44:47 INFO QUEUE_POSITION | side=no order_id=98c960d6-b2a4-424a-8b91-cf3b0f870cbb ahead_contracts=1158.00
+03:45:02 INFO QUEUE_POSITION | side=no order_id=98c960d6-b2a4-424a-8b91-cf3b0f870cbb ahead_contracts=1158.00
+03:45:17 INFO QUEUE_POSITION | side=no order_id=98c960d6-b2a4-424a-8b91-cf3b0f870cbb ahead_contracts=1158.00
+03:45:33 INFO QUEUE_POSITION | side=no order_id=98c960d6-b2a4-424a-8b91-cf3b0f870cbb ahead_contracts=1158.00
+03:45:40 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=98c960d6-b2a4-424a-8b91-cf3b0f870cbb
+03:45:40 INFO CREATE_OK | side=no price_dollars=0.9700 remaining_contracts=10.00 order_id=7eda6c96-ae9b-4c03-9847-f5edfa53bd67
+03:45:41 INFO AMEND_OK | side=no price_dollars=0.9600 total_fillable_contracts=10.00 order_id=7eda6c96-ae9b-4c03-9847-f5edfa53bd67
+03:45:48 INFO QUEUE_POSITION | side=no order_id=7eda6c96-ae9b-4c03-9847-f5edfa53bd67 ahead_contracts=1158.00
+03:46:03 INFO QUEUE_POSITION | side=no order_id=7eda6c96-ae9b-4c03-9847-f5edfa53bd67 ahead_contracts=1158.00
+03:46:18 INFO QUEUE_POSITION | side=no order_id=7eda6c96-ae9b-4c03-9847-f5edfa53bd67 ahead_contracts=1158.00
+03:46:33 INFO QUEUE_POSITION | side=no order_id=7eda6c96-ae9b-4c03-9847-f5edfa53bd67 ahead_contracts=1158.00
+03:46:39 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=7eda6c96-ae9b-4c03-9847-f5edfa53bd67
+03:46:39 INFO CREATE_OK | side=no price_dollars=0.9700 remaining_contracts=10.00 order_id=d3a22736-87f6-4066-9646-c677a1db070c
+03:46:40 INFO AMEND_OK | side=no price_dollars=0.9600 total_fillable_contracts=10.00 order_id=d3a22736-87f6-4066-9646-c677a1db070c
+03:46:48 INFO QUEUE_POSITION | side=no order_id=d3a22736-87f6-4066-9646-c677a1db070c ahead_contracts=1158.00
+03:47:03 INFO QUEUE_POSITION | side=no order_id=d3a22736-87f6-4066-9646-c677a1db070c ahead_contracts=1158.00
+03:47:18 INFO QUEUE_POSITION | side=no order_id=d3a22736-87f6-4066-9646-c677a1db070c ahead_contracts=1158.00
+03:47:33 INFO QUEUE_POSITION | side=no order_id=d3a22736-87f6-4066-9646-c677a1db070c ahead_contracts=1158.00
+03:47:38 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=d3a22736-87f6-4066-9646-c677a1db070c
+03:47:38 INFO CREATE_OK | side=no price_dollars=0.9700 remaining_contracts=10.00 order_id=1ca4d9b7-29a4-453e-9c7f-c5a36519eec0
+03:47:39 INFO AMEND_OK | side=no price_dollars=0.9600 total_fillable_contracts=10.00 order_id=1ca4d9b7-29a4-453e-9c7f-c5a36519eec0
+03:47:48 INFO QUEUE_POSITION | side=no order_id=1ca4d9b7-29a4-453e-9c7f-c5a36519eec0 ahead_contracts=1158.00
+03:48:03 INFO QUEUE_POSITION | side=no order_id=1ca4d9b7-29a4-453e-9c7f-c5a36519eec0 ahead_contracts=1158.00
+03:48:18 INFO QUEUE_POSITION | side=no order_id=1ca4d9b7-29a4-453e-9c7f-c5a36519eec0 ahead_contracts=1158.00
+03:48:33 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=1ca4d9b7-29a4-453e-9c7f-c5a36519eec0
+03:48:33 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 400: {"error":{"code":"insufficient_balance","message":"insufficient balance","service":"exchange"}}
+03:48:34 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:48:34 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:48:39 INFO CREATE_OK | side=no price_dollars=0.9700 remaining_contracts=10.00 order_id=31e3f54a-d417-43b0-81c3-ba572ad4039f
+03:48:40 INFO AMEND_OK | side=no price_dollars=0.9600 total_fillable_contracts=10.00 order_id=31e3f54a-d417-43b0-81c3-ba572ad4039f
+03:48:48 INFO QUEUE_POSITION | side=no order_id=31e3f54a-d417-43b0-81c3-ba572ad4039f ahead_contracts=1158.00
+03:49:03 INFO QUEUE_POSITION | side=no order_id=31e3f54a-d417-43b0-81c3-ba572ad4039f ahead_contracts=158.00
+03:49:18 INFO QUEUE_POSITION | side=no order_id=31e3f54a-d417-43b0-81c3-ba572ad4039f ahead_contracts=0.00
+03:49:33 INFO QUEUE_POSITION | side=no order_id=31e3f54a-d417-43b0-81c3-ba572ad4039f ahead_contracts=0.00
+03:49:37 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=31e3f54a-d417-43b0-81c3-ba572ad4039f
+03:49:37 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=31e3f54a-d417-43b0-81c3-ba572ad4039f
+03:49:37 INFO CREATE_OK | side=no price_dollars=0.9600 remaining_contracts=10.00 order_id=9b8537e8-f854-4c48-b793-c0e62a3b5871
+03:49:48 INFO QUEUE_POSITION | side=no order_id=9b8537e8-f854-4c48-b793-c0e62a3b5871 ahead_contracts=0.00
+03:50:03 INFO QUEUE_POSITION | side=no order_id=9b8537e8-f854-4c48-b793-c0e62a3b5871 ahead_contracts=0.00
+03:50:18 INFO QUEUE_POSITION | side=no order_id=9b8537e8-f854-4c48-b793-c0e62a3b5871 ahead_contracts=0.00
+03:50:33 INFO QUEUE_POSITION | side=no order_id=9b8537e8-f854-4c48-b793-c0e62a3b5871 ahead_contracts=0.00
+03:50:36 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=9b8537e8-f854-4c48-b793-c0e62a3b5871
+03:50:36 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=9b8537e8-f854-4c48-b793-c0e62a3b5871
+03:50:36 INFO CREATE_OK | side=no price_dollars=0.9600 remaining_contracts=10.00 order_id=536cdb7d-dbf7-4ac0-b57c-4f725f50ed40
+03:50:48 INFO QUEUE_POSITION | side=no order_id=536cdb7d-dbf7-4ac0-b57c-4f725f50ed40 ahead_contracts=0.00
+03:51:03 INFO QUEUE_POSITION | side=no order_id=536cdb7d-dbf7-4ac0-b57c-4f725f50ed40 ahead_contracts=0.00
+03:51:18 INFO QUEUE_POSITION | side=no order_id=536cdb7d-dbf7-4ac0-b57c-4f725f50ed40 ahead_contracts=0.00
+03:51:33 INFO QUEUE_POSITION | side=no order_id=536cdb7d-dbf7-4ac0-b57c-4f725f50ed40 ahead_contracts=0.00
+03:51:35 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=536cdb7d-dbf7-4ac0-b57c-4f725f50ed40
+03:51:35 INFO CREATE_OK | side=no price_dollars=0.9700 remaining_contracts=10.00 order_id=32043cd1-4763-40f4-bc5d-a29891b4de34
+03:51:36 INFO AMEND_OK | side=no price_dollars=0.9600 total_fillable_contracts=10.00 order_id=32043cd1-4763-40f4-bc5d-a29891b4de34
+03:51:48 INFO QUEUE_POSITION | side=no order_id=32043cd1-4763-40f4-bc5d-a29891b4de34 ahead_contracts=0.00
+03:52:03 INFO QUEUE_POSITION | side=no order_id=32043cd1-4763-40f4-bc5d-a29891b4de34 ahead_contracts=0.00
+03:52:19 INFO QUEUE_POSITION | side=no order_id=32043cd1-4763-40f4-bc5d-a29891b4de34 ahead_contracts=0.00
+03:52:34 INFO QUEUE_POSITION | side=no order_id=32043cd1-4763-40f4-bc5d-a29891b4de34 ahead_contracts=0.00
+03:52:34 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=32043cd1-4763-40f4-bc5d-a29891b4de34
+03:52:34 INFO CREATE_OK | side=no price_dollars=0.9700 remaining_contracts=10.00 order_id=de3843f0-4929-4412-a18c-5a34129480f4
+03:52:35 INFO AMEND_OK | side=no price_dollars=0.9600 total_fillable_contracts=10.00 order_id=de3843f0-4929-4412-a18c-5a34129480f4
+03:52:49 INFO QUEUE_POSITION | side=no order_id=de3843f0-4929-4412-a18c-5a34129480f4 ahead_contracts=0.00
+03:53:04 INFO QUEUE_POSITION | side=no order_id=de3843f0-4929-4412-a18c-5a34129480f4 ahead_contracts=0.00
+03:53:19 INFO QUEUE_POSITION | side=no order_id=de3843f0-4929-4412-a18c-5a34129480f4 ahead_contracts=0.00
+03:53:33 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=de3843f0-4929-4412-a18c-5a34129480f4
+03:53:33 INFO CREATE_OK | side=no price_dollars=0.9700 remaining_contracts=10.00 order_id=5a18917f-2955-433f-af3f-f7575cadb4e9
+03:53:34 INFO AMEND_OK | side=no price_dollars=0.9600 total_fillable_contracts=10.00 order_id=5a18917f-2955-433f-af3f-f7575cadb4e9
+03:53:34 INFO QUEUE_POSITION | side=no order_id=5a18917f-2955-433f-af3f-f7575cadb4e9 ahead_contracts=0.00
+03:53:49 INFO QUEUE_POSITION | side=no order_id=5a18917f-2955-433f-af3f-f7575cadb4e9 ahead_contracts=0.00
+03:54:04 INFO QUEUE_POSITION | side=no order_id=5a18917f-2955-433f-af3f-f7575cadb4e9 ahead_contracts=0.00
+03:54:19 INFO QUEUE_POSITION | side=no order_id=5a18917f-2955-433f-af3f-f7575cadb4e9 ahead_contracts=0.00
+03:54:32 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=5a18917f-2955-433f-af3f-f7575cadb4e9
+03:54:32 INFO CREATE_OK | side=no price_dollars=0.9700 remaining_contracts=10.00 order_id=71bf7c21-e077-467b-99ee-423c08974318
+03:54:33 INFO AMEND_OK | side=no price_dollars=0.9600 total_fillable_contracts=10.00 order_id=71bf7c21-e077-467b-99ee-423c08974318
+03:54:34 INFO QUEUE_POSITION | side=no order_id=71bf7c21-e077-467b-99ee-423c08974318 ahead_contracts=0.00
+03:54:49 INFO QUEUE_POSITION | side=no order_id=71bf7c21-e077-467b-99ee-423c08974318 ahead_contracts=0.00
+03:55:04 INFO QUEUE_POSITION | side=no order_id=71bf7c21-e077-467b-99ee-423c08974318 ahead_contracts=0.00
+03:55:19 INFO QUEUE_POSITION | side=no order_id=71bf7c21-e077-467b-99ee-423c08974318 ahead_contracts=0.00
+03:55:31 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=71bf7c21-e077-467b-99ee-423c08974318
+03:55:31 INFO CREATE_OK | side=no price_dollars=0.9700 remaining_contracts=10.00 order_id=f2a18f16-b1ca-45cf-922c-8c0d03c64b34
+03:55:32 INFO AMEND_OK | side=no price_dollars=0.9600 total_fillable_contracts=10.00 order_id=f2a18f16-b1ca-45cf-922c-8c0d03c64b34
+03:55:34 INFO QUEUE_POSITION | side=no order_id=f2a18f16-b1ca-45cf-922c-8c0d03c64b34 ahead_contracts=0.00
+03:55:49 INFO QUEUE_POSITION | side=no order_id=f2a18f16-b1ca-45cf-922c-8c0d03c64b34 ahead_contracts=0.00
+03:56:04 INFO QUEUE_POSITION | side=no order_id=f2a18f16-b1ca-45cf-922c-8c0d03c64b34 ahead_contracts=0.00
+03:56:19 INFO QUEUE_POSITION | side=no order_id=f2a18f16-b1ca-45cf-922c-8c0d03c64b34 ahead_contracts=0.00
+03:56:30 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=f2a18f16-b1ca-45cf-922c-8c0d03c64b34
+03:56:30 INFO CREATE_OK | side=no price_dollars=0.9700 remaining_contracts=10.00 order_id=f805bf4d-517c-4777-9cc3-d5c293a24f4c
+03:56:31 INFO AMEND_OK | side=no price_dollars=0.9600 total_fillable_contracts=10.00 order_id=f805bf4d-517c-4777-9cc3-d5c293a24f4c
+03:56:34 INFO QUEUE_POSITION | side=no order_id=f805bf4d-517c-4777-9cc3-d5c293a24f4c ahead_contracts=0.00
+03:56:49 INFO QUEUE_POSITION | side=no order_id=f805bf4d-517c-4777-9cc3-d5c293a24f4c ahead_contracts=0.00
+03:57:04 INFO QUEUE_POSITION | side=no order_id=f805bf4d-517c-4777-9cc3-d5c293a24f4c ahead_contracts=0.00
+03:57:19 INFO QUEUE_POSITION | side=no order_id=f805bf4d-517c-4777-9cc3-d5c293a24f4c ahead_contracts=0.00
+03:57:29 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=f805bf4d-517c-4777-9cc3-d5c293a24f4c
+03:57:29 INFO CREATE_OK | side=no price_dollars=0.9700 remaining_contracts=10.00 order_id=3c2e0140-9de8-44f8-863f-9c034745face
+03:57:30 INFO AMEND_OK | side=no price_dollars=0.9600 total_fillable_contracts=10.00 order_id=3c2e0140-9de8-44f8-863f-9c034745face
+03:57:34 INFO QUEUE_POSITION | side=no order_id=3c2e0140-9de8-44f8-863f-9c034745face ahead_contracts=0.00
+03:57:49 INFO QUEUE_POSITION | side=no order_id=3c2e0140-9de8-44f8-863f-9c034745face ahead_contracts=0.00
+03:58:04 INFO QUEUE_POSITION | side=no order_id=3c2e0140-9de8-44f8-863f-9c034745face ahead_contracts=0.00
+03:58:19 INFO QUEUE_POSITION | side=no order_id=3c2e0140-9de8-44f8-863f-9c034745face ahead_contracts=0.00
+03:58:28 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=3c2e0140-9de8-44f8-863f-9c034745face
+03:58:28 INFO CREATE_OK | side=no price_dollars=0.9700 remaining_contracts=10.00 order_id=4a6da80e-dfd7-42df-98db-cf2506e3617f
+03:58:29 INFO AMEND_OK | side=no price_dollars=0.9600 total_fillable_contracts=10.00 order_id=4a6da80e-dfd7-42df-98db-cf2506e3617f
+03:58:34 INFO QUEUE_POSITION | side=no order_id=4a6da80e-dfd7-42df-98db-cf2506e3617f ahead_contracts=0.00
+03:58:49 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=4a6da80e-dfd7-42df-98db-cf2506e3617f
+03:58:49 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+03:59:28 INFO CREATE_OK | side=no price_dollars=0.9700 remaining_contracts=10.00 order_id=9b372bd3-19dc-4de7-a88e-e1260f0e6c46
+03:59:29 INFO AMEND_OK | side=no price_dollars=0.9600 total_fillable_contracts=10.00 order_id=9b372bd3-19dc-4de7-a88e-e1260f0e6c46
+03:59:35 INFO QUEUE_POSITION | side=no order_id=9b372bd3-19dc-4de7-a88e-e1260f0e6c46 ahead_contracts=0.00
+03:59:50 INFO QUEUE_POSITION | side=no order_id=9b372bd3-19dc-4de7-a88e-e1260f0e6c46 ahead_contracts=0.00
+04:00:05 INFO QUEUE_POSITION | side=no order_id=9b372bd3-19dc-4de7-a88e-e1260f0e6c46 ahead_contracts=0.00
+04:00:20 INFO QUEUE_POSITION | side=no order_id=9b372bd3-19dc-4de7-a88e-e1260f0e6c46 ahead_contracts=0.00
+04:00:27 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=9b372bd3-19dc-4de7-a88e-e1260f0e6c46
+04:00:27 INFO CREATE_OK | side=no price_dollars=0.9700 remaining_contracts=10.00 order_id=bafc7cad-97d3-4bf8-a43e-790df3ead555
+04:00:28 INFO AMEND_OK | side=no price_dollars=0.9600 total_fillable_contracts=10.00 order_id=bafc7cad-97d3-4bf8-a43e-790df3ead555
+04:00:35 INFO QUEUE_POSITION | side=no order_id=bafc7cad-97d3-4bf8-a43e-790df3ead555 ahead_contracts=0.00
+04:00:50 INFO QUEUE_POSITION | side=no order_id=bafc7cad-97d3-4bf8-a43e-790df3ead555 ahead_contracts=0.00
+04:01:03 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=bafc7cad-97d3-4bf8-a43e-790df3ead555
+04:01:03 INFO REQUOTE_ERROR | error=POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1675, in requote_worker
+    await self.ensure_side_quote("no", desired_no_units)
+  File "/workspaces/Kalshi_alg/V1.py", line 1437, in ensure_side_quote
+    response = await asyncio.to_thread(
+               ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/threads.py", line 25, in to_thread
+    return await loop.run_in_executor(None, func_call)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 776, in create_order
+    return self.rest_post(f"{self.api_prefix}/portfolio/orders", body)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/workspaces/Kalshi_alg/V1.py", line 675, in rest_post
+    raise RuntimeError(f"POST {path} failed {response.status_code}: {response.text[:500]}")
+RuntimeError: POST /trade-api/v2/portfolio/orders failed 429: {"error":{"code":"too_many_requests","message":"too many requests"}}
+04:01:43 INFO CREATE_OK | side=no price_dollars=0.9700 remaining_contracts=10.00 order_id=2a6c11a0-1476-4fb4-a4d4-42ee43966b0f
+04:01:43 INFO AMEND_OK | side=no price_dollars=0.9600 total_fillable_contracts=10.00 order_id=2a6c11a0-1476-4fb4-a4d4-42ee43966b0f
+04:01:50 INFO QUEUE_POSITION | side=no order_id=2a6c11a0-1476-4fb4-a4d4-42ee43966b0f ahead_contracts=0.00
+04:02:05 INFO QUEUE_POSITION | side=no order_id=2a6c11a0-1476-4fb4-a4d4-42ee43966b0f ahead_contracts=0.00
+04:02:20 INFO QUEUE_POSITION | side=no order_id=2a6c11a0-1476-4fb4-a4d4-42ee43966b0f ahead_contracts=0.00
+04:02:35 INFO QUEUE_POSITION | side=no order_id=2a6c11a0-1476-4fb4-a4d4-42ee43966b0f ahead_contracts=0.00
+04:02:42 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=2a6c11a0-1476-4fb4-a4d4-42ee43966b0f
+04:02:42 INFO CREATE_OK | side=no price_dollars=0.9700 remaining_contracts=10.00 order_id=b7eb11b3-a83d-49f4-9217-51fef3e29b00
+04:02:43 INFO AMEND_OK | side=no price_dollars=0.9600 total_fillable_contracts=10.00 order_id=b7eb11b3-a83d-49f4-9217-51fef3e29b00
+04:02:50 INFO QUEUE_POSITION | side=no order_id=b7eb11b3-a83d-49f4-9217-51fef3e29b00 ahead_contracts=0.00
+04:03:05 INFO QUEUE_POSITION | side=no order_id=b7eb11b3-a83d-49f4-9217-51fef3e29b00 ahead_contracts=0.00
+04:03:20 INFO QUEUE_POSITION | side=no order_id=b7eb11b3-a83d-49f4-9217-51fef3e29b00 ahead_contracts=0.00
+04:03:35 INFO QUEUE_POSITION | side=no order_id=b7eb11b3-a83d-49f4-9217-51fef3e29b00 ahead_contracts=0.00
+04:03:38 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=b7eb11b3-a83d-49f4-9217-51fef3e29b00
+04:03:38 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=b7eb11b3-a83d-49f4-9217-51fef3e29b00
+04:03:38 INFO CREATE_OK | side=no price_dollars=0.9600 remaining_contracts=10.00 order_id=1d82cef8-c78b-4fa4-9416-653dba876464
+04:03:50 INFO QUEUE_POSITION | side=no order_id=1d82cef8-c78b-4fa4-9416-653dba876464 ahead_contracts=0.00
+04:04:05 INFO QUEUE_POSITION | side=no order_id=1d82cef8-c78b-4fa4-9416-653dba876464 ahead_contracts=0.00
+04:04:20 INFO QUEUE_POSITION | side=no order_id=1d82cef8-c78b-4fa4-9416-653dba876464 ahead_contracts=0.00
+04:04:35 INFO QUEUE_POSITION | side=no order_id=1d82cef8-c78b-4fa4-9416-653dba876464 ahead_contracts=0.00
+04:04:37 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=1d82cef8-c78b-4fa4-9416-653dba876464
+04:04:37 INFO CREATE_OK | side=no price_dollars=0.9700 remaining_contracts=10.00 order_id=eaf1395e-6bb6-453f-9ff4-eb49b0830ef1
+04:04:38 INFO AMEND_OK | side=no price_dollars=0.9600 total_fillable_contracts=10.00 order_id=eaf1395e-6bb6-453f-9ff4-eb49b0830ef1
+04:04:50 INFO QUEUE_POSITION | side=no order_id=eaf1395e-6bb6-453f-9ff4-eb49b0830ef1 ahead_contracts=0.00
+04:05:05 INFO QUEUE_POSITION | side=no order_id=eaf1395e-6bb6-453f-9ff4-eb49b0830ef1 ahead_contracts=0.00
+04:05:20 INFO QUEUE_POSITION | side=no order_id=eaf1395e-6bb6-453f-9ff4-eb49b0830ef1 ahead_contracts=0.00
+04:05:33 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=eaf1395e-6bb6-453f-9ff4-eb49b0830ef1
+04:05:33 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=eaf1395e-6bb6-453f-9ff4-eb49b0830ef1
+04:05:33 INFO CREATE_OK | side=no price_dollars=0.9600 remaining_contracts=10.00 order_id=bdc12df9-d735-4121-9f95-880da50c1202
+04:05:35 INFO QUEUE_POSITION | side=no order_id=bdc12df9-d735-4121-9f95-880da50c1202 ahead_contracts=0.00
+04:05:50 INFO QUEUE_POSITION | side=no order_id=bdc12df9-d735-4121-9f95-880da50c1202 ahead_contracts=0.00
+04:06:05 INFO QUEUE_POSITION | side=no order_id=bdc12df9-d735-4121-9f95-880da50c1202 ahead_contracts=0.00
+04:06:20 INFO QUEUE_POSITION | side=no order_id=bdc12df9-d735-4121-9f95-880da50c1202 ahead_contracts=0.00
+04:06:32 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=bdc12df9-d735-4121-9f95-880da50c1202
+04:06:32 INFO CREATE_OK | side=no price_dollars=0.9700 remaining_contracts=10.00 order_id=0498c07f-ac68-491d-a864-0f7a01b181a1
+04:06:33 INFO AMEND_OK | side=no price_dollars=0.9600 total_fillable_contracts=10.00 order_id=0498c07f-ac68-491d-a864-0f7a01b181a1
+04:06:35 INFO QUEUE_POSITION | side=no order_id=0498c07f-ac68-491d-a864-0f7a01b181a1 ahead_contracts=0.00
+04:06:51 INFO QUEUE_POSITION | side=no order_id=0498c07f-ac68-491d-a864-0f7a01b181a1 ahead_contracts=0.00
+04:07:06 INFO QUEUE_POSITION | side=no order_id=0498c07f-ac68-491d-a864-0f7a01b181a1 ahead_contracts=0.00
+04:07:21 INFO QUEUE_POSITION | side=no order_id=0498c07f-ac68-491d-a864-0f7a01b181a1 ahead_contracts=0.00
+04:07:27 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=0498c07f-ac68-491d-a864-0f7a01b181a1
+04:07:27 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=0498c07f-ac68-491d-a864-0f7a01b181a1
+04:07:27 INFO CREATE_OK | side=no price_dollars=0.9600 remaining_contracts=10.00 order_id=be226527-310c-4e50-9bdf-56456bdc5018
+04:07:36 INFO QUEUE_POSITION | side=no order_id=be226527-310c-4e50-9bdf-56456bdc5018 ahead_contracts=0.00
+04:07:51 INFO QUEUE_POSITION | side=no order_id=be226527-310c-4e50-9bdf-56456bdc5018 ahead_contracts=0.00
+04:08:06 INFO QUEUE_POSITION | side=no order_id=be226527-310c-4e50-9bdf-56456bdc5018 ahead_contracts=0.00
+04:08:21 INFO QUEUE_POSITION | side=no order_id=be226527-310c-4e50-9bdf-56456bdc5018 ahead_contracts=0.00
+04:08:26 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=be226527-310c-4e50-9bdf-56456bdc5018
+04:08:26 INFO CREATE_OK | side=no price_dollars=0.9700 remaining_contracts=10.00 order_id=b662ce55-33db-4175-8847-2d4bb7118b27
+04:08:27 INFO AMEND_OK | side=no price_dollars=0.9600 total_fillable_contracts=10.00 order_id=b662ce55-33db-4175-8847-2d4bb7118b27
+04:08:36 INFO QUEUE_POSITION | side=no order_id=b662ce55-33db-4175-8847-2d4bb7118b27 ahead_contracts=0.00
+04:08:51 INFO QUEUE_POSITION | side=no order_id=b662ce55-33db-4175-8847-2d4bb7118b27 ahead_contracts=0.00
+04:09:06 INFO QUEUE_POSITION | side=no order_id=b662ce55-33db-4175-8847-2d4bb7118b27 ahead_contracts=0.00
+04:09:21 INFO QUEUE_POSITION | side=no order_id=b662ce55-33db-4175-8847-2d4bb7118b27 ahead_contracts=0.00
+04:09:21 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=b662ce55-33db-4175-8847-2d4bb7118b27
+04:09:21 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=b662ce55-33db-4175-8847-2d4bb7118b27
+04:09:21 INFO CREATE_OK | side=no price_dollars=0.9600 remaining_contracts=10.00 order_id=d0261b81-0eb1-4cf0-bef7-81d82445f7fc
+04:09:36 INFO QUEUE_POSITION | side=no order_id=d0261b81-0eb1-4cf0-bef7-81d82445f7fc ahead_contracts=0.00
+04:09:51 INFO QUEUE_POSITION | side=no order_id=d0261b81-0eb1-4cf0-bef7-81d82445f7fc ahead_contracts=0.00
+04:10:06 INFO QUEUE_POSITION | side=no order_id=d0261b81-0eb1-4cf0-bef7-81d82445f7fc ahead_contracts=0.00
+04:10:20 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=d0261b81-0eb1-4cf0-bef7-81d82445f7fc
+04:10:20 INFO CREATE_OK | side=no price_dollars=0.9700 remaining_contracts=10.00 order_id=081caed0-0751-4eb2-b7e7-d095231be364
+04:10:21 INFO AMEND_OK | side=no price_dollars=0.9600 total_fillable_contracts=10.00 order_id=081caed0-0751-4eb2-b7e7-d095231be364
+04:10:21 INFO QUEUE_POSITION | side=no order_id=081caed0-0751-4eb2-b7e7-d095231be364 ahead_contracts=0.00
+04:10:36 INFO QUEUE_POSITION | side=no order_id=081caed0-0751-4eb2-b7e7-d095231be364 ahead_contracts=0.00
+04:10:51 INFO QUEUE_POSITION | side=no order_id=081caed0-0751-4eb2-b7e7-d095231be364 ahead_contracts=0.00
+04:11:06 INFO QUEUE_POSITION | side=no order_id=081caed0-0751-4eb2-b7e7-d095231be364 ahead_contracts=0.00
+04:11:08 INFO AMEND_OK | side=no price_dollars=0.9700 total_fillable_contracts=10.00 order_id=081caed0-0751-4eb2-b7e7-d095231be364
+04:11:19 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=081caed0-0751-4eb2-b7e7-d095231be364
+04:11:19 INFO CREATE_OK | side=no price_dollars=0.9800 remaining_contracts=10.00 order_id=5fb61eee-6179-4aaa-8817-0eb670e4eacb
+04:11:20 INFO AMEND_OK | side=no price_dollars=0.9600 total_fillable_contracts=10.00 order_id=5fb61eee-6179-4aaa-8817-0eb670e4eacb
+04:11:21 INFO QUEUE_POSITION | side=no order_id=5fb61eee-6179-4aaa-8817-0eb670e4eacb ahead_contracts=1015.00
+04:11:36 INFO QUEUE_POSITION | side=no order_id=5fb61eee-6179-4aaa-8817-0eb670e4eacb ahead_contracts=1015.00
+04:11:51 INFO QUEUE_POSITION | side=no order_id=5fb61eee-6179-4aaa-8817-0eb670e4eacb ahead_contracts=1015.00
+04:12:06 INFO QUEUE_POSITION | side=no order_id=5fb61eee-6179-4aaa-8817-0eb670e4eacb ahead_contracts=1015.00
+04:12:18 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=5fb61eee-6179-4aaa-8817-0eb670e4eacb
+04:12:18 INFO CREATE_OK | side=no price_dollars=0.9700 remaining_contracts=10.00 order_id=d6c80492-8826-42c8-971e-e8d634940170
+04:12:19 INFO AMEND_OK | side=no price_dollars=0.9600 total_fillable_contracts=10.00 order_id=d6c80492-8826-42c8-971e-e8d634940170
+04:12:21 INFO QUEUE_POSITION | side=no order_id=d6c80492-8826-42c8-971e-e8d634940170 ahead_contracts=1015.00
+04:12:36 INFO QUEUE_POSITION | side=no order_id=d6c80492-8826-42c8-971e-e8d634940170 ahead_contracts=0.00
+04:12:51 INFO QUEUE_POSITION | side=no order_id=d6c80492-8826-42c8-971e-e8d634940170 ahead_contracts=0.00
+04:13:06 INFO QUEUE_POSITION | side=no order_id=d6c80492-8826-42c8-971e-e8d634940170 ahead_contracts=0.00
+04:13:13 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=d6c80492-8826-42c8-971e-e8d634940170
+04:13:13 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=d6c80492-8826-42c8-971e-e8d634940170
+04:13:13 INFO CREATE_OK | side=no price_dollars=0.9600 remaining_contracts=10.00 order_id=5e22f98c-4624-4292-a10f-d700e0a4a2a6
+04:13:14 INFO AMEND_OK | side=no price_dollars=0.8800 total_fillable_contracts=11.00 order_id=5e22f98c-4624-4292-a10f-d700e0a4a2a6
+04:13:22 INFO QUEUE_POSITION | side=no order_id=5e22f98c-4624-4292-a10f-d700e0a4a2a6 ahead_contracts=12.00
+04:13:37 INFO QUEUE_POSITION | side=no order_id=5e22f98c-4624-4292-a10f-d700e0a4a2a6 ahead_contracts=12.00
+04:13:52 INFO QUEUE_POSITION | side=no order_id=5e22f98c-4624-4292-a10f-d700e0a4a2a6 ahead_contracts=12.00
+04:14:07 INFO QUEUE_POSITION | side=no order_id=5e22f98c-4624-4292-a10f-d700e0a4a2a6 ahead_contracts=12.00
+04:14:12 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=5e22f98c-4624-4292-a10f-d700e0a4a2a6
+04:14:12 INFO CANCEL_SKIPPED_ORDER_MISSING | side=no reason=refresh_expiring_quote order_id=5e22f98c-4624-4292-a10f-d700e0a4a2a6
+04:14:12 INFO CREATE_OK | side=no price_dollars=0.8800 remaining_contracts=11.00 order_id=abb87070-3a73-49f6-8a77-cfde8c8bf06b
+04:14:22 INFO QUEUE_POSITION | side=no order_id=abb87070-3a73-49f6-8a77-cfde8c8bf06b ahead_contracts=12.00
+04:14:37 INFO QUEUE_POSITION | side=no order_id=abb87070-3a73-49f6-8a77-cfde8c8bf06b ahead_contracts=12.00
+04:14:52 INFO QUEUE_POSITION | side=no order_id=abb87070-3a73-49f6-8a77-cfde8c8bf06b ahead_contracts=12.00
+04:15:07 INFO QUEUE_POSITION | side=no order_id=abb87070-3a73-49f6-8a77-cfde8c8bf06b ahead_contracts=12.00
+04:15:11 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=abb87070-3a73-49f6-8a77-cfde8c8bf06b
+04:15:11 INFO CREATE_OK | side=no price_dollars=0.8900 remaining_contracts=11.00 order_id=5b8bceb4-e487-411b-8c67-e666fe47cc54
+04:15:12 INFO AMEND_OK | side=no price_dollars=0.8800 total_fillable_contracts=11.00 order_id=5b8bceb4-e487-411b-8c67-e666fe47cc54
+04:15:22 INFO QUEUE_POSITION | side=no order_id=5b8bceb4-e487-411b-8c67-e666fe47cc54 ahead_contracts=0.00
+04:15:37 INFO QUEUE_POSITION | side=no order_id=5b8bceb4-e487-411b-8c67-e666fe47cc54 ahead_contracts=0.00
+04:15:52 INFO QUEUE_POSITION | side=no order_id=5b8bceb4-e487-411b-8c67-e666fe47cc54 ahead_contracts=0.00
+04:16:07 INFO QUEUE_POSITION | side=no order_id=5b8bceb4-e487-411b-8c67-e666fe47cc54 ahead_contracts=0.00
+04:16:10 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=5b8bceb4-e487-411b-8c67-e666fe47cc54
+04:16:10 INFO CREATE_OK | side=no price_dollars=0.8900 remaining_contracts=11.00 order_id=9e34ee44-a581-4b85-b684-368fce45648d
+04:16:11 INFO AMEND_OK | side=no price_dollars=0.8600 total_fillable_contracts=11.00 order_id=9e34ee44-a581-4b85-b684-368fce45648d
+04:16:22 INFO QUEUE_POSITION | side=no order_id=9e34ee44-a581-4b85-b684-368fce45648d ahead_contracts=12.00
+04:16:37 INFO QUEUE_POSITION | side=no order_id=9e34ee44-a581-4b85-b684-368fce45648d ahead_contracts=12.00
+04:16:52 INFO QUEUE_POSITION | side=no order_id=9e34ee44-a581-4b85-b684-368fce45648d ahead_contracts=12.00
+04:17:07 INFO QUEUE_POSITION | side=no order_id=9e34ee44-a581-4b85-b684-368fce45648d ahead_contracts=12.00
+04:17:09 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=9e34ee44-a581-4b85-b684-368fce45648d
+04:17:09 INFO CREATE_OK | side=no price_dollars=0.8700 remaining_contracts=11.00 order_id=4a4941a5-01e9-4ac0-bee1-deda87f7fb87
+04:17:10 INFO AMEND_OK | side=no price_dollars=0.8600 total_fillable_contracts=11.00 order_id=4a4941a5-01e9-4ac0-bee1-deda87f7fb87
+04:17:22 INFO QUEUE_POSITION | side=no order_id=4a4941a5-01e9-4ac0-bee1-deda87f7fb87 ahead_contracts=12.00
+04:17:37 INFO QUEUE_POSITION | side=no order_id=4a4941a5-01e9-4ac0-bee1-deda87f7fb87 ahead_contracts=12.00
+04:17:52 INFO QUEUE_POSITION | side=no order_id=4a4941a5-01e9-4ac0-bee1-deda87f7fb87 ahead_contracts=12.00
+04:18:01 INFO CANCEL_REQUESTED | side=no reason=quote_disabled order_id=4a4941a5-01e9-4ac0-bee1-deda87f7fb87
+04:18:01 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=4a4941a5-01e9-4ac0-bee1-deda87f7fb87
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/V1.py", line 1870, in <module>
+    main()
+  File "/workspaces/Kalshi_alg/V1.py", line 1866, in main
+    asyncio.run(bot.run())
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/runners.py", line 194, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/base_events.py", line 671, in run_until_complete
+    self.run_forever()
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/base_events.py", line 638, in run_forever
+    self._run_once()
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/base_events.py", line 1933, in _run_once
+    event_list = self._selector.select(timeout)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/selectors.py", line 468, in select
+    fd_event_list = self._selector.poll(timeout, max_ev)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/codespace/.python/current/lib/python3.12/asyncio/runners.py", line 157, in _on_sigint
+    raise KeyboardInterrupt()
+KeyboardInterrupt

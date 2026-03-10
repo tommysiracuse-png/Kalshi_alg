@@ -1,0 +1,417 @@
+
+=== START 2026-03-08 06:26:22 ===
+CMD: /home/codespace/.python/current/bin/python3 /workspaces/Kalshi_alg/V1.py --ticker KXWBCMVP-26-SOHT --yes-budget-cents 1000 --no-budget-cents 1000
+06:26:24 INFO START | environment=PROD ticker=KXWBCMVP-26-SOHT yes_budget_cents=1000 no_budget_cents=1000 price_structure=linear_cent fractional_trading=False dry_run=False websocket=wss://api.elections.kalshi.com/trade-api/ws/v2
+06:26:24 INFO STARTUP_POSITION | contracts=0.00
+06:26:24 INFO WS_CONNECTED_AND_SUBSCRIBED
+06:26:24 INFO CREATE_OK | side=yes price_dollars=0.2500 remaining_contracts=39.00 order_id=b712d944-4c77-4d89-8ad0-19c95e9b7b94
+06:26:24 INFO CREATE_OK | side=no price_dollars=0.7100 remaining_contracts=14.00 order_id=d6027f65-41ce-4616-b631-b4486941d7ee
+06:26:24 INFO AMEND_OK | side=yes price_dollars=0.2400 total_fillable_contracts=41.00 order_id=b712d944-4c77-4d89-8ad0-19c95e9b7b94
+06:26:24 INFO AMEND_OK | side=no price_dollars=0.7000 total_fillable_contracts=14.00 order_id=d6027f65-41ce-4616-b631-b4486941d7ee
+06:26:39 INFO QUEUE_POSITION | side=yes order_id=b712d944-4c77-4d89-8ad0-19c95e9b7b94 ahead_contracts=5.00
+06:26:39 INFO QUEUE_POSITION | side=no order_id=d6027f65-41ce-4616-b631-b4486941d7ee ahead_contracts=718.00
+06:26:54 INFO QUEUE_POSITION | side=yes order_id=b712d944-4c77-4d89-8ad0-19c95e9b7b94 ahead_contracts=0.00
+06:26:54 INFO QUEUE_POSITION | side=no order_id=d6027f65-41ce-4616-b631-b4486941d7ee ahead_contracts=718.00
+06:27:09 INFO QUEUE_POSITION | side=yes order_id=b712d944-4c77-4d89-8ad0-19c95e9b7b94 ahead_contracts=0.00
+06:27:09 INFO QUEUE_POSITION | side=no order_id=d6027f65-41ce-4616-b631-b4486941d7ee ahead_contracts=718.00
+06:27:24 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=d6027f65-41ce-4616-b631-b4486941d7ee
+06:27:24 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=b712d944-4c77-4d89-8ad0-19c95e9b7b94
+06:27:24 INFO CANCEL_SKIPPED_ORDER_MISSING | side=yes reason=refresh_expiring_quote order_id=b712d944-4c77-4d89-8ad0-19c95e9b7b94
+06:27:24 INFO CREATE_OK | side=yes price_dollars=0.2400 remaining_contracts=41.00 order_id=f1c1ba50-9a89-44d4-b8a6-b7408d7912ba
+06:27:24 INFO CREATE_OK | side=no price_dollars=0.7100 remaining_contracts=14.00 order_id=3945f626-f436-4e09-85ea-ce8b3d0399fb
+06:27:24 INFO AMEND_OK | side=no price_dollars=0.7000 total_fillable_contracts=14.00 order_id=3945f626-f436-4e09-85ea-ce8b3d0399fb
+06:27:24 INFO QUEUE_POSITION | side=yes order_id=f1c1ba50-9a89-44d4-b8a6-b7408d7912ba ahead_contracts=0.00
+06:27:24 INFO QUEUE_POSITION | side=no order_id=3945f626-f436-4e09-85ea-ce8b3d0399fb ahead_contracts=718.00
+06:27:39 INFO QUEUE_POSITION | side=yes order_id=f1c1ba50-9a89-44d4-b8a6-b7408d7912ba ahead_contracts=0.00
+06:27:39 INFO QUEUE_POSITION | side=no order_id=3945f626-f436-4e09-85ea-ce8b3d0399fb ahead_contracts=718.00
+06:27:54 INFO QUEUE_POSITION | side=yes order_id=f1c1ba50-9a89-44d4-b8a6-b7408d7912ba ahead_contracts=0.00
+06:27:54 INFO QUEUE_POSITION | side=no order_id=3945f626-f436-4e09-85ea-ce8b3d0399fb ahead_contracts=718.00
+06:28:09 INFO QUEUE_POSITION | side=yes order_id=f1c1ba50-9a89-44d4-b8a6-b7408d7912ba ahead_contracts=0.00
+06:28:09 INFO QUEUE_POSITION | side=no order_id=3945f626-f436-4e09-85ea-ce8b3d0399fb ahead_contracts=718.00
+06:28:24 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=3945f626-f436-4e09-85ea-ce8b3d0399fb
+06:28:24 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=f1c1ba50-9a89-44d4-b8a6-b7408d7912ba
+06:28:24 INFO CANCEL_SKIPPED_ORDER_MISSING | side=yes reason=refresh_expiring_quote order_id=f1c1ba50-9a89-44d4-b8a6-b7408d7912ba
+06:28:24 INFO CREATE_OK | side=yes price_dollars=0.2400 remaining_contracts=41.00 order_id=767e7938-fbf4-43be-8bad-987db79bdf7e
+06:28:24 INFO CREATE_OK | side=no price_dollars=0.7100 remaining_contracts=14.00 order_id=8e7a4af5-320f-490a-8fb9-7cbcb7cf95c4
+06:28:24 INFO AMEND_OK | side=no price_dollars=0.7000 total_fillable_contracts=14.00 order_id=8e7a4af5-320f-490a-8fb9-7cbcb7cf95c4
+06:28:24 INFO QUEUE_POSITION | side=yes order_id=767e7938-fbf4-43be-8bad-987db79bdf7e ahead_contracts=0.00
+06:28:24 INFO QUEUE_POSITION | side=no order_id=8e7a4af5-320f-490a-8fb9-7cbcb7cf95c4 ahead_contracts=718.00
+06:28:39 INFO QUEUE_POSITION | side=yes order_id=767e7938-fbf4-43be-8bad-987db79bdf7e ahead_contracts=0.00
+06:28:39 INFO QUEUE_POSITION | side=no order_id=8e7a4af5-320f-490a-8fb9-7cbcb7cf95c4 ahead_contracts=718.00
+06:28:54 INFO QUEUE_POSITION | side=yes order_id=767e7938-fbf4-43be-8bad-987db79bdf7e ahead_contracts=0.00
+06:28:54 INFO QUEUE_POSITION | side=no order_id=8e7a4af5-320f-490a-8fb9-7cbcb7cf95c4 ahead_contracts=718.00
+06:29:09 INFO QUEUE_POSITION | side=yes order_id=767e7938-fbf4-43be-8bad-987db79bdf7e ahead_contracts=0.00
+06:29:10 INFO QUEUE_POSITION | side=no order_id=8e7a4af5-320f-490a-8fb9-7cbcb7cf95c4 ahead_contracts=718.00
+06:29:24 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=767e7938-fbf4-43be-8bad-987db79bdf7e
+06:29:24 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=8e7a4af5-320f-490a-8fb9-7cbcb7cf95c4
+06:29:24 INFO CREATE_OK | side=yes price_dollars=0.2500 remaining_contracts=39.00 order_id=51643c68-a365-4903-8fe8-97c103743bb0
+06:29:24 INFO CREATE_OK | side=no price_dollars=0.7000 remaining_contracts=14.00 order_id=d21689bf-0af4-46e1-8bf6-262cf41dcc0c
+06:29:24 INFO AMEND_OK | side=yes price_dollars=0.2400 total_fillable_contracts=41.00 order_id=51643c68-a365-4903-8fe8-97c103743bb0
+06:29:25 INFO QUEUE_POSITION | side=yes order_id=51643c68-a365-4903-8fe8-97c103743bb0 ahead_contracts=0.00
+06:29:25 INFO QUEUE_POSITION | side=no order_id=d21689bf-0af4-46e1-8bf6-262cf41dcc0c ahead_contracts=718.00
+06:29:40 INFO QUEUE_POSITION | side=yes order_id=51643c68-a365-4903-8fe8-97c103743bb0 ahead_contracts=0.00
+06:29:40 INFO QUEUE_POSITION | side=no order_id=d21689bf-0af4-46e1-8bf6-262cf41dcc0c ahead_contracts=718.00
+06:29:55 INFO QUEUE_POSITION | side=yes order_id=51643c68-a365-4903-8fe8-97c103743bb0 ahead_contracts=0.00
+06:29:55 INFO QUEUE_POSITION | side=no order_id=d21689bf-0af4-46e1-8bf6-262cf41dcc0c ahead_contracts=718.00
+06:30:10 INFO QUEUE_POSITION | side=yes order_id=51643c68-a365-4903-8fe8-97c103743bb0 ahead_contracts=0.00
+06:30:10 INFO QUEUE_POSITION | side=no order_id=d21689bf-0af4-46e1-8bf6-262cf41dcc0c ahead_contracts=718.00
+06:30:24 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=51643c68-a365-4903-8fe8-97c103743bb0
+06:30:24 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=d21689bf-0af4-46e1-8bf6-262cf41dcc0c
+06:30:24 INFO CREATE_OK | side=yes price_dollars=0.2500 remaining_contracts=39.00 order_id=67e0180f-8517-43f2-8a7d-38b3d44a70cd
+06:30:24 INFO CREATE_OK | side=no price_dollars=0.7000 remaining_contracts=14.00 order_id=e0696557-d25c-4fb1-a1a9-e26d71454c95
+06:30:24 INFO AMEND_OK | side=yes price_dollars=0.2400 total_fillable_contracts=41.00 order_id=67e0180f-8517-43f2-8a7d-38b3d44a70cd
+06:30:25 INFO QUEUE_POSITION | side=yes order_id=67e0180f-8517-43f2-8a7d-38b3d44a70cd ahead_contracts=0.00
+06:30:25 INFO QUEUE_POSITION | side=no order_id=e0696557-d25c-4fb1-a1a9-e26d71454c95 ahead_contracts=718.00
+06:30:40 INFO QUEUE_POSITION | side=yes order_id=67e0180f-8517-43f2-8a7d-38b3d44a70cd ahead_contracts=0.00
+06:30:40 INFO QUEUE_POSITION | side=no order_id=e0696557-d25c-4fb1-a1a9-e26d71454c95 ahead_contracts=718.00
+06:30:55 INFO QUEUE_POSITION | side=yes order_id=67e0180f-8517-43f2-8a7d-38b3d44a70cd ahead_contracts=0.00
+06:30:55 INFO QUEUE_POSITION | side=no order_id=e0696557-d25c-4fb1-a1a9-e26d71454c95 ahead_contracts=718.00
+06:31:10 INFO QUEUE_POSITION | side=yes order_id=67e0180f-8517-43f2-8a7d-38b3d44a70cd ahead_contracts=0.00
+06:31:10 INFO QUEUE_POSITION | side=no order_id=e0696557-d25c-4fb1-a1a9-e26d71454c95 ahead_contracts=718.00
+06:31:21 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=67e0180f-8517-43f2-8a7d-38b3d44a70cd
+06:31:21 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=67e0180f-8517-43f2-8a7d-38b3d44a70cd
+06:31:21 INFO CREATE_OK | side=yes price_dollars=0.2400 remaining_contracts=41.00 order_id=f9bde4ed-88cb-4811-8b5c-f5244d4b0520
+06:31:21 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=e0696557-d25c-4fb1-a1a9-e26d71454c95
+06:31:21 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=e0696557-d25c-4fb1-a1a9-e26d71454c95
+06:31:21 INFO CREATE_OK | side=no price_dollars=0.7000 remaining_contracts=14.00 order_id=44b1b77e-17e8-4dde-bfc8-1a7ac5a54a4d
+06:31:25 INFO QUEUE_POSITION | side=yes order_id=f9bde4ed-88cb-4811-8b5c-f5244d4b0520 ahead_contracts=0.00
+06:31:25 INFO QUEUE_POSITION | side=no order_id=44b1b77e-17e8-4dde-bfc8-1a7ac5a54a4d ahead_contracts=718.00
+06:31:40 INFO QUEUE_POSITION | side=yes order_id=f9bde4ed-88cb-4811-8b5c-f5244d4b0520 ahead_contracts=0.00
+06:31:40 INFO QUEUE_POSITION | side=no order_id=44b1b77e-17e8-4dde-bfc8-1a7ac5a54a4d ahead_contracts=718.00
+06:31:55 INFO QUEUE_POSITION | side=yes order_id=f9bde4ed-88cb-4811-8b5c-f5244d4b0520 ahead_contracts=0.00
+06:31:55 INFO QUEUE_POSITION | side=no order_id=44b1b77e-17e8-4dde-bfc8-1a7ac5a54a4d ahead_contracts=718.00
+06:32:10 INFO QUEUE_POSITION | side=yes order_id=f9bde4ed-88cb-4811-8b5c-f5244d4b0520 ahead_contracts=0.00
+06:32:10 INFO QUEUE_POSITION | side=no order_id=44b1b77e-17e8-4dde-bfc8-1a7ac5a54a4d ahead_contracts=718.00
+06:32:21 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=44b1b77e-17e8-4dde-bfc8-1a7ac5a54a4d
+06:32:21 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=f9bde4ed-88cb-4811-8b5c-f5244d4b0520
+06:32:21 INFO CANCEL_SKIPPED_ORDER_MISSING | side=yes reason=refresh_expiring_quote order_id=f9bde4ed-88cb-4811-8b5c-f5244d4b0520
+06:32:21 INFO CREATE_OK | side=yes price_dollars=0.2400 remaining_contracts=41.00 order_id=9ab5f1d8-2db9-460c-ac15-8298d5f79386
+06:32:21 INFO CREATE_OK | side=no price_dollars=0.7100 remaining_contracts=14.00 order_id=c3a5d298-0e1c-431b-90d0-d204d9c88327
+06:32:21 INFO AMEND_OK | side=no price_dollars=0.7000 total_fillable_contracts=14.00 order_id=c3a5d298-0e1c-431b-90d0-d204d9c88327
+06:32:25 INFO QUEUE_POSITION | side=yes order_id=9ab5f1d8-2db9-460c-ac15-8298d5f79386 ahead_contracts=0.00
+06:32:25 INFO QUEUE_POSITION | side=no order_id=c3a5d298-0e1c-431b-90d0-d204d9c88327 ahead_contracts=718.00
+06:32:40 INFO QUEUE_POSITION | side=yes order_id=9ab5f1d8-2db9-460c-ac15-8298d5f79386 ahead_contracts=0.00
+06:32:40 INFO QUEUE_POSITION | side=no order_id=c3a5d298-0e1c-431b-90d0-d204d9c88327 ahead_contracts=718.00
+06:32:56 INFO QUEUE_POSITION | side=yes order_id=9ab5f1d8-2db9-460c-ac15-8298d5f79386 ahead_contracts=0.00
+06:32:56 INFO QUEUE_POSITION | side=no order_id=c3a5d298-0e1c-431b-90d0-d204d9c88327 ahead_contracts=718.00
+06:33:11 INFO QUEUE_POSITION | side=yes order_id=9ab5f1d8-2db9-460c-ac15-8298d5f79386 ahead_contracts=0.00
+06:33:11 INFO QUEUE_POSITION | side=no order_id=c3a5d298-0e1c-431b-90d0-d204d9c88327 ahead_contracts=718.00
+06:33:21 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=c3a5d298-0e1c-431b-90d0-d204d9c88327
+06:33:21 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=9ab5f1d8-2db9-460c-ac15-8298d5f79386
+06:33:21 INFO CANCEL_SKIPPED_ORDER_MISSING | side=yes reason=refresh_expiring_quote order_id=9ab5f1d8-2db9-460c-ac15-8298d5f79386
+06:33:21 INFO CREATE_OK | side=yes price_dollars=0.2400 remaining_contracts=41.00 order_id=70e7c3d4-0b04-4dda-a054-5cc7757359e7
+06:33:21 INFO CREATE_OK | side=no price_dollars=0.7100 remaining_contracts=14.00 order_id=84818435-98f3-4735-a3ae-dc9b971d5034
+06:33:21 INFO AMEND_OK | side=no price_dollars=0.7000 total_fillable_contracts=14.00 order_id=84818435-98f3-4735-a3ae-dc9b971d5034
+06:33:26 INFO QUEUE_POSITION | side=yes order_id=70e7c3d4-0b04-4dda-a054-5cc7757359e7 ahead_contracts=0.00
+06:33:26 INFO QUEUE_POSITION | side=no order_id=84818435-98f3-4735-a3ae-dc9b971d5034 ahead_contracts=718.00
+06:33:41 INFO QUEUE_POSITION | side=yes order_id=70e7c3d4-0b04-4dda-a054-5cc7757359e7 ahead_contracts=0.00
+06:33:41 INFO QUEUE_POSITION | side=no order_id=84818435-98f3-4735-a3ae-dc9b971d5034 ahead_contracts=718.00
+06:33:56 INFO QUEUE_POSITION | side=yes order_id=70e7c3d4-0b04-4dda-a054-5cc7757359e7 ahead_contracts=0.00
+06:33:56 INFO QUEUE_POSITION | side=no order_id=84818435-98f3-4735-a3ae-dc9b971d5034 ahead_contracts=711.00
+06:34:11 INFO QUEUE_POSITION | side=yes order_id=70e7c3d4-0b04-4dda-a054-5cc7757359e7 ahead_contracts=0.00
+06:34:11 INFO QUEUE_POSITION | side=no order_id=84818435-98f3-4735-a3ae-dc9b971d5034 ahead_contracts=711.00
+06:34:21 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=84818435-98f3-4735-a3ae-dc9b971d5034
+06:34:21 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=70e7c3d4-0b04-4dda-a054-5cc7757359e7
+06:34:21 INFO CANCEL_SKIPPED_ORDER_MISSING | side=yes reason=refresh_expiring_quote order_id=70e7c3d4-0b04-4dda-a054-5cc7757359e7
+06:34:21 INFO CREATE_OK | side=yes price_dollars=0.2400 remaining_contracts=41.00 order_id=71c44b3b-a21b-402f-b3e8-b973e74f8d29
+06:34:21 INFO CREATE_OK | side=no price_dollars=0.7100 remaining_contracts=14.00 order_id=f5ab2f81-b302-42d7-8341-20886c237e36
+06:34:21 INFO AMEND_OK | side=no price_dollars=0.7000 total_fillable_contracts=14.00 order_id=f5ab2f81-b302-42d7-8341-20886c237e36
+06:34:26 INFO QUEUE_POSITION | side=yes order_id=71c44b3b-a21b-402f-b3e8-b973e74f8d29 ahead_contracts=0.00
+06:34:26 INFO QUEUE_POSITION | side=no order_id=f5ab2f81-b302-42d7-8341-20886c237e36 ahead_contracts=711.00
+06:34:41 INFO QUEUE_POSITION | side=yes order_id=71c44b3b-a21b-402f-b3e8-b973e74f8d29 ahead_contracts=0.00
+06:34:41 INFO QUEUE_POSITION | side=no order_id=f5ab2f81-b302-42d7-8341-20886c237e36 ahead_contracts=711.00
+06:34:56 INFO QUEUE_POSITION | side=yes order_id=71c44b3b-a21b-402f-b3e8-b973e74f8d29 ahead_contracts=0.00
+06:34:56 INFO QUEUE_POSITION | side=no order_id=f5ab2f81-b302-42d7-8341-20886c237e36 ahead_contracts=711.00
+06:35:11 INFO QUEUE_POSITION | side=yes order_id=71c44b3b-a21b-402f-b3e8-b973e74f8d29 ahead_contracts=0.00
+06:35:11 INFO QUEUE_POSITION | side=no order_id=f5ab2f81-b302-42d7-8341-20886c237e36 ahead_contracts=711.00
+06:35:21 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=f5ab2f81-b302-42d7-8341-20886c237e36
+06:35:21 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=71c44b3b-a21b-402f-b3e8-b973e74f8d29
+06:35:21 INFO CREATE_OK | side=yes price_dollars=0.2500 remaining_contracts=39.00 order_id=ebc4fdd4-f192-42bb-9907-f78a6107e863
+06:35:21 INFO CREATE_OK | side=no price_dollars=0.7100 remaining_contracts=14.00 order_id=be1bc9e9-dfc7-4c25-8ab5-1b2acd62af0d
+06:35:21 INFO AMEND_OK | side=yes price_dollars=0.2400 total_fillable_contracts=41.00 order_id=ebc4fdd4-f192-42bb-9907-f78a6107e863
+06:35:21 INFO AMEND_OK | side=no price_dollars=0.7000 total_fillable_contracts=14.00 order_id=be1bc9e9-dfc7-4c25-8ab5-1b2acd62af0d
+06:35:26 INFO QUEUE_POSITION | side=yes order_id=ebc4fdd4-f192-42bb-9907-f78a6107e863 ahead_contracts=0.00
+06:35:26 INFO QUEUE_POSITION | side=no order_id=be1bc9e9-dfc7-4c25-8ab5-1b2acd62af0d ahead_contracts=711.00
+06:35:41 INFO QUEUE_POSITION | side=yes order_id=ebc4fdd4-f192-42bb-9907-f78a6107e863 ahead_contracts=0.00
+06:35:41 INFO QUEUE_POSITION | side=no order_id=be1bc9e9-dfc7-4c25-8ab5-1b2acd62af0d ahead_contracts=711.00
+06:35:56 INFO QUEUE_POSITION | side=yes order_id=ebc4fdd4-f192-42bb-9907-f78a6107e863 ahead_contracts=0.00
+06:35:56 INFO QUEUE_POSITION | side=no order_id=be1bc9e9-dfc7-4c25-8ab5-1b2acd62af0d ahead_contracts=711.00
+06:36:11 INFO QUEUE_POSITION | side=yes order_id=ebc4fdd4-f192-42bb-9907-f78a6107e863 ahead_contracts=0.00
+06:36:12 INFO QUEUE_POSITION | side=no order_id=be1bc9e9-dfc7-4c25-8ab5-1b2acd62af0d ahead_contracts=711.00
+06:36:21 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=ebc4fdd4-f192-42bb-9907-f78a6107e863
+06:36:21 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=be1bc9e9-dfc7-4c25-8ab5-1b2acd62af0d
+06:36:21 INFO CREATE_OK | side=yes price_dollars=0.2500 remaining_contracts=39.00 order_id=e01f6cef-51f9-4092-8f85-7dc97c69fe78
+06:36:21 INFO CREATE_OK | side=no price_dollars=0.7000 remaining_contracts=14.00 order_id=b15588e3-2842-43c4-9ec8-3d3b354be484
+06:36:21 INFO AMEND_OK | side=yes price_dollars=0.2400 total_fillable_contracts=41.00 order_id=e01f6cef-51f9-4092-8f85-7dc97c69fe78
+06:36:27 INFO QUEUE_POSITION | side=yes order_id=e01f6cef-51f9-4092-8f85-7dc97c69fe78 ahead_contracts=0.00
+06:36:27 INFO QUEUE_POSITION | side=no order_id=b15588e3-2842-43c4-9ec8-3d3b354be484 ahead_contracts=711.00
+06:36:42 INFO QUEUE_POSITION | side=yes order_id=e01f6cef-51f9-4092-8f85-7dc97c69fe78 ahead_contracts=0.00
+06:36:42 INFO QUEUE_POSITION | side=no order_id=b15588e3-2842-43c4-9ec8-3d3b354be484 ahead_contracts=711.00
+06:36:57 INFO QUEUE_POSITION | side=yes order_id=e01f6cef-51f9-4092-8f85-7dc97c69fe78 ahead_contracts=0.00
+06:36:57 INFO QUEUE_POSITION | side=no order_id=b15588e3-2842-43c4-9ec8-3d3b354be484 ahead_contracts=711.00
+06:37:12 INFO QUEUE_POSITION | side=yes order_id=e01f6cef-51f9-4092-8f85-7dc97c69fe78 ahead_contracts=0.00
+06:37:12 INFO QUEUE_POSITION | side=no order_id=b15588e3-2842-43c4-9ec8-3d3b354be484 ahead_contracts=711.00
+06:37:21 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=e01f6cef-51f9-4092-8f85-7dc97c69fe78
+06:37:21 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=b15588e3-2842-43c4-9ec8-3d3b354be484
+06:37:21 INFO CREATE_OK | side=yes price_dollars=0.2500 remaining_contracts=39.00 order_id=162fbb40-7565-459f-8c01-8e127f3ca722
+06:37:21 INFO CREATE_OK | side=no price_dollars=0.7100 remaining_contracts=14.00 order_id=1d2e73e8-e0ce-4c40-95b3-b40f6e8755ca
+06:37:21 INFO AMEND_OK | side=yes price_dollars=0.2400 total_fillable_contracts=41.00 order_id=162fbb40-7565-459f-8c01-8e127f3ca722
+06:37:21 INFO AMEND_OK | side=no price_dollars=0.7000 total_fillable_contracts=14.00 order_id=1d2e73e8-e0ce-4c40-95b3-b40f6e8755ca
+06:37:27 INFO QUEUE_POSITION | side=yes order_id=162fbb40-7565-459f-8c01-8e127f3ca722 ahead_contracts=0.00
+06:37:27 INFO QUEUE_POSITION | side=no order_id=1d2e73e8-e0ce-4c40-95b3-b40f6e8755ca ahead_contracts=711.00
+06:37:42 INFO QUEUE_POSITION | side=yes order_id=162fbb40-7565-459f-8c01-8e127f3ca722 ahead_contracts=0.00
+06:37:42 INFO QUEUE_POSITION | side=no order_id=1d2e73e8-e0ce-4c40-95b3-b40f6e8755ca ahead_contracts=711.00
+06:37:57 INFO QUEUE_POSITION | side=yes order_id=162fbb40-7565-459f-8c01-8e127f3ca722 ahead_contracts=0.00
+06:37:57 INFO QUEUE_POSITION | side=no order_id=1d2e73e8-e0ce-4c40-95b3-b40f6e8755ca ahead_contracts=711.00
+06:38:12 INFO QUEUE_POSITION | side=yes order_id=162fbb40-7565-459f-8c01-8e127f3ca722 ahead_contracts=0.00
+06:38:12 INFO QUEUE_POSITION | side=no order_id=1d2e73e8-e0ce-4c40-95b3-b40f6e8755ca ahead_contracts=711.00
+06:38:21 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=1d2e73e8-e0ce-4c40-95b3-b40f6e8755ca
+06:38:21 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=162fbb40-7565-459f-8c01-8e127f3ca722
+06:38:21 INFO CANCEL_SKIPPED_ORDER_MISSING | side=yes reason=refresh_expiring_quote order_id=162fbb40-7565-459f-8c01-8e127f3ca722
+06:38:21 INFO CREATE_OK | side=yes price_dollars=0.2400 remaining_contracts=41.00 order_id=2fc2ad8c-d36c-4a78-ab72-92a4bb1ed0ea
+06:38:21 INFO CREATE_OK | side=no price_dollars=0.7100 remaining_contracts=14.00 order_id=117a63f3-d59a-4fc5-b705-450d15531ab0
+06:38:21 INFO AMEND_OK | side=no price_dollars=0.7000 total_fillable_contracts=14.00 order_id=117a63f3-d59a-4fc5-b705-450d15531ab0
+06:38:27 INFO QUEUE_POSITION | side=yes order_id=2fc2ad8c-d36c-4a78-ab72-92a4bb1ed0ea ahead_contracts=0.00
+06:38:27 INFO QUEUE_POSITION | side=no order_id=117a63f3-d59a-4fc5-b705-450d15531ab0 ahead_contracts=711.00
+06:38:42 INFO QUEUE_POSITION | side=yes order_id=2fc2ad8c-d36c-4a78-ab72-92a4bb1ed0ea ahead_contracts=0.00
+06:38:42 INFO QUEUE_POSITION | side=no order_id=117a63f3-d59a-4fc5-b705-450d15531ab0 ahead_contracts=711.00
+06:38:57 INFO QUEUE_POSITION | side=yes order_id=2fc2ad8c-d36c-4a78-ab72-92a4bb1ed0ea ahead_contracts=0.00
+06:38:57 INFO QUEUE_POSITION | side=no order_id=117a63f3-d59a-4fc5-b705-450d15531ab0 ahead_contracts=711.00
+06:39:12 INFO QUEUE_POSITION | side=yes order_id=2fc2ad8c-d36c-4a78-ab72-92a4bb1ed0ea ahead_contracts=0.00
+06:39:12 INFO QUEUE_POSITION | side=no order_id=117a63f3-d59a-4fc5-b705-450d15531ab0 ahead_contracts=711.00
+06:39:21 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=117a63f3-d59a-4fc5-b705-450d15531ab0
+06:39:21 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=2fc2ad8c-d36c-4a78-ab72-92a4bb1ed0ea
+06:39:21 INFO CREATE_OK | side=yes price_dollars=0.2500 remaining_contracts=39.00 order_id=f5272a19-6701-4977-8b4c-e11d74c6d45e
+06:39:21 INFO CREATE_OK | side=no price_dollars=0.7100 remaining_contracts=14.00 order_id=ffb4c25d-7654-45eb-8a94-eeb56de48e57
+06:39:21 INFO AMEND_OK | side=yes price_dollars=0.2400 total_fillable_contracts=41.00 order_id=f5272a19-6701-4977-8b4c-e11d74c6d45e
+06:39:21 INFO AMEND_OK | side=no price_dollars=0.7000 total_fillable_contracts=14.00 order_id=ffb4c25d-7654-45eb-8a94-eeb56de48e57
+06:39:27 INFO QUEUE_POSITION | side=yes order_id=f5272a19-6701-4977-8b4c-e11d74c6d45e ahead_contracts=0.00
+06:39:27 INFO QUEUE_POSITION | side=no order_id=ffb4c25d-7654-45eb-8a94-eeb56de48e57 ahead_contracts=711.00
+06:39:42 INFO QUEUE_POSITION | side=yes order_id=f5272a19-6701-4977-8b4c-e11d74c6d45e ahead_contracts=0.00
+06:39:42 INFO QUEUE_POSITION | side=no order_id=ffb4c25d-7654-45eb-8a94-eeb56de48e57 ahead_contracts=711.00
+06:39:57 INFO QUEUE_POSITION | side=yes order_id=f5272a19-6701-4977-8b4c-e11d74c6d45e ahead_contracts=0.00
+06:39:58 INFO QUEUE_POSITION | side=no order_id=ffb4c25d-7654-45eb-8a94-eeb56de48e57 ahead_contracts=711.00
+06:40:13 INFO QUEUE_POSITION | side=yes order_id=f5272a19-6701-4977-8b4c-e11d74c6d45e ahead_contracts=0.00
+06:40:13 INFO QUEUE_POSITION | side=no order_id=ffb4c25d-7654-45eb-8a94-eeb56de48e57 ahead_contracts=711.00
+06:40:18 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=f5272a19-6701-4977-8b4c-e11d74c6d45e
+06:40:18 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=f5272a19-6701-4977-8b4c-e11d74c6d45e
+06:40:18 INFO CREATE_OK | side=yes price_dollars=0.2400 remaining_contracts=41.00 order_id=e6b36095-e6ed-4494-b3ea-340e01afd904
+06:40:18 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=ffb4c25d-7654-45eb-8a94-eeb56de48e57
+06:40:18 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=ffb4c25d-7654-45eb-8a94-eeb56de48e57
+06:40:18 INFO CREATE_OK | side=no price_dollars=0.6900 remaining_contracts=14.00 order_id=34d85a33-5223-41bc-92e2-60a5d022ae1c
+06:40:18 INFO CANCEL_REQUESTED | side=yes reason=quote_disabled order_id=e6b36095-e6ed-4494-b3ea-340e01afd904
+06:40:18 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=e6b36095-e6ed-4494-b3ea-340e01afd904
+06:40:21 INFO CREATE_OK | side=yes price_dollars=0.2500 remaining_contracts=39.00 order_id=ee058040-73b9-423a-98c1-690b30e1ae51
+06:40:21 INFO AMEND_OK | side=yes price_dollars=0.2400 total_fillable_contracts=41.00 order_id=ee058040-73b9-423a-98c1-690b30e1ae51
+06:40:28 INFO QUEUE_POSITION | side=yes order_id=ee058040-73b9-423a-98c1-690b30e1ae51 ahead_contracts=0.00
+06:40:28 INFO QUEUE_POSITION | side=no order_id=34d85a33-5223-41bc-92e2-60a5d022ae1c ahead_contracts=1604.00
+06:40:43 INFO QUEUE_POSITION | side=yes order_id=ee058040-73b9-423a-98c1-690b30e1ae51 ahead_contracts=0.00
+06:40:43 INFO QUEUE_POSITION | side=no order_id=34d85a33-5223-41bc-92e2-60a5d022ae1c ahead_contracts=1604.00
+06:40:58 INFO QUEUE_POSITION | side=yes order_id=ee058040-73b9-423a-98c1-690b30e1ae51 ahead_contracts=0.00
+06:40:58 INFO QUEUE_POSITION | side=no order_id=34d85a33-5223-41bc-92e2-60a5d022ae1c ahead_contracts=1604.00
+06:41:13 INFO QUEUE_POSITION | side=yes order_id=ee058040-73b9-423a-98c1-690b30e1ae51 ahead_contracts=0.00
+06:41:13 INFO QUEUE_POSITION | side=no order_id=34d85a33-5223-41bc-92e2-60a5d022ae1c ahead_contracts=1604.00
+06:41:18 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=34d85a33-5223-41bc-92e2-60a5d022ae1c
+06:41:18 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=ee058040-73b9-423a-98c1-690b30e1ae51
+06:41:18 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=ee058040-73b9-423a-98c1-690b30e1ae51
+06:41:18 INFO CREATE_OK | side=yes price_dollars=0.2400 remaining_contracts=41.00 order_id=249d56cc-681e-4f79-bb3b-ca67aa8092d1
+06:41:18 INFO CREATE_OK | side=no price_dollars=0.7000 remaining_contracts=14.00 order_id=89f2ee84-60e4-47f7-abb2-a11fd50ccbd8
+06:41:18 INFO AMEND_OK | side=no price_dollars=0.6900 total_fillable_contracts=14.00 order_id=89f2ee84-60e4-47f7-abb2-a11fd50ccbd8
+06:41:28 INFO QUEUE_POSITION | side=yes order_id=249d56cc-681e-4f79-bb3b-ca67aa8092d1 ahead_contracts=0.00
+06:41:28 INFO QUEUE_POSITION | side=no order_id=89f2ee84-60e4-47f7-abb2-a11fd50ccbd8 ahead_contracts=1604.00
+06:41:43 INFO QUEUE_POSITION | side=yes order_id=249d56cc-681e-4f79-bb3b-ca67aa8092d1 ahead_contracts=0.00
+06:41:43 INFO QUEUE_POSITION | side=no order_id=89f2ee84-60e4-47f7-abb2-a11fd50ccbd8 ahead_contracts=1604.00
+06:41:58 INFO QUEUE_POSITION | side=yes order_id=249d56cc-681e-4f79-bb3b-ca67aa8092d1 ahead_contracts=0.00
+06:41:58 INFO QUEUE_POSITION | side=no order_id=89f2ee84-60e4-47f7-abb2-a11fd50ccbd8 ahead_contracts=1604.00
+06:42:13 INFO QUEUE_POSITION | side=yes order_id=249d56cc-681e-4f79-bb3b-ca67aa8092d1 ahead_contracts=0.00
+06:42:13 INFO QUEUE_POSITION | side=no order_id=89f2ee84-60e4-47f7-abb2-a11fd50ccbd8 ahead_contracts=1604.00
+06:42:18 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=249d56cc-681e-4f79-bb3b-ca67aa8092d1
+06:42:18 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=89f2ee84-60e4-47f7-abb2-a11fd50ccbd8
+06:42:18 INFO CREATE_OK | side=yes price_dollars=0.2500 remaining_contracts=39.00 order_id=8fe2baa7-9b87-4ed5-8d4f-64138f46af78
+06:42:18 INFO CREATE_OK | side=no price_dollars=0.6900 remaining_contracts=14.00 order_id=16fab707-26c6-46f0-b655-f19cffbe8f91
+06:42:18 INFO AMEND_OK | side=yes price_dollars=0.2400 total_fillable_contracts=41.00 order_id=8fe2baa7-9b87-4ed5-8d4f-64138f46af78
+06:42:28 INFO QUEUE_POSITION | side=yes order_id=8fe2baa7-9b87-4ed5-8d4f-64138f46af78 ahead_contracts=0.00
+06:42:28 INFO QUEUE_POSITION | side=no order_id=16fab707-26c6-46f0-b655-f19cffbe8f91 ahead_contracts=1604.00
+06:42:43 INFO QUEUE_POSITION | side=yes order_id=8fe2baa7-9b87-4ed5-8d4f-64138f46af78 ahead_contracts=0.00
+06:42:43 INFO QUEUE_POSITION | side=no order_id=16fab707-26c6-46f0-b655-f19cffbe8f91 ahead_contracts=1604.00
+06:42:58 INFO QUEUE_POSITION | side=yes order_id=8fe2baa7-9b87-4ed5-8d4f-64138f46af78 ahead_contracts=0.00
+06:42:58 INFO QUEUE_POSITION | side=no order_id=16fab707-26c6-46f0-b655-f19cffbe8f91 ahead_contracts=1604.00
+06:43:13 INFO QUEUE_POSITION | side=yes order_id=8fe2baa7-9b87-4ed5-8d4f-64138f46af78 ahead_contracts=0.00
+06:43:13 INFO QUEUE_POSITION | side=no order_id=16fab707-26c6-46f0-b655-f19cffbe8f91 ahead_contracts=1604.00
+06:43:18 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=8fe2baa7-9b87-4ed5-8d4f-64138f46af78
+06:43:18 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=16fab707-26c6-46f0-b655-f19cffbe8f91
+06:43:18 INFO CREATE_OK | side=yes price_dollars=0.2500 remaining_contracts=39.00 order_id=5d3fdd2f-fb05-4e17-9d22-287abefa7198
+06:43:18 INFO CREATE_OK | side=no price_dollars=0.6900 remaining_contracts=14.00 order_id=ce9f4feb-bca3-440c-9b4f-379f6e418041
+06:43:18 INFO AMEND_OK | side=yes price_dollars=0.2400 total_fillable_contracts=41.00 order_id=5d3fdd2f-fb05-4e17-9d22-287abefa7198
+06:43:28 INFO QUEUE_POSITION | side=yes order_id=5d3fdd2f-fb05-4e17-9d22-287abefa7198 ahead_contracts=0.00
+06:43:29 INFO QUEUE_POSITION | side=no order_id=ce9f4feb-bca3-440c-9b4f-379f6e418041 ahead_contracts=1604.00
+06:43:44 INFO QUEUE_POSITION | side=yes order_id=5d3fdd2f-fb05-4e17-9d22-287abefa7198 ahead_contracts=0.00
+06:43:44 INFO QUEUE_POSITION | side=no order_id=ce9f4feb-bca3-440c-9b4f-379f6e418041 ahead_contracts=1604.00
+06:43:59 INFO QUEUE_POSITION | side=yes order_id=5d3fdd2f-fb05-4e17-9d22-287abefa7198 ahead_contracts=0.00
+06:43:59 INFO QUEUE_POSITION | side=no order_id=ce9f4feb-bca3-440c-9b4f-379f6e418041 ahead_contracts=1604.00
+06:44:14 INFO QUEUE_POSITION | side=yes order_id=5d3fdd2f-fb05-4e17-9d22-287abefa7198 ahead_contracts=0.00
+06:44:14 INFO QUEUE_POSITION | side=no order_id=ce9f4feb-bca3-440c-9b4f-379f6e418041 ahead_contracts=1604.00
+06:44:18 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=5d3fdd2f-fb05-4e17-9d22-287abefa7198
+06:44:18 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=ce9f4feb-bca3-440c-9b4f-379f6e418041
+06:44:18 INFO CREATE_OK | side=yes price_dollars=0.2500 remaining_contracts=39.00 order_id=9d272f7a-70c5-4e9a-81c8-05d8b55947ef
+06:44:18 INFO CREATE_OK | side=no price_dollars=0.6900 remaining_contracts=14.00 order_id=7a402c40-e9c4-4acf-9eea-a135b03a2744
+06:44:18 INFO AMEND_OK | side=yes price_dollars=0.2400 total_fillable_contracts=41.00 order_id=9d272f7a-70c5-4e9a-81c8-05d8b55947ef
+06:44:29 INFO QUEUE_POSITION | side=yes order_id=9d272f7a-70c5-4e9a-81c8-05d8b55947ef ahead_contracts=0.00
+06:44:29 INFO QUEUE_POSITION | side=no order_id=7a402c40-e9c4-4acf-9eea-a135b03a2744 ahead_contracts=1604.00
+06:44:44 INFO QUEUE_POSITION | side=yes order_id=9d272f7a-70c5-4e9a-81c8-05d8b55947ef ahead_contracts=0.00
+06:44:44 INFO QUEUE_POSITION | side=no order_id=7a402c40-e9c4-4acf-9eea-a135b03a2744 ahead_contracts=1604.00
+06:44:59 INFO QUEUE_POSITION | side=yes order_id=9d272f7a-70c5-4e9a-81c8-05d8b55947ef ahead_contracts=0.00
+06:44:59 INFO QUEUE_POSITION | side=no order_id=7a402c40-e9c4-4acf-9eea-a135b03a2744 ahead_contracts=1604.00
+06:45:14 INFO QUEUE_POSITION | side=yes order_id=9d272f7a-70c5-4e9a-81c8-05d8b55947ef ahead_contracts=0.00
+06:45:14 INFO QUEUE_POSITION | side=no order_id=7a402c40-e9c4-4acf-9eea-a135b03a2744 ahead_contracts=1604.00
+06:45:18 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=7a402c40-e9c4-4acf-9eea-a135b03a2744
+06:45:18 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=9d272f7a-70c5-4e9a-81c8-05d8b55947ef
+06:45:18 INFO CANCEL_SKIPPED_ORDER_MISSING | side=yes reason=refresh_expiring_quote order_id=9d272f7a-70c5-4e9a-81c8-05d8b55947ef
+06:45:18 INFO CREATE_OK | side=yes price_dollars=0.2400 remaining_contracts=41.00 order_id=ae7bed3f-feba-4054-98a7-e0804b36937f
+06:45:18 INFO CREATE_OK | side=no price_dollars=0.7000 remaining_contracts=14.00 order_id=0710927a-0a98-4758-a38d-9c223b9ea7cd
+06:45:18 INFO AMEND_OK | side=no price_dollars=0.6900 total_fillable_contracts=14.00 order_id=0710927a-0a98-4758-a38d-9c223b9ea7cd
+06:45:29 INFO QUEUE_POSITION | side=yes order_id=ae7bed3f-feba-4054-98a7-e0804b36937f ahead_contracts=0.00
+06:45:29 INFO QUEUE_POSITION | side=no order_id=0710927a-0a98-4758-a38d-9c223b9ea7cd ahead_contracts=1604.00
+06:45:44 INFO QUEUE_POSITION | side=yes order_id=ae7bed3f-feba-4054-98a7-e0804b36937f ahead_contracts=0.00
+06:45:44 INFO QUEUE_POSITION | side=no order_id=0710927a-0a98-4758-a38d-9c223b9ea7cd ahead_contracts=1604.00
+06:45:59 INFO QUEUE_POSITION | side=yes order_id=ae7bed3f-feba-4054-98a7-e0804b36937f ahead_contracts=0.00
+06:45:59 INFO QUEUE_POSITION | side=no order_id=0710927a-0a98-4758-a38d-9c223b9ea7cd ahead_contracts=1604.00
+06:46:14 INFO QUEUE_POSITION | side=yes order_id=ae7bed3f-feba-4054-98a7-e0804b36937f ahead_contracts=0.00
+06:46:14 INFO QUEUE_POSITION | side=no order_id=0710927a-0a98-4758-a38d-9c223b9ea7cd ahead_contracts=1604.00
+06:46:18 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=0710927a-0a98-4758-a38d-9c223b9ea7cd
+06:46:18 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=ae7bed3f-feba-4054-98a7-e0804b36937f
+06:46:18 INFO CANCEL_SKIPPED_ORDER_MISSING | side=yes reason=refresh_expiring_quote order_id=ae7bed3f-feba-4054-98a7-e0804b36937f
+06:46:18 INFO CREATE_OK | side=yes price_dollars=0.2400 remaining_contracts=41.00 order_id=1cb6205e-aedd-424b-9126-3f06dcc48375
+06:46:18 INFO CREATE_OK | side=no price_dollars=0.7000 remaining_contracts=14.00 order_id=13330b53-1c46-4634-a608-641d199afb54
+06:46:18 INFO AMEND_OK | side=no price_dollars=0.6900 total_fillable_contracts=14.00 order_id=13330b53-1c46-4634-a608-641d199afb54
+06:46:29 INFO QUEUE_POSITION | side=yes order_id=1cb6205e-aedd-424b-9126-3f06dcc48375 ahead_contracts=0.00
+06:46:29 INFO QUEUE_POSITION | side=no order_id=13330b53-1c46-4634-a608-641d199afb54 ahead_contracts=1604.00
+06:46:44 INFO QUEUE_POSITION | side=yes order_id=1cb6205e-aedd-424b-9126-3f06dcc48375 ahead_contracts=0.00
+06:46:44 INFO QUEUE_POSITION | side=no order_id=13330b53-1c46-4634-a608-641d199afb54 ahead_contracts=1604.00
+06:46:59 INFO QUEUE_POSITION | side=yes order_id=1cb6205e-aedd-424b-9126-3f06dcc48375 ahead_contracts=0.00
+06:46:59 INFO QUEUE_POSITION | side=no order_id=13330b53-1c46-4634-a608-641d199afb54 ahead_contracts=1604.00
+06:47:15 INFO QUEUE_POSITION | side=yes order_id=1cb6205e-aedd-424b-9126-3f06dcc48375 ahead_contracts=0.00
+06:47:15 INFO QUEUE_POSITION | side=no order_id=13330b53-1c46-4634-a608-641d199afb54 ahead_contracts=1604.00
+06:47:18 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=13330b53-1c46-4634-a608-641d199afb54
+06:47:18 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=1cb6205e-aedd-424b-9126-3f06dcc48375
+06:47:18 INFO CANCEL_SKIPPED_ORDER_MISSING | side=yes reason=refresh_expiring_quote order_id=1cb6205e-aedd-424b-9126-3f06dcc48375
+06:47:18 INFO CREATE_OK | side=yes price_dollars=0.2400 remaining_contracts=41.00 order_id=451a379b-bd83-409a-a2e3-18de313bf6de
+06:47:18 INFO CREATE_OK | side=no price_dollars=0.7000 remaining_contracts=14.00 order_id=d02a8f48-dbb4-4f03-aa18-7548b3c04080
+06:47:18 INFO AMEND_OK | side=no price_dollars=0.6900 total_fillable_contracts=14.00 order_id=d02a8f48-dbb4-4f03-aa18-7548b3c04080
+06:47:30 INFO QUEUE_POSITION | side=yes order_id=451a379b-bd83-409a-a2e3-18de313bf6de ahead_contracts=0.00
+06:47:30 INFO QUEUE_POSITION | side=no order_id=d02a8f48-dbb4-4f03-aa18-7548b3c04080 ahead_contracts=1604.00
+06:47:45 INFO QUEUE_POSITION | side=yes order_id=451a379b-bd83-409a-a2e3-18de313bf6de ahead_contracts=0.00
+06:47:45 INFO QUEUE_POSITION | side=no order_id=d02a8f48-dbb4-4f03-aa18-7548b3c04080 ahead_contracts=1604.00
+06:48:00 INFO AMEND_OK | side=no price_dollars=0.7000 total_fillable_contracts=14.00 order_id=d02a8f48-dbb4-4f03-aa18-7548b3c04080
+06:48:00 INFO QUEUE_POSITION | side=yes order_id=451a379b-bd83-409a-a2e3-18de313bf6de ahead_contracts=0.00
+06:48:00 INFO QUEUE_POSITION | side=no order_id=d02a8f48-dbb4-4f03-aa18-7548b3c04080 ahead_contracts=460.00
+06:48:15 INFO QUEUE_POSITION | side=yes order_id=451a379b-bd83-409a-a2e3-18de313bf6de ahead_contracts=0.00
+06:48:15 INFO QUEUE_POSITION | side=no order_id=d02a8f48-dbb4-4f03-aa18-7548b3c04080 ahead_contracts=460.00
+06:48:18 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=d02a8f48-dbb4-4f03-aa18-7548b3c04080
+06:48:18 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=451a379b-bd83-409a-a2e3-18de313bf6de
+06:48:18 INFO CANCEL_SKIPPED_ORDER_MISSING | side=yes reason=refresh_expiring_quote order_id=451a379b-bd83-409a-a2e3-18de313bf6de
+06:48:18 INFO CREATE_OK | side=yes price_dollars=0.2400 remaining_contracts=41.00 order_id=d26269cb-85e2-44af-8428-ea64b45c6dd9
+06:48:18 INFO CREATE_OK | side=no price_dollars=0.7100 remaining_contracts=14.00 order_id=2d050050-80e2-4c97-bef2-8cc8ee23478d
+06:48:18 INFO AMEND_OK | side=no price_dollars=0.7000 total_fillable_contracts=14.00 order_id=2d050050-80e2-4c97-bef2-8cc8ee23478d
+06:48:30 INFO QUEUE_POSITION | side=yes order_id=d26269cb-85e2-44af-8428-ea64b45c6dd9 ahead_contracts=0.00
+06:48:30 INFO QUEUE_POSITION | side=no order_id=2d050050-80e2-4c97-bef2-8cc8ee23478d ahead_contracts=460.00
+06:48:45 INFO QUEUE_POSITION | side=yes order_id=d26269cb-85e2-44af-8428-ea64b45c6dd9 ahead_contracts=0.00
+06:48:45 INFO QUEUE_POSITION | side=no order_id=2d050050-80e2-4c97-bef2-8cc8ee23478d ahead_contracts=460.00
+06:49:00 INFO QUEUE_POSITION | side=yes order_id=d26269cb-85e2-44af-8428-ea64b45c6dd9 ahead_contracts=0.00
+06:49:00 INFO QUEUE_POSITION | side=no order_id=2d050050-80e2-4c97-bef2-8cc8ee23478d ahead_contracts=460.00
+06:49:15 INFO QUEUE_POSITION | side=yes order_id=d26269cb-85e2-44af-8428-ea64b45c6dd9 ahead_contracts=0.00
+06:49:15 INFO QUEUE_POSITION | side=no order_id=2d050050-80e2-4c97-bef2-8cc8ee23478d ahead_contracts=460.00
+06:49:18 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=d26269cb-85e2-44af-8428-ea64b45c6dd9
+06:49:18 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=2d050050-80e2-4c97-bef2-8cc8ee23478d
+06:49:18 INFO CREATE_OK | side=yes price_dollars=0.2500 remaining_contracts=39.00 order_id=6780c67d-f8ac-46a2-949e-8011deb75060
+06:49:18 INFO CREATE_OK | side=no price_dollars=0.7000 remaining_contracts=14.00 order_id=dc991d76-1f2a-4951-96fd-19a64406725e
+06:49:18 INFO AMEND_OK | side=yes price_dollars=0.2400 total_fillable_contracts=41.00 order_id=6780c67d-f8ac-46a2-949e-8011deb75060
+06:49:30 INFO QUEUE_POSITION | side=yes order_id=6780c67d-f8ac-46a2-949e-8011deb75060 ahead_contracts=0.00
+06:49:30 INFO QUEUE_POSITION | side=no order_id=dc991d76-1f2a-4951-96fd-19a64406725e ahead_contracts=460.00
+06:49:45 INFO QUEUE_POSITION | side=yes order_id=6780c67d-f8ac-46a2-949e-8011deb75060 ahead_contracts=0.00
+06:49:45 INFO QUEUE_POSITION | side=no order_id=dc991d76-1f2a-4951-96fd-19a64406725e ahead_contracts=460.00
+06:50:00 INFO QUEUE_POSITION | side=yes order_id=6780c67d-f8ac-46a2-949e-8011deb75060 ahead_contracts=0.00
+06:50:00 INFO QUEUE_POSITION | side=no order_id=dc991d76-1f2a-4951-96fd-19a64406725e ahead_contracts=460.00
+06:50:15 INFO QUEUE_POSITION | side=yes order_id=6780c67d-f8ac-46a2-949e-8011deb75060 ahead_contracts=0.00
+06:50:15 INFO QUEUE_POSITION | side=no order_id=dc991d76-1f2a-4951-96fd-19a64406725e ahead_contracts=460.00
+06:50:18 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=6780c67d-f8ac-46a2-949e-8011deb75060
+06:50:18 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=dc991d76-1f2a-4951-96fd-19a64406725e
+06:50:18 INFO CREATE_OK | side=yes price_dollars=0.2500 remaining_contracts=39.00 order_id=51fa6a1c-9dec-4501-8bad-0de365b22c88
+06:50:18 INFO CREATE_OK | side=no price_dollars=0.7000 remaining_contracts=14.00 order_id=c356f16e-5375-4a53-9f18-ba6bfcee5dcb
+06:50:18 INFO AMEND_OK | side=yes price_dollars=0.2400 total_fillable_contracts=41.00 order_id=51fa6a1c-9dec-4501-8bad-0de365b22c88
+06:50:30 INFO QUEUE_POSITION | side=yes order_id=51fa6a1c-9dec-4501-8bad-0de365b22c88 ahead_contracts=0.00
+06:50:30 INFO QUEUE_POSITION | side=no order_id=c356f16e-5375-4a53-9f18-ba6bfcee5dcb ahead_contracts=460.00
+06:50:45 INFO QUEUE_POSITION | side=yes order_id=51fa6a1c-9dec-4501-8bad-0de365b22c88 ahead_contracts=0.00
+06:50:45 INFO QUEUE_POSITION | side=no order_id=c356f16e-5375-4a53-9f18-ba6bfcee5dcb ahead_contracts=460.00
+06:51:01 INFO QUEUE_POSITION | side=yes order_id=51fa6a1c-9dec-4501-8bad-0de365b22c88 ahead_contracts=0.00
+06:51:01 INFO QUEUE_POSITION | side=no order_id=c356f16e-5375-4a53-9f18-ba6bfcee5dcb ahead_contracts=460.00
+06:51:16 INFO QUEUE_POSITION | side=yes order_id=51fa6a1c-9dec-4501-8bad-0de365b22c88 ahead_contracts=0.00
+06:51:16 INFO QUEUE_POSITION | side=no order_id=c356f16e-5375-4a53-9f18-ba6bfcee5dcb ahead_contracts=460.00
+06:51:18 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=51fa6a1c-9dec-4501-8bad-0de365b22c88
+06:51:18 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=c356f16e-5375-4a53-9f18-ba6bfcee5dcb
+06:51:18 INFO CREATE_OK | side=yes price_dollars=0.2500 remaining_contracts=39.00 order_id=fff94f1c-7410-4586-9cee-483f5f8e6a40
+06:51:18 INFO CREATE_OK | side=no price_dollars=0.7000 remaining_contracts=14.00 order_id=d8117758-964e-439f-b6d7-aa5a4e140bdc
+06:51:18 INFO AMEND_OK | side=yes price_dollars=0.2400 total_fillable_contracts=41.00 order_id=fff94f1c-7410-4586-9cee-483f5f8e6a40
+06:51:31 INFO QUEUE_POSITION | side=yes order_id=fff94f1c-7410-4586-9cee-483f5f8e6a40 ahead_contracts=0.00
+06:51:31 INFO QUEUE_POSITION | side=no order_id=d8117758-964e-439f-b6d7-aa5a4e140bdc ahead_contracts=460.00
+06:51:46 INFO QUEUE_POSITION | side=yes order_id=fff94f1c-7410-4586-9cee-483f5f8e6a40 ahead_contracts=0.00
+06:51:46 INFO QUEUE_POSITION | side=no order_id=d8117758-964e-439f-b6d7-aa5a4e140bdc ahead_contracts=407.00
+06:52:01 INFO QUEUE_POSITION | side=yes order_id=fff94f1c-7410-4586-9cee-483f5f8e6a40 ahead_contracts=0.00
+06:52:01 INFO QUEUE_POSITION | side=no order_id=d8117758-964e-439f-b6d7-aa5a4e140bdc ahead_contracts=407.00
+06:52:16 INFO QUEUE_POSITION | side=yes order_id=fff94f1c-7410-4586-9cee-483f5f8e6a40 ahead_contracts=0.00
+06:52:16 INFO QUEUE_POSITION | side=no order_id=d8117758-964e-439f-b6d7-aa5a4e140bdc ahead_contracts=407.00
+06:52:18 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=fff94f1c-7410-4586-9cee-483f5f8e6a40
+06:52:18 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=d8117758-964e-439f-b6d7-aa5a4e140bdc
+06:52:18 INFO CREATE_OK | side=yes price_dollars=0.2500 remaining_contracts=39.00 order_id=c84c6b24-46b3-4964-bddf-6b41dfc8c69e
+06:52:18 INFO CREATE_OK | side=no price_dollars=0.7100 remaining_contracts=14.00 order_id=edfc7247-09b3-4b5c-b31c-9a07e71c2b59
+06:52:18 INFO AMEND_OK | side=yes price_dollars=0.2400 total_fillable_contracts=41.00 order_id=c84c6b24-46b3-4964-bddf-6b41dfc8c69e
+06:52:18 INFO AMEND_OK | side=no price_dollars=0.7000 total_fillable_contracts=14.00 order_id=edfc7247-09b3-4b5c-b31c-9a07e71c2b59
+06:52:31 INFO QUEUE_POSITION | side=yes order_id=c84c6b24-46b3-4964-bddf-6b41dfc8c69e ahead_contracts=0.00
+06:52:31 INFO QUEUE_POSITION | side=no order_id=edfc7247-09b3-4b5c-b31c-9a07e71c2b59 ahead_contracts=407.00
+06:52:46 INFO QUEUE_POSITION | side=yes order_id=c84c6b24-46b3-4964-bddf-6b41dfc8c69e ahead_contracts=0.00
+06:52:46 INFO QUEUE_POSITION | side=no order_id=edfc7247-09b3-4b5c-b31c-9a07e71c2b59 ahead_contracts=407.00
+06:53:01 INFO QUEUE_POSITION | side=yes order_id=c84c6b24-46b3-4964-bddf-6b41dfc8c69e ahead_contracts=0.00
+06:53:01 INFO QUEUE_POSITION | side=no order_id=edfc7247-09b3-4b5c-b31c-9a07e71c2b59 ahead_contracts=407.00
+06:53:16 INFO QUEUE_POSITION | side=yes order_id=c84c6b24-46b3-4964-bddf-6b41dfc8c69e ahead_contracts=0.00
+06:53:16 INFO QUEUE_POSITION | side=no order_id=edfc7247-09b3-4b5c-b31c-9a07e71c2b59 ahead_contracts=407.00
+06:53:18 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=edfc7247-09b3-4b5c-b31c-9a07e71c2b59
+06:53:18 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=c84c6b24-46b3-4964-bddf-6b41dfc8c69e
+06:53:18 INFO CREATE_OK | side=yes price_dollars=0.2500 remaining_contracts=39.00 order_id=53b33ea7-23fe-4a9f-a851-2b65aa84292b
+06:53:18 INFO CREATE_OK | side=no price_dollars=0.7100 remaining_contracts=14.00 order_id=a9d4cb15-b720-4dd9-b748-aea11c60e4c0
+06:53:18 INFO AMEND_OK | side=yes price_dollars=0.2400 total_fillable_contracts=41.00 order_id=53b33ea7-23fe-4a9f-a851-2b65aa84292b
+06:53:18 INFO AMEND_OK | side=no price_dollars=0.7000 total_fillable_contracts=14.00 order_id=a9d4cb15-b720-4dd9-b748-aea11c60e4c0
+06:53:31 INFO QUEUE_POSITION | side=yes order_id=53b33ea7-23fe-4a9f-a851-2b65aa84292b ahead_contracts=0.00
+06:53:31 INFO QUEUE_POSITION | side=no order_id=a9d4cb15-b720-4dd9-b748-aea11c60e4c0 ahead_contracts=407.00
+06:53:46 INFO QUEUE_POSITION | side=yes order_id=53b33ea7-23fe-4a9f-a851-2b65aa84292b ahead_contracts=0.00
+06:53:46 INFO QUEUE_POSITION | side=no order_id=a9d4cb15-b720-4dd9-b748-aea11c60e4c0 ahead_contracts=407.00
+06:54:01 INFO QUEUE_POSITION | side=yes order_id=53b33ea7-23fe-4a9f-a851-2b65aa84292b ahead_contracts=0.00
+06:54:01 INFO QUEUE_POSITION | side=no order_id=a9d4cb15-b720-4dd9-b748-aea11c60e4c0 ahead_contracts=407.00
+06:54:16 INFO QUEUE_POSITION | side=yes order_id=53b33ea7-23fe-4a9f-a851-2b65aa84292b ahead_contracts=0.00
+06:54:16 INFO QUEUE_POSITION | side=no order_id=a9d4cb15-b720-4dd9-b748-aea11c60e4c0 ahead_contracts=407.00
+06:54:18 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=53b33ea7-23fe-4a9f-a851-2b65aa84292b
+06:54:18 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=a9d4cb15-b720-4dd9-b748-aea11c60e4c0
+06:54:18 INFO CREATE_OK | side=yes price_dollars=0.2500 remaining_contracts=39.00 order_id=24ccdebf-13dd-4fa4-872f-411ab93cecc2
+06:54:18 INFO CREATE_OK | side=no price_dollars=0.7000 remaining_contracts=14.00 order_id=1e0da4ce-868b-4e89-b592-4b38a171ad70
+06:54:18 INFO AMEND_OK | side=yes price_dollars=0.2400 total_fillable_contracts=41.00 order_id=24ccdebf-13dd-4fa4-872f-411ab93cecc2
+06:54:31 INFO QUEUE_POSITION | side=yes order_id=24ccdebf-13dd-4fa4-872f-411ab93cecc2 ahead_contracts=0.00
+06:54:32 INFO QUEUE_POSITION | side=no order_id=1e0da4ce-868b-4e89-b592-4b38a171ad70 ahead_contracts=407.00
+06:54:39 INFO AMEND_OK | side=no price_dollars=0.6900 total_fillable_contracts=14.00 order_id=1e0da4ce-868b-4e89-b592-4b38a171ad70
+06:54:39 INFO AMEND_OK | side=yes price_dollars=0.2500 total_fillable_contracts=39.00 order_id=24ccdebf-13dd-4fa4-872f-411ab93cecc2
+06:54:39 INFO AMEND_OK | side=no price_dollars=0.7000 total_fillable_contracts=14.00 order_id=1e0da4ce-868b-4e89-b592-4b38a171ad70
+06:54:43 INFO AMEND_OK | side=yes price_dollars=0.2600 total_fillable_contracts=38.00 order_id=24ccdebf-13dd-4fa4-872f-411ab93cecc2
+06:54:47 INFO QUEUE_POSITION | side=yes order_id=24ccdebf-13dd-4fa4-872f-411ab93cecc2 ahead_contracts=2.00
+06:54:47 INFO QUEUE_POSITION | side=no order_id=1e0da4ce-868b-4e89-b592-4b38a171ad70 ahead_contracts=251.00
+06:55:02 INFO QUEUE_POSITION | side=yes order_id=24ccdebf-13dd-4fa4-872f-411ab93cecc2 ahead_contracts=2.00
+06:55:02 INFO QUEUE_POSITION | side=no order_id=1e0da4ce-868b-4e89-b592-4b38a171ad70 ahead_contracts=251.00
+06:55:17 INFO QUEUE_POSITION | side=yes order_id=24ccdebf-13dd-4fa4-872f-411ab93cecc2 ahead_contracts=2.00
+06:55:17 INFO QUEUE_POSITION | side=no order_id=1e0da4ce-868b-4e89-b592-4b38a171ad70 ahead_contracts=251.00
+06:55:18 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=1e0da4ce-868b-4e89-b592-4b38a171ad70
+06:55:18 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=24ccdebf-13dd-4fa4-872f-411ab93cecc2
+06:55:18 INFO CANCEL_SKIPPED_ORDER_MISSING | side=yes reason=refresh_expiring_quote order_id=24ccdebf-13dd-4fa4-872f-411ab93cecc2
+06:55:18 INFO CREATE_OK | side=yes price_dollars=0.2600 remaining_contracts=38.00 order_id=a00ad9a7-0a8a-46d3-89a8-4f133acbd86b
+06:55:18 INFO CREATE_OK | side=no price_dollars=0.7100 remaining_contracts=14.00 order_id=dd319fc4-b057-4315-a280-0f081910154e
+06:55:18 INFO AMEND_OK | side=no price_dollars=0.7000 total_fillable_contracts=14.00 order_id=dd319fc4-b057-4315-a280-0f081910154e
+06:55:32 INFO QUEUE_POSITION | side=yes order_id=a00ad9a7-0a8a-46d3-89a8-4f133acbd86b ahead_contracts=2.00
+06:55:32 INFO QUEUE_POSITION | side=no order_id=dd319fc4-b057-4315-a280-0f081910154e ahead_contracts=251.00
+06:55:47 INFO QUEUE_POSITION | side=yes order_id=a00ad9a7-0a8a-46d3-89a8-4f133acbd86b ahead_contracts=2.00
+06:55:47 INFO QUEUE_POSITION | side=no order_id=dd319fc4-b057-4315-a280-0f081910154e ahead_contracts=251.00

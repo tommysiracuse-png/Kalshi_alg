@@ -1,0 +1,667 @@
+
+=== START 2026-03-07 21:03:14 ===
+CMD: /home/codespace/.python/current/bin/python3 /workspaces/Kalshi_alg/V1.py --ticker KXLIGUE1TOTAL-26MAR07TFCOM-2 --yes-budget-cents 200 --no-budget-cents 200
+21:03:15 INFO START | environment=PROD ticker=KXLIGUE1TOTAL-26MAR07TFCOM-2 yes_budget_cents=200 no_budget_cents=200 price_structure=linear_cent fractional_trading=False dry_run=False websocket=wss://api.elections.kalshi.com/trade-api/ws/v2
+21:03:15 INFO STARTUP_POSITION | contracts=0.00
+21:03:15 INFO WS_CONNECTED_AND_SUBSCRIBED
+21:03:15 INFO CREATE_OK | side=yes price_dollars=0.4600 remaining_contracts=4.00 order_id=7de721a8-09cf-4988-8446-29479a03c206
+21:03:15 INFO CREATE_OK | side=no price_dollars=0.5100 remaining_contracts=3.00 order_id=394feb20-4536-425c-8151-afc2a46c0153
+21:03:16 INFO AMEND_OK | side=yes price_dollars=0.4500 total_fillable_contracts=4.00 order_id=7de721a8-09cf-4988-8446-29479a03c206
+21:03:16 INFO AMEND_OK | side=no price_dollars=0.4800 total_fillable_contracts=4.00 order_id=394feb20-4536-425c-8151-afc2a46c0153
+21:03:17 INFO AMEND_OK | side=no price_dollars=0.4900 total_fillable_contracts=3.00 order_id=394feb20-4536-425c-8151-afc2a46c0153
+21:03:17 INFO AMEND_OK | side=no price_dollars=0.5000 total_fillable_contracts=3.00 order_id=394feb20-4536-425c-8151-afc2a46c0153
+21:04:00 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=394feb20-4536-425c-8151-afc2a46c0153
+21:04:00 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=7de721a8-09cf-4988-8446-29479a03c206
+21:04:00 INFO CANCEL_SKIPPED_ORDER_MISSING | side=yes reason=refresh_expiring_quote order_id=7de721a8-09cf-4988-8446-29479a03c206
+21:04:00 INFO CREATE_OK | side=yes price_dollars=0.4500 remaining_contracts=4.00 order_id=54cf47b8-8ddf-4bb8-a804-5001813d8808
+21:04:00 INFO CREATE_OK | side=no price_dollars=0.5100 remaining_contracts=3.00 order_id=90266e40-d5ae-4682-aa90-29dda4850c6e
+21:04:00 INFO AMEND_OK | side=no price_dollars=0.4900 total_fillable_contracts=3.00 order_id=90266e40-d5ae-4682-aa90-29dda4850c6e
+21:04:45 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=90266e40-d5ae-4682-aa90-29dda4850c6e
+21:04:45 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=54cf47b8-8ddf-4bb8-a804-5001813d8808
+21:04:45 INFO CANCEL_SKIPPED_ORDER_MISSING | side=yes reason=refresh_expiring_quote order_id=54cf47b8-8ddf-4bb8-a804-5001813d8808
+21:04:45 INFO CREATE_OK | side=yes price_dollars=0.4500 remaining_contracts=4.00 order_id=f2f165e5-b8e3-40ba-9940-225abaf45266
+21:04:45 INFO CREATE_OK | side=no price_dollars=0.5000 remaining_contracts=3.00 order_id=cda7be63-715e-49f1-a404-4af0252a81c8
+21:04:45 INFO AMEND_OK | side=no price_dollars=0.4900 total_fillable_contracts=3.00 order_id=cda7be63-715e-49f1-a404-4af0252a81c8
+21:05:25 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=f2f165e5-b8e3-40ba-9940-225abaf45266
+21:05:25 INFO CREATE_OK | side=yes price_dollars=0.4500 remaining_contracts=4.00 order_id=de2f98bc-602d-4a42-8d5a-6456b31fb2b6
+21:05:25 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=f2f165e5-b8e3-40ba-9940-225abaf45266
+21:05:25 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=cda7be63-715e-49f1-a404-4af0252a81c8
+21:05:25 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=cda7be63-715e-49f1-a404-4af0252a81c8
+21:05:26 INFO CREATE_OK | side=no price_dollars=0.5000 remaining_contracts=3.00 order_id=bfa66703-95aa-4c73-a6a9-99d0a54ccb78
+21:05:26 INFO AMEND_OK | side=no price_dollars=0.5100 total_fillable_contracts=3.00 order_id=bfa66703-95aa-4c73-a6a9-99d0a54ccb78
+21:06:10 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=de2f98bc-602d-4a42-8d5a-6456b31fb2b6
+21:06:10 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=bfa66703-95aa-4c73-a6a9-99d0a54ccb78
+21:06:10 INFO CREATE_OK | side=yes price_dollars=0.4600 remaining_contracts=4.00 order_id=7433f8b9-c7b0-45d8-a213-9afd0e75fd94
+21:06:10 INFO CREATE_OK | side=no price_dollars=0.5100 remaining_contracts=3.00 order_id=1c484d6f-1d05-4b1c-b2db-fe1f83809638
+21:06:10 INFO AMEND_OK | side=yes price_dollars=0.4500 total_fillable_contracts=4.00 order_id=7433f8b9-c7b0-45d8-a213-9afd0e75fd94
+21:06:55 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=7433f8b9-c7b0-45d8-a213-9afd0e75fd94
+21:06:55 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=1c484d6f-1d05-4b1c-b2db-fe1f83809638
+21:06:55 INFO CREATE_OK | side=yes price_dollars=0.4600 remaining_contracts=4.00 order_id=171e3aac-cd01-4944-886b-0b2143c300cd
+21:06:55 INFO CREATE_OK | side=no price_dollars=0.5200 remaining_contracts=3.00 order_id=c05ee791-fa65-4052-97ca-9ef3e2a2aae5
+21:06:55 INFO AMEND_OK | side=yes price_dollars=0.4500 total_fillable_contracts=4.00 order_id=171e3aac-cd01-4944-886b-0b2143c300cd
+21:06:55 INFO AMEND_OK | side=no price_dollars=0.5100 total_fillable_contracts=3.00 order_id=c05ee791-fa65-4052-97ca-9ef3e2a2aae5
+21:07:40 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=171e3aac-cd01-4944-886b-0b2143c300cd
+21:07:40 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=c05ee791-fa65-4052-97ca-9ef3e2a2aae5
+21:07:40 INFO CREATE_OK | side=yes price_dollars=0.4600 remaining_contracts=4.00 order_id=737d2a74-4bdc-4bbb-ab4a-17293aa54c00
+21:07:40 INFO CREATE_OK | side=no price_dollars=0.5100 remaining_contracts=3.00 order_id=ff8ed13f-4432-4213-b7e5-4f768e3fac87
+21:07:40 INFO AMEND_OK | side=yes price_dollars=0.4500 total_fillable_contracts=4.00 order_id=737d2a74-4bdc-4bbb-ab4a-17293aa54c00
+21:07:40 INFO AMEND_OK | side=no price_dollars=0.4900 total_fillable_contracts=3.00 order_id=ff8ed13f-4432-4213-b7e5-4f768e3fac87
+21:07:41 INFO AMEND_OK | side=no price_dollars=0.5000 total_fillable_contracts=3.00 order_id=ff8ed13f-4432-4213-b7e5-4f768e3fac87
+21:07:41 INFO AMEND_OK | side=no price_dollars=0.5100 total_fillable_contracts=3.00 order_id=ff8ed13f-4432-4213-b7e5-4f768e3fac87
+21:08:25 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=ff8ed13f-4432-4213-b7e5-4f768e3fac87
+21:08:25 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=737d2a74-4bdc-4bbb-ab4a-17293aa54c00
+21:08:25 INFO CANCEL_SKIPPED_ORDER_MISSING | side=yes reason=refresh_expiring_quote order_id=737d2a74-4bdc-4bbb-ab4a-17293aa54c00
+21:08:25 INFO CREATE_OK | side=yes price_dollars=0.4500 remaining_contracts=4.00 order_id=af5f90a1-1d72-4f19-955c-73a448b595c4
+21:08:25 INFO CREATE_OK | side=no price_dollars=0.5200 remaining_contracts=3.00 order_id=6b89d6b5-019c-411a-81b2-f798dacd35a6
+21:08:25 INFO AMEND_OK | side=no price_dollars=0.4800 total_fillable_contracts=4.00 order_id=6b89d6b5-019c-411a-81b2-f798dacd35a6
+21:08:27 INFO AMEND_OK | side=no price_dollars=0.4900 total_fillable_contracts=3.00 order_id=6b89d6b5-019c-411a-81b2-f798dacd35a6
+21:08:27 INFO AMEND_OK | side=no price_dollars=0.5000 total_fillable_contracts=3.00 order_id=6b89d6b5-019c-411a-81b2-f798dacd35a6
+21:09:10 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=6b89d6b5-019c-411a-81b2-f798dacd35a6
+21:09:10 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=af5f90a1-1d72-4f19-955c-73a448b595c4
+21:09:10 INFO CANCEL_SKIPPED_ORDER_MISSING | side=yes reason=refresh_expiring_quote order_id=af5f90a1-1d72-4f19-955c-73a448b595c4
+21:09:10 INFO CREATE_OK | side=yes price_dollars=0.4500 remaining_contracts=4.00 order_id=0864e599-09b7-4c9d-8f0e-6aee64f2ba1c
+21:09:10 INFO CREATE_OK | side=no price_dollars=0.5100 remaining_contracts=3.00 order_id=e8c29a54-a282-4b43-846c-f0eef51d9f05
+21:09:10 INFO AMEND_OK | side=no price_dollars=0.4800 total_fillable_contracts=4.00 order_id=e8c29a54-a282-4b43-846c-f0eef51d9f05
+21:09:12 INFO AMEND_OK | side=no price_dollars=0.4900 total_fillable_contracts=3.00 order_id=e8c29a54-a282-4b43-846c-f0eef51d9f05
+21:09:12 INFO AMEND_OK | side=no price_dollars=0.5000 total_fillable_contracts=3.00 order_id=e8c29a54-a282-4b43-846c-f0eef51d9f05
+21:09:55 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=0864e599-09b7-4c9d-8f0e-6aee64f2ba1c
+21:09:55 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=e8c29a54-a282-4b43-846c-f0eef51d9f05
+21:09:55 INFO CREATE_OK | side=yes price_dollars=0.4600 remaining_contracts=4.00 order_id=0ef347ba-2006-4ddb-8dd1-2719afff8422
+21:09:55 INFO CREATE_OK | side=no price_dollars=0.5000 remaining_contracts=3.00 order_id=ffc47f11-f53d-401d-8a23-5eb9b321a237
+21:09:55 INFO AMEND_OK | side=yes price_dollars=0.4200 total_fillable_contracts=4.00 order_id=0ef347ba-2006-4ddb-8dd1-2719afff8422
+21:09:55 INFO AMEND_OK | side=no price_dollars=0.4800 total_fillable_contracts=4.00 order_id=ffc47f11-f53d-401d-8a23-5eb9b321a237
+21:09:56 INFO AMEND_OK | side=yes price_dollars=0.4300 total_fillable_contracts=4.00 order_id=0ef347ba-2006-4ddb-8dd1-2719afff8422
+21:09:56 INFO AMEND_OK | side=yes price_dollars=0.4400 total_fillable_contracts=4.00 order_id=0ef347ba-2006-4ddb-8dd1-2719afff8422
+21:09:59 INFO AMEND_OK | side=yes price_dollars=0.4300 total_fillable_contracts=4.00 order_id=0ef347ba-2006-4ddb-8dd1-2719afff8422
+21:10:02 INFO AMEND_OK | side=yes price_dollars=0.4400 total_fillable_contracts=4.00 order_id=0ef347ba-2006-4ddb-8dd1-2719afff8422
+21:10:04 INFO AMEND_OK | side=yes price_dollars=0.4500 total_fillable_contracts=4.00 order_id=0ef347ba-2006-4ddb-8dd1-2719afff8422
+21:10:04 INFO AMEND_OK | side=yes price_dollars=0.4600 total_fillable_contracts=4.00 order_id=0ef347ba-2006-4ddb-8dd1-2719afff8422
+21:10:05 INFO AMEND_OK | side=no price_dollars=0.4900 total_fillable_contracts=3.00 order_id=ffc47f11-f53d-401d-8a23-5eb9b321a237
+21:10:05 INFO AMEND_OK | side=yes price_dollars=0.4300 total_fillable_contracts=4.00 order_id=0ef347ba-2006-4ddb-8dd1-2719afff8422
+21:10:05 INFO AMEND_OK | side=no price_dollars=0.5000 total_fillable_contracts=3.00 order_id=ffc47f11-f53d-401d-8a23-5eb9b321a237
+21:10:09 INFO AMEND_OK | side=yes price_dollars=0.4200 total_fillable_contracts=4.00 order_id=0ef347ba-2006-4ddb-8dd1-2719afff8422
+21:10:10 INFO AMEND_OK | side=yes price_dollars=0.4300 total_fillable_contracts=4.00 order_id=0ef347ba-2006-4ddb-8dd1-2719afff8422
+21:10:19 INFO AMEND_OK | side=yes price_dollars=0.4400 total_fillable_contracts=4.00 order_id=0ef347ba-2006-4ddb-8dd1-2719afff8422
+21:10:28 INFO AMEND_OK | side=yes price_dollars=0.4300 total_fillable_contracts=4.00 order_id=0ef347ba-2006-4ddb-8dd1-2719afff8422
+21:10:36 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=0ef347ba-2006-4ddb-8dd1-2719afff8422
+21:10:36 INFO CREATE_OK | side=yes price_dollars=0.4400 remaining_contracts=4.00 order_id=1d572456-5bd3-45f2-974f-37b3b686ac52
+21:10:36 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=0ef347ba-2006-4ddb-8dd1-2719afff8422
+21:10:36 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=ffc47f11-f53d-401d-8a23-5eb9b321a237
+21:10:36 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=ffc47f11-f53d-401d-8a23-5eb9b321a237
+21:10:36 INFO CREATE_OK | side=no price_dollars=0.5000 remaining_contracts=3.00 order_id=9edf3a5d-bc8f-4d99-8fe8-5484f1e3d31d
+21:10:36 INFO AMEND_OK | side=yes price_dollars=0.4300 total_fillable_contracts=4.00 order_id=1d572456-5bd3-45f2-974f-37b3b686ac52
+21:10:44 INFO AMEND_OK | side=yes price_dollars=0.4400 total_fillable_contracts=4.00 order_id=1d572456-5bd3-45f2-974f-37b3b686ac52
+21:10:44 INFO AMEND_OK | side=yes price_dollars=0.4300 total_fillable_contracts=4.00 order_id=1d572456-5bd3-45f2-974f-37b3b686ac52
+21:10:52 INFO AMEND_OK | side=yes price_dollars=0.4400 total_fillable_contracts=4.00 order_id=1d572456-5bd3-45f2-974f-37b3b686ac52
+21:10:52 INFO AMEND_OK | side=yes price_dollars=0.4300 total_fillable_contracts=4.00 order_id=1d572456-5bd3-45f2-974f-37b3b686ac52
+21:10:55 INFO AMEND_OK | side=no price_dollars=0.4700 total_fillable_contracts=4.00 order_id=9edf3a5d-bc8f-4d99-8fe8-5484f1e3d31d
+21:10:56 INFO AMEND_OK | side=yes price_dollars=0.4200 total_fillable_contracts=4.00 order_id=1d572456-5bd3-45f2-974f-37b3b686ac52
+21:11:00 INFO AMEND_OK | side=yes price_dollars=0.4300 total_fillable_contracts=4.00 order_id=1d572456-5bd3-45f2-974f-37b3b686ac52
+21:11:00 INFO AMEND_OK | side=no price_dollars=0.4800 total_fillable_contracts=4.00 order_id=9edf3a5d-bc8f-4d99-8fe8-5484f1e3d31d
+21:11:01 INFO AMEND_OK | side=no price_dollars=0.4900 total_fillable_contracts=3.00 order_id=9edf3a5d-bc8f-4d99-8fe8-5484f1e3d31d
+21:11:02 INFO AMEND_OK | side=no price_dollars=0.5000 total_fillable_contracts=3.00 order_id=9edf3a5d-bc8f-4d99-8fe8-5484f1e3d31d
+21:11:21 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=1d572456-5bd3-45f2-974f-37b3b686ac52
+21:11:21 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=9edf3a5d-bc8f-4d99-8fe8-5484f1e3d31d
+21:11:21 INFO CREATE_OK | side=yes price_dollars=0.4400 remaining_contracts=4.00 order_id=9c853807-eeba-4ec3-9296-18a2862191bf
+21:11:21 INFO CREATE_OK | side=no price_dollars=0.5000 remaining_contracts=3.00 order_id=27f60446-fa4b-4cd2-8e49-61087d4811c7
+21:11:21 INFO AMEND_OK | side=yes price_dollars=0.4300 total_fillable_contracts=4.00 order_id=9c853807-eeba-4ec3-9296-18a2862191bf
+21:11:21 INFO AMEND_OK | side=no price_dollars=0.0900 total_fillable_contracts=21.00 order_id=27f60446-fa4b-4cd2-8e49-61087d4811c7
+21:11:21 INFO CANCEL_REQUESTED | side=no reason=quote_disabled order_id=27f60446-fa4b-4cd2-8e49-61087d4811c7
+21:11:21 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=27f60446-fa4b-4cd2-8e49-61087d4811c7
+21:11:22 INFO CREATE_OK | side=no price_dollars=0.4900 remaining_contracts=3.00 order_id=13bc854f-53b9-40be-a878-5c3ff006552f
+21:11:30 INFO AMEND_OK | side=yes price_dollars=0.4400 total_fillable_contracts=4.00 order_id=9c853807-eeba-4ec3-9296-18a2862191bf
+21:11:30 INFO AMEND_OK | side=yes price_dollars=0.4500 total_fillable_contracts=4.00 order_id=9c853807-eeba-4ec3-9296-18a2862191bf
+21:11:30 INFO AMEND_OK | side=yes price_dollars=0.4100 total_fillable_contracts=4.00 order_id=9c853807-eeba-4ec3-9296-18a2862191bf
+21:11:30 INFO AMEND_OK | side=no price_dollars=0.5100 total_fillable_contracts=3.00 order_id=13bc854f-53b9-40be-a878-5c3ff006552f
+21:11:35 INFO AMEND_OK | side=yes price_dollars=0.4200 total_fillable_contracts=4.00 order_id=9c853807-eeba-4ec3-9296-18a2862191bf
+21:11:38 INFO AMEND_OK | side=yes price_dollars=0.4300 total_fillable_contracts=4.00 order_id=9c853807-eeba-4ec3-9296-18a2862191bf
+21:11:40 INFO ORDER_NOT_RESTING | side=no status=executed order_id=13bc854f-53b9-40be-a878-5c3ff006552f
+21:11:41 INFO CREATE_OK | side=no price_dollars=0.4900 remaining_contracts=3.00 order_id=458739ec-417a-4f36-b10d-81f1b5a10e11
+21:11:41 INFO AMEND_OK | side=no price_dollars=0.4800 total_fillable_contracts=4.00 order_id=458739ec-417a-4f36-b10d-81f1b5a10e11
+21:11:41 INFO AMEND_OK | side=yes price_dollars=0.4100 total_fillable_contracts=4.00 order_id=9c853807-eeba-4ec3-9296-18a2862191bf
+21:11:41 INFO AMEND_OK | side=yes price_dollars=0.4200 total_fillable_contracts=4.00 order_id=9c853807-eeba-4ec3-9296-18a2862191bf
+21:11:46 INFO AMEND_OK | side=yes price_dollars=0.4300 total_fillable_contracts=4.00 order_id=9c853807-eeba-4ec3-9296-18a2862191bf
+21:11:46 INFO AMEND_OK | side=yes price_dollars=0.4400 total_fillable_contracts=4.00 order_id=9c853807-eeba-4ec3-9296-18a2862191bf
+21:11:51 INFO AMEND_OK | side=no price_dollars=0.4900 total_fillable_contracts=3.00 order_id=458739ec-417a-4f36-b10d-81f1b5a10e11
+21:11:52 INFO AMEND_OK | side=no price_dollars=0.5000 total_fillable_contracts=3.00 order_id=458739ec-417a-4f36-b10d-81f1b5a10e11
+21:11:52 INFO AMEND_OK | side=no price_dollars=0.5100 total_fillable_contracts=3.00 order_id=458739ec-417a-4f36-b10d-81f1b5a10e11
+21:11:52 INFO AMEND_OK | side=yes price_dollars=0.4100 total_fillable_contracts=4.00 order_id=9c853807-eeba-4ec3-9296-18a2862191bf
+21:11:57 INFO AMEND_OK | side=yes price_dollars=0.4200 total_fillable_contracts=4.00 order_id=9c853807-eeba-4ec3-9296-18a2862191bf
+21:11:58 INFO AMEND_OK | side=yes price_dollars=0.4300 total_fillable_contracts=4.00 order_id=9c853807-eeba-4ec3-9296-18a2862191bf
+21:11:59 INFO AMEND_OK | side=yes price_dollars=0.4100 total_fillable_contracts=4.00 order_id=9c853807-eeba-4ec3-9296-18a2862191bf
+21:12:01 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=9c853807-eeba-4ec3-9296-18a2862191bf
+21:12:01 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=9c853807-eeba-4ec3-9296-18a2862191bf
+21:12:01 INFO CREATE_OK | side=yes price_dollars=0.4100 remaining_contracts=4.00 order_id=5c6fe66d-bee9-444f-aa3e-c9bd610b7a46
+21:12:23 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=458739ec-417a-4f36-b10d-81f1b5a10e11
+21:12:23 INFO CREATE_OK | side=no price_dollars=0.5100 remaining_contracts=3.00 order_id=067b3bb4-8cf4-464f-88a0-876d0e753bc8
+21:12:23 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=458739ec-417a-4f36-b10d-81f1b5a10e11
+21:12:23 INFO AMEND_OK | side=yes price_dollars=0.4200 total_fillable_contracts=4.00 order_id=5c6fe66d-bee9-444f-aa3e-c9bd610b7a46
+21:12:23 INFO AMEND_OK | side=no price_dollars=0.5100 total_fillable_contracts=3.00 order_id=067b3bb4-8cf4-464f-88a0-876d0e753bc8
+21:12:23 INFO AMEND_OK | side=no price_dollars=0.5000 total_fillable_contracts=3.00 order_id=067b3bb4-8cf4-464f-88a0-876d0e753bc8
+21:12:31 INFO AMEND_OK | side=no price_dollars=0.5100 total_fillable_contracts=3.00 order_id=067b3bb4-8cf4-464f-88a0-876d0e753bc8
+21:12:31 INFO AMEND_OK | side=no price_dollars=0.5200 total_fillable_contracts=3.00 order_id=067b3bb4-8cf4-464f-88a0-876d0e753bc8
+21:12:39 INFO AMEND_OK | side=yes price_dollars=0.4300 total_fillable_contracts=4.00 order_id=5c6fe66d-bee9-444f-aa3e-c9bd610b7a46
+21:12:39 INFO AMEND_OK | side=yes price_dollars=0.3900 total_fillable_contracts=5.00 order_id=5c6fe66d-bee9-444f-aa3e-c9bd610b7a46
+21:12:39 INFO AMEND_OK | side=yes price_dollars=0.4200 total_fillable_contracts=4.00 order_id=5c6fe66d-bee9-444f-aa3e-c9bd610b7a46
+21:12:40 INFO AMEND_OK | side=yes price_dollars=0.3900 total_fillable_contracts=5.00 order_id=5c6fe66d-bee9-444f-aa3e-c9bd610b7a46
+21:12:40 INFO AMEND_OK | side=yes price_dollars=0.4200 total_fillable_contracts=4.00 order_id=5c6fe66d-bee9-444f-aa3e-c9bd610b7a46
+21:12:40 INFO AMEND_OK | side=yes price_dollars=0.4100 total_fillable_contracts=4.00 order_id=5c6fe66d-bee9-444f-aa3e-c9bd610b7a46
+21:12:46 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=5c6fe66d-bee9-444f-aa3e-c9bd610b7a46
+21:12:46 INFO CREATE_OK | side=yes price_dollars=0.4200 remaining_contracts=4.00 order_id=9d3355ae-68c3-4cfd-96cd-25746754ce8c
+21:12:46 INFO AMEND_OK | side=yes price_dollars=0.4100 total_fillable_contracts=4.00 order_id=9d3355ae-68c3-4cfd-96cd-25746754ce8c
+21:12:47 INFO AMEND_OK | side=yes price_dollars=0.4200 total_fillable_contracts=4.00 order_id=9d3355ae-68c3-4cfd-96cd-25746754ce8c
+21:12:53 INFO AMEND_OK | side=yes price_dollars=0.3500 total_fillable_contracts=5.00 order_id=9d3355ae-68c3-4cfd-96cd-25746754ce8c
+21:12:55 INFO AMEND_OK | side=yes price_dollars=0.3900 total_fillable_contracts=5.00 order_id=9d3355ae-68c3-4cfd-96cd-25746754ce8c
+21:13:08 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=067b3bb4-8cf4-464f-88a0-876d0e753bc8
+21:13:08 INFO CREATE_OK | side=no price_dollars=0.5300 remaining_contracts=3.00 order_id=7d332020-e185-4b5f-b33e-4fb400f5f0ba
+21:13:08 INFO AMEND_OK | side=no price_dollars=0.5000 total_fillable_contracts=3.00 order_id=7d332020-e185-4b5f-b33e-4fb400f5f0ba
+21:13:31 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=9d3355ae-68c3-4cfd-96cd-25746754ce8c
+21:13:31 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=4.00 order_id=e920711c-d4fd-4970-b86d-ec430866f22b
+21:13:31 INFO AMEND_OK | side=yes price_dollars=0.3900 total_fillable_contracts=5.00 order_id=e920711c-d4fd-4970-b86d-ec430866f22b
+21:13:52 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=7d332020-e185-4b5f-b33e-4fb400f5f0ba
+21:13:52 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=7d332020-e185-4b5f-b33e-4fb400f5f0ba
+21:13:52 INFO CREATE_OK | side=no price_dollars=0.5000 remaining_contracts=3.00 order_id=2904b0da-12ca-407c-b327-f29ad903fd50
+21:14:00 INFO AMEND_OK | side=no price_dollars=0.5100 total_fillable_contracts=3.00 order_id=2904b0da-12ca-407c-b327-f29ad903fd50
+21:14:00 INFO AMEND_OK | side=no price_dollars=0.5200 total_fillable_contracts=3.00 order_id=2904b0da-12ca-407c-b327-f29ad903fd50
+21:14:16 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=e920711c-d4fd-4970-b86d-ec430866f22b
+21:14:16 INFO CREATE_OK | side=yes price_dollars=0.4000 remaining_contracts=4.00 order_id=a9140202-1aea-4c0a-b0b1-38f0e73f141f
+21:14:16 INFO AMEND_OK | side=yes price_dollars=0.3900 total_fillable_contracts=5.00 order_id=a9140202-1aea-4c0a-b0b1-38f0e73f141f
+21:14:21 INFO ORDER_NOT_RESTING | side=no status=executed order_id=2904b0da-12ca-407c-b327-f29ad903fd50
+21:14:21 INFO CREATE_OK | side=no price_dollars=0.5100 remaining_contracts=3.00 order_id=78c9dabc-82c7-4e13-8701-e5e90840b2b8
+21:14:22 INFO AMEND_OK | side=no price_dollars=0.5000 total_fillable_contracts=3.00 order_id=78c9dabc-82c7-4e13-8701-e5e90840b2b8
+21:14:22 INFO AMEND_OK | side=yes price_dollars=0.3700 total_fillable_contracts=5.00 order_id=a9140202-1aea-4c0a-b0b1-38f0e73f141f
+21:14:22 INFO AMEND_OK | side=no price_dollars=0.5100 total_fillable_contracts=3.00 order_id=78c9dabc-82c7-4e13-8701-e5e90840b2b8
+21:15:01 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=a9140202-1aea-4c0a-b0b1-38f0e73f141f
+21:15:01 INFO CREATE_OK | side=yes price_dollars=0.3800 remaining_contracts=5.00 order_id=37f25b48-b8fe-48f5-9f19-f776fb9865a7
+21:15:01 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=78c9dabc-82c7-4e13-8701-e5e90840b2b8
+21:15:01 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=78c9dabc-82c7-4e13-8701-e5e90840b2b8
+21:15:01 INFO CREATE_OK | side=no price_dollars=0.5100 remaining_contracts=3.00 order_id=a83cb053-e02a-4bb6-ab41-8f93ff01c076
+21:15:01 INFO AMEND_OK | side=yes price_dollars=0.3700 total_fillable_contracts=5.00 order_id=37f25b48-b8fe-48f5-9f19-f776fb9865a7
+21:15:43 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=37f25b48-b8fe-48f5-9f19-f776fb9865a7
+21:15:43 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=37f25b48-b8fe-48f5-9f19-f776fb9865a7
+21:15:43 INFO CREATE_OK | side=yes price_dollars=0.3700 remaining_contracts=5.00 order_id=76935d05-36d8-48da-8e53-b1a1056fea52
+21:15:43 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=a83cb053-e02a-4bb6-ab41-8f93ff01c076
+21:15:43 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=a83cb053-e02a-4bb6-ab41-8f93ff01c076
+21:15:43 INFO CREATE_OK | side=no price_dollars=0.5100 remaining_contracts=3.00 order_id=4ef9fa0a-36c3-40cb-9589-79f9f2f79251
+21:15:43 INFO AMEND_OK | side=yes price_dollars=0.3600 total_fillable_contracts=5.00 order_id=76935d05-36d8-48da-8e53-b1a1056fea52
+21:15:43 INFO AMEND_OK | side=no price_dollars=0.1800 total_fillable_contracts=10.00 order_id=4ef9fa0a-36c3-40cb-9589-79f9f2f79251
+21:15:43 INFO AMEND_OK | side=yes price_dollars=0.3300 total_fillable_contracts=5.00 order_id=76935d05-36d8-48da-8e53-b1a1056fea52
+21:15:43 INFO AMEND_OK | side=no price_dollars=0.5000 total_fillable_contracts=3.00 order_id=4ef9fa0a-36c3-40cb-9589-79f9f2f79251
+21:15:44 INFO AMEND_OK | side=no price_dollars=0.1800 total_fillable_contracts=10.00 order_id=4ef9fa0a-36c3-40cb-9589-79f9f2f79251
+21:15:44 INFO AMEND_OK | side=no price_dollars=0.5000 total_fillable_contracts=3.00 order_id=4ef9fa0a-36c3-40cb-9589-79f9f2f79251
+21:15:44 INFO AMEND_OK | side=no price_dollars=0.1800 total_fillable_contracts=10.00 order_id=4ef9fa0a-36c3-40cb-9589-79f9f2f79251
+21:15:44 INFO CANCEL_REQUESTED | side=no reason=quote_disabled order_id=4ef9fa0a-36c3-40cb-9589-79f9f2f79251
+21:15:44 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=4ef9fa0a-36c3-40cb-9589-79f9f2f79251
+21:15:49 INFO CREATE_OK | side=no price_dollars=0.5400 remaining_contracts=3.00 order_id=0983b729-3517-4a13-bfe1-599a0e7af532
+21:15:49 INFO AMEND_OK | side=yes price_dollars=0.3500 total_fillable_contracts=5.00 order_id=76935d05-36d8-48da-8e53-b1a1056fea52
+21:15:49 INFO AMEND_OK | side=no price_dollars=0.5300 total_fillable_contracts=3.00 order_id=0983b729-3517-4a13-bfe1-599a0e7af532
+21:16:06 INFO AMEND_OK | side=no price_dollars=0.1800 total_fillable_contracts=10.00 order_id=0983b729-3517-4a13-bfe1-599a0e7af532
+21:16:06 INFO AMEND_OK | side=yes price_dollars=0.3300 total_fillable_contracts=5.00 order_id=76935d05-36d8-48da-8e53-b1a1056fea52
+21:16:06 INFO CANCEL_REQUESTED | side=no reason=quote_disabled order_id=0983b729-3517-4a13-bfe1-599a0e7af532
+21:16:06 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=0983b729-3517-4a13-bfe1-599a0e7af532
+21:16:06 INFO CREATE_OK | side=no price_dollars=0.5300 remaining_contracts=3.00 order_id=f6dfc5c5-3662-4b3f-b52e-8abd5d52432b
+21:16:07 INFO AMEND_OK | side=no price_dollars=0.1700 total_fillable_contracts=11.00 order_id=f6dfc5c5-3662-4b3f-b52e-8abd5d52432b
+21:16:07 INFO CANCEL_REQUESTED | side=no reason=quote_disabled order_id=f6dfc5c5-3662-4b3f-b52e-8abd5d52432b
+21:16:07 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=f6dfc5c5-3662-4b3f-b52e-8abd5d52432b
+21:16:13 INFO CREATE_OK | side=no price_dollars=0.5400 remaining_contracts=3.00 order_id=d80b0597-7102-418e-a4aa-e3c6d86b0686
+21:16:13 INFO AMEND_OK | side=yes price_dollars=0.3500 total_fillable_contracts=5.00 order_id=76935d05-36d8-48da-8e53-b1a1056fea52
+21:16:13 INFO AMEND_OK | side=no price_dollars=0.5300 total_fillable_contracts=3.00 order_id=d80b0597-7102-418e-a4aa-e3c6d86b0686
+21:16:28 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=76935d05-36d8-48da-8e53-b1a1056fea52
+21:16:28 INFO CREATE_OK | side=yes price_dollars=0.3600 remaining_contracts=5.00 order_id=1c736e0e-80d0-491a-aa1e-7cd856bfc1b9
+21:16:28 INFO AMEND_OK | side=yes price_dollars=0.3500 total_fillable_contracts=5.00 order_id=1c736e0e-80d0-491a-aa1e-7cd856bfc1b9
+21:16:29 INFO AMEND_OK | side=no price_dollars=0.1700 total_fillable_contracts=11.00 order_id=d80b0597-7102-418e-a4aa-e3c6d86b0686
+21:16:29 INFO CANCEL_REQUESTED | side=no reason=quote_disabled order_id=d80b0597-7102-418e-a4aa-e3c6d86b0686
+21:16:29 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=d80b0597-7102-418e-a4aa-e3c6d86b0686
+21:16:29 INFO AMEND_OK | side=yes price_dollars=0.3300 total_fillable_contracts=5.00 order_id=1c736e0e-80d0-491a-aa1e-7cd856bfc1b9
+21:16:29 INFO CREATE_OK | side=no price_dollars=0.5300 remaining_contracts=3.00 order_id=b71a0acf-cf82-44ab-bb94-09d7e1adfe8f
+21:16:29 INFO AMEND_OK | side=no price_dollars=0.5200 total_fillable_contracts=3.00 order_id=b71a0acf-cf82-44ab-bb94-09d7e1adfe8f
+21:16:29 INFO AMEND_OK | side=no price_dollars=0.1700 total_fillable_contracts=11.00 order_id=b71a0acf-cf82-44ab-bb94-09d7e1adfe8f
+21:16:30 INFO CANCEL_REQUESTED | side=no reason=quote_disabled order_id=b71a0acf-cf82-44ab-bb94-09d7e1adfe8f
+21:16:30 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=b71a0acf-cf82-44ab-bb94-09d7e1adfe8f
+21:16:40 INFO AMEND_OK | side=yes price_dollars=0.3500 total_fillable_contracts=5.00 order_id=1c736e0e-80d0-491a-aa1e-7cd856bfc1b9
+21:16:40 INFO CREATE_OK | side=no price_dollars=0.5500 remaining_contracts=3.00 order_id=ac32eff0-8b84-48b1-a198-f697a883d2b1
+21:16:40 INFO AMEND_OK | side=no price_dollars=0.5400 total_fillable_contracts=3.00 order_id=ac32eff0-8b84-48b1-a198-f697a883d2b1
+21:16:57 INFO AMEND_OK | side=yes price_dollars=0.3400 total_fillable_contracts=5.00 order_id=1c736e0e-80d0-491a-aa1e-7cd856bfc1b9
+21:17:08 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=1c736e0e-80d0-491a-aa1e-7cd856bfc1b9
+21:17:08 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=1c736e0e-80d0-491a-aa1e-7cd856bfc1b9
+21:17:08 INFO CREATE_OK | side=yes price_dollars=0.3400 remaining_contracts=5.00 order_id=88838a65-3828-403e-a77a-8fb9681abef0
+21:17:08 INFO AMEND_OK | side=no price_dollars=0.5300 total_fillable_contracts=3.00 order_id=ac32eff0-8b84-48b1-a198-f697a883d2b1
+21:17:09 INFO AMEND_OK | side=yes price_dollars=0.3300 total_fillable_contracts=5.00 order_id=88838a65-3828-403e-a77a-8fb9681abef0
+21:17:09 INFO AMEND_OK | side=no price_dollars=0.1700 total_fillable_contracts=11.00 order_id=ac32eff0-8b84-48b1-a198-f697a883d2b1
+21:17:09 INFO CANCEL_REQUESTED | side=no reason=quote_disabled order_id=ac32eff0-8b84-48b1-a198-f697a883d2b1
+21:17:09 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=ac32eff0-8b84-48b1-a198-f697a883d2b1
+21:17:09 INFO CREATE_OK | side=no price_dollars=0.5300 remaining_contracts=3.00 order_id=43cd3a32-c47f-4c63-9517-17e9f67bcac4
+21:17:09 INFO AMEND_OK | side=no price_dollars=0.5200 total_fillable_contracts=3.00 order_id=43cd3a32-c47f-4c63-9517-17e9f67bcac4
+21:17:10 INFO AMEND_OK | side=no price_dollars=0.1700 total_fillable_contracts=11.00 order_id=43cd3a32-c47f-4c63-9517-17e9f67bcac4
+21:17:10 INFO CANCEL_REQUESTED | side=no reason=quote_disabled order_id=43cd3a32-c47f-4c63-9517-17e9f67bcac4
+21:17:10 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=43cd3a32-c47f-4c63-9517-17e9f67bcac4
+21:17:16 INFO AMEND_OK | side=yes price_dollars=0.3400 total_fillable_contracts=5.00 order_id=88838a65-3828-403e-a77a-8fb9681abef0
+21:17:16 INFO CREATE_OK | side=no price_dollars=0.5500 remaining_contracts=3.00 order_id=8564e062-0d2a-4545-b53e-feca4ddf46d3
+21:17:16 INFO AMEND_OK | side=no price_dollars=0.5400 total_fillable_contracts=3.00 order_id=8564e062-0d2a-4545-b53e-feca4ddf46d3
+21:17:23 INFO AMEND_OK | side=no price_dollars=0.1700 total_fillable_contracts=11.00 order_id=8564e062-0d2a-4545-b53e-feca4ddf46d3
+21:17:23 INFO CANCEL_REQUESTED | side=no reason=quote_disabled order_id=8564e062-0d2a-4545-b53e-feca4ddf46d3
+21:17:23 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=8564e062-0d2a-4545-b53e-feca4ddf46d3
+21:17:23 INFO AMEND_OK | side=yes price_dollars=0.3300 total_fillable_contracts=5.00 order_id=88838a65-3828-403e-a77a-8fb9681abef0
+21:17:39 INFO CREATE_OK | side=no price_dollars=0.5600 remaining_contracts=3.00 order_id=c95fecdc-7094-4cd7-8fd9-92583c4188b2
+21:17:39 INFO AMEND_OK | side=yes price_dollars=0.3400 total_fillable_contracts=5.00 order_id=88838a65-3828-403e-a77a-8fb9681abef0
+21:17:39 INFO AMEND_OK | side=no price_dollars=0.5500 total_fillable_contracts=3.00 order_id=c95fecdc-7094-4cd7-8fd9-92583c4188b2
+21:17:49 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=88838a65-3828-403e-a77a-8fb9681abef0
+21:17:49 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=88838a65-3828-403e-a77a-8fb9681abef0
+21:17:49 INFO CREATE_OK | side=yes price_dollars=0.3400 remaining_contracts=5.00 order_id=0e44ed5e-89d6-4046-900b-749b9c7da18f
+21:18:16 INFO AMEND_OK | side=no price_dollars=0.5600 total_fillable_contracts=3.00 order_id=c95fecdc-7094-4cd7-8fd9-92583c4188b2
+21:18:20 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=c95fecdc-7094-4cd7-8fd9-92583c4188b2
+21:18:21 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=c95fecdc-7094-4cd7-8fd9-92583c4188b2
+21:18:21 INFO CREATE_OK | side=no price_dollars=0.5600 remaining_contracts=3.00 order_id=0022431c-20c8-4737-9c05-12e359d00169
+21:18:29 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=0e44ed5e-89d6-4046-900b-749b9c7da18f
+21:18:29 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=0e44ed5e-89d6-4046-900b-749b9c7da18f
+21:18:29 INFO CREATE_OK | side=yes price_dollars=0.3400 remaining_contracts=5.00 order_id=505b0421-a356-4b23-a341-9bd2c9264a96
+21:18:33 INFO AMEND_OK | side=no price_dollars=0.5700 total_fillable_contracts=3.00 order_id=0022431c-20c8-4737-9c05-12e359d00169
+21:18:33 INFO AMEND_OK | side=no price_dollars=0.5600 total_fillable_contracts=3.00 order_id=0022431c-20c8-4737-9c05-12e359d00169
+21:18:33 INFO AMEND_OK | side=yes price_dollars=0.3300 total_fillable_contracts=5.00 order_id=505b0421-a356-4b23-a341-9bd2c9264a96
+21:18:41 INFO AMEND_OK | side=no price_dollars=0.0600 total_fillable_contracts=32.00 order_id=0022431c-20c8-4737-9c05-12e359d00169
+21:18:41 INFO AMEND_OK | side=yes price_dollars=0.3200 total_fillable_contracts=6.00 order_id=505b0421-a356-4b23-a341-9bd2c9264a96
+21:18:41 INFO AMEND_OK | side=no price_dollars=0.5500 total_fillable_contracts=3.00 order_id=0022431c-20c8-4737-9c05-12e359d00169
+21:18:42 INFO AMEND_OK | side=no price_dollars=0.0600 total_fillable_contracts=32.00 order_id=0022431c-20c8-4737-9c05-12e359d00169
+21:18:42 INFO CANCEL_REQUESTED | side=no reason=quote_disabled order_id=0022431c-20c8-4737-9c05-12e359d00169
+21:18:42 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=0022431c-20c8-4737-9c05-12e359d00169
+21:18:46 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=3.00 order_id=1d055c66-418e-4140-922b-829703461271
+21:18:46 INFO AMEND_OK | side=no price_dollars=0.5600 total_fillable_contracts=3.00 order_id=1d055c66-418e-4140-922b-829703461271
+21:19:01 INFO AMEND_OK | side=yes price_dollars=0.3300 total_fillable_contracts=5.00 order_id=505b0421-a356-4b23-a341-9bd2c9264a96
+21:19:09 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=505b0421-a356-4b23-a341-9bd2c9264a96
+21:19:09 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=505b0421-a356-4b23-a341-9bd2c9264a96
+21:19:09 INFO CREATE_OK | side=yes price_dollars=0.3400 remaining_contracts=5.00 order_id=2ad31a18-2dba-4cec-8064-def210869583
+21:19:18 INFO AMEND_OK | side=yes price_dollars=0.3300 total_fillable_contracts=5.00 order_id=2ad31a18-2dba-4cec-8064-def210869583
+21:19:31 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=1d055c66-418e-4140-922b-829703461271
+21:19:31 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=3.00 order_id=af728ce6-1670-4674-b82d-92f6985da6b7
+21:19:31 INFO AMEND_OK | side=no price_dollars=0.5600 total_fillable_contracts=3.00 order_id=af728ce6-1670-4674-b82d-92f6985da6b7
+21:19:54 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=2ad31a18-2dba-4cec-8064-def210869583
+21:19:54 INFO CREATE_OK | side=yes price_dollars=0.3400 remaining_contracts=5.00 order_id=888cdf4e-1497-45ca-9062-46dce8596d51
+21:19:54 INFO AMEND_OK | side=yes price_dollars=0.3300 total_fillable_contracts=5.00 order_id=888cdf4e-1497-45ca-9062-46dce8596d51
+21:20:13 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=af728ce6-1670-4674-b82d-92f6985da6b7
+21:20:13 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=af728ce6-1670-4674-b82d-92f6985da6b7
+21:20:13 INFO CREATE_OK | side=no price_dollars=0.5600 remaining_contracts=3.00 order_id=b4cd999d-0eb8-4d0a-96bf-3f13b9fde363
+21:20:29 INFO AMEND_OK | side=yes price_dollars=0.3200 total_fillable_contracts=6.00 order_id=888cdf4e-1497-45ca-9062-46dce8596d51
+21:20:32 INFO AMEND_OK | side=no price_dollars=0.5700 total_fillable_contracts=3.00 order_id=b4cd999d-0eb8-4d0a-96bf-3f13b9fde363
+21:20:39 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=888cdf4e-1497-45ca-9062-46dce8596d51
+21:20:39 INFO CREATE_OK | side=yes price_dollars=0.3300 remaining_contracts=5.00 order_id=1fd39c11-69c3-481f-a184-7f1bc6fd2d33
+21:20:39 INFO AMEND_OK | side=yes price_dollars=0.3200 total_fillable_contracts=6.00 order_id=1fd39c11-69c3-481f-a184-7f1bc6fd2d33
+21:20:58 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=b4cd999d-0eb8-4d0a-96bf-3f13b9fde363
+21:20:58 INFO CREATE_OK | side=no price_dollars=0.5800 remaining_contracts=3.00 order_id=bdcf5771-d472-4235-99a8-365628d51423
+21:20:58 INFO AMEND_OK | side=no price_dollars=0.5700 total_fillable_contracts=3.00 order_id=bdcf5771-d472-4235-99a8-365628d51423
+21:21:03 INFO AMEND_OK | side=yes price_dollars=0.3300 total_fillable_contracts=5.00 order_id=1fd39c11-69c3-481f-a184-7f1bc6fd2d33
+21:21:06 INFO AMEND_OK | side=yes price_dollars=0.3200 total_fillable_contracts=6.00 order_id=1fd39c11-69c3-481f-a184-7f1bc6fd2d33
+21:21:15 INFO AMEND_OK | side=no price_dollars=0.5800 total_fillable_contracts=3.00 order_id=bdcf5771-d472-4235-99a8-365628d51423
+21:21:24 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=1fd39c11-69c3-481f-a184-7f1bc6fd2d33
+21:21:24 INFO CREATE_OK | side=yes price_dollars=0.3300 remaining_contracts=5.00 order_id=a7d56b87-32cf-4802-906e-e776e8880d31
+21:21:24 INFO AMEND_OK | side=yes price_dollars=0.3200 total_fillable_contracts=6.00 order_id=a7d56b87-32cf-4802-906e-e776e8880d31
+21:21:43 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=bdcf5771-d472-4235-99a8-365628d51423
+21:21:43 INFO CREATE_OK | side=no price_dollars=0.5900 remaining_contracts=3.00 order_id=89d84688-fb80-44a5-baf2-58686d016236
+21:21:43 INFO AMEND_OK | side=no price_dollars=0.5800 total_fillable_contracts=3.00 order_id=89d84688-fb80-44a5-baf2-58686d016236
+21:22:02 INFO AMEND_OK | side=no price_dollars=0.6000 total_fillable_contracts=3.00 order_id=89d84688-fb80-44a5-baf2-58686d016236
+21:22:06 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=a7d56b87-32cf-4802-906e-e776e8880d31
+21:22:06 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=a7d56b87-32cf-4802-906e-e776e8880d31
+21:22:06 INFO CREATE_OK | side=yes price_dollars=0.3200 remaining_contracts=6.00 order_id=40fd462b-719f-4e12-814a-a03aed6f3ba7
+21:22:27 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=89d84688-fb80-44a5-baf2-58686d016236
+21:22:27 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=89d84688-fb80-44a5-baf2-58686d016236
+21:22:27 INFO CREATE_OK | side=no price_dollars=0.6000 remaining_contracts=3.00 order_id=5a118776-255b-4c47-be29-745b642fcc36
+21:22:51 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=40fd462b-719f-4e12-814a-a03aed6f3ba7
+21:22:51 INFO CREATE_OK | side=yes price_dollars=0.3300 remaining_contracts=5.00 order_id=53934400-b828-4884-bde0-ecbb81abb7e2
+21:22:51 INFO AMEND_OK | side=yes price_dollars=0.3200 total_fillable_contracts=6.00 order_id=53934400-b828-4884-bde0-ecbb81abb7e2
+21:23:07 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=5a118776-255b-4c47-be29-745b642fcc36
+21:23:07 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=5a118776-255b-4c47-be29-745b642fcc36
+21:23:07 INFO CREATE_OK | side=no price_dollars=0.6000 remaining_contracts=3.00 order_id=2f559dc5-a184-49ea-86b9-abdc07465dbb
+21:23:33 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=53934400-b828-4884-bde0-ecbb81abb7e2
+21:23:33 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=53934400-b828-4884-bde0-ecbb81abb7e2
+21:23:33 INFO CREATE_OK | side=yes price_dollars=0.3200 remaining_contracts=6.00 order_id=f7f64cc2-192d-4277-ac97-b1f70d6a460b
+21:23:33 INFO AMEND_OK | side=no price_dollars=0.6100 total_fillable_contracts=3.00 order_id=2f559dc5-a184-49ea-86b9-abdc07465dbb
+21:23:47 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=2f559dc5-a184-49ea-86b9-abdc07465dbb
+21:23:47 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=2f559dc5-a184-49ea-86b9-abdc07465dbb
+21:23:47 INFO CREATE_OK | side=no price_dollars=0.6200 remaining_contracts=3.00 order_id=5306f59a-8301-4624-ad15-9c27d140c877
+21:23:47 INFO AMEND_OK | side=no price_dollars=0.6100 total_fillable_contracts=3.00 order_id=5306f59a-8301-4624-ad15-9c27d140c877
+21:23:47 INFO AMEND_OK | side=no price_dollars=0.6200 total_fillable_contracts=3.00 order_id=5306f59a-8301-4624-ad15-9c27d140c877
+21:23:48 INFO AMEND_OK | side=no price_dollars=0.6100 total_fillable_contracts=3.00 order_id=5306f59a-8301-4624-ad15-9c27d140c877
+21:23:48 INFO AMEND_OK | side=no price_dollars=0.6200 total_fillable_contracts=3.00 order_id=5306f59a-8301-4624-ad15-9c27d140c877
+21:24:12 INFO AMEND_OK | side=no price_dollars=0.1400 total_fillable_contracts=13.00 order_id=5306f59a-8301-4624-ad15-9c27d140c877
+21:24:12 INFO CANCEL_REQUESTED | side=no reason=quote_disabled order_id=5306f59a-8301-4624-ad15-9c27d140c877
+21:24:12 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=5306f59a-8301-4624-ad15-9c27d140c877
+21:24:13 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=f7f64cc2-192d-4277-ac97-b1f70d6a460b
+21:24:13 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=f7f64cc2-192d-4277-ac97-b1f70d6a460b
+21:24:13 INFO CREATE_OK | side=yes price_dollars=0.3200 remaining_contracts=6.00 order_id=dfde6c73-b7a1-42a2-a66e-b23c22fd443b
+21:24:14 INFO AMEND_OK | side=yes price_dollars=0.3300 total_fillable_contracts=5.00 order_id=dfde6c73-b7a1-42a2-a66e-b23c22fd443b
+21:24:15 INFO AMEND_OK | side=yes price_dollars=0.3400 total_fillable_contracts=5.00 order_id=dfde6c73-b7a1-42a2-a66e-b23c22fd443b
+21:24:15 INFO AMEND_OK | side=yes price_dollars=0.3300 total_fillable_contracts=5.00 order_id=dfde6c73-b7a1-42a2-a66e-b23c22fd443b
+21:24:15 INFO AMEND_OK | side=yes price_dollars=0.3400 total_fillable_contracts=5.00 order_id=dfde6c73-b7a1-42a2-a66e-b23c22fd443b
+21:24:16 INFO AMEND_OK | side=yes price_dollars=0.3300 total_fillable_contracts=5.00 order_id=dfde6c73-b7a1-42a2-a66e-b23c22fd443b
+21:24:18 INFO AMEND_OK | side=yes price_dollars=0.3200 total_fillable_contracts=6.00 order_id=dfde6c73-b7a1-42a2-a66e-b23c22fd443b
+21:24:18 INFO CREATE_OK | side=no price_dollars=0.6200 remaining_contracts=3.00 order_id=f01a5a3c-0f95-460d-bc19-9cf877a57d8b
+21:24:51 INFO AMEND_OK | side=yes price_dollars=0.3000 total_fillable_contracts=6.00 order_id=dfde6c73-b7a1-42a2-a66e-b23c22fd443b
+21:24:58 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=dfde6c73-b7a1-42a2-a66e-b23c22fd443b
+21:24:58 INFO CREATE_OK | side=yes price_dollars=0.3100 remaining_contracts=6.00 order_id=81b9df67-91ff-4ef8-8a2a-57ffa2d09974
+21:24:58 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=f01a5a3c-0f95-460d-bc19-9cf877a57d8b
+21:24:58 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=f01a5a3c-0f95-460d-bc19-9cf877a57d8b
+21:24:58 INFO CREATE_OK | side=no price_dollars=0.6200 remaining_contracts=3.00 order_id=0cdf647e-2cc2-4bb8-af51-d5f1c49871bc
+21:24:58 INFO AMEND_OK | side=yes price_dollars=0.3000 total_fillable_contracts=6.00 order_id=81b9df67-91ff-4ef8-8a2a-57ffa2d09974
+21:24:59 INFO AMEND_OK | side=no price_dollars=0.6300 total_fillable_contracts=3.00 order_id=0cdf647e-2cc2-4bb8-af51-d5f1c49871bc
+21:25:41 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=81b9df67-91ff-4ef8-8a2a-57ffa2d09974
+21:25:41 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=81b9df67-91ff-4ef8-8a2a-57ffa2d09974
+21:25:41 INFO CREATE_OK | side=yes price_dollars=0.3000 remaining_contracts=6.00 order_id=fd0c7b6b-37cb-4e4b-9d76-0fd5553d1899
+21:25:41 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=0cdf647e-2cc2-4bb8-af51-d5f1c49871bc
+21:25:41 INFO CREATE_OK | side=no price_dollars=0.6300 remaining_contracts=3.00 order_id=72160c6e-cd9e-4ca8-ae04-95e34304d791
+21:25:41 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=0cdf647e-2cc2-4bb8-af51-d5f1c49871bc
+21:25:41 INFO AMEND_OK | side=no price_dollars=0.6400 total_fillable_contracts=3.00 order_id=72160c6e-cd9e-4ca8-ae04-95e34304d791
+21:25:41 INFO AMEND_OK | side=no price_dollars=0.6300 total_fillable_contracts=3.00 order_id=72160c6e-cd9e-4ca8-ae04-95e34304d791
+21:25:44 INFO AMEND_OK | side=no price_dollars=0.6400 total_fillable_contracts=3.00 order_id=72160c6e-cd9e-4ca8-ae04-95e34304d791
+21:25:45 INFO AMEND_OK | side=no price_dollars=0.6500 total_fillable_contracts=3.00 order_id=72160c6e-cd9e-4ca8-ae04-95e34304d791
+21:26:22 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=fd0c7b6b-37cb-4e4b-9d76-0fd5553d1899
+21:26:22 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=fd0c7b6b-37cb-4e4b-9d76-0fd5553d1899
+21:26:22 INFO CREATE_OK | side=yes price_dollars=0.3000 remaining_contracts=6.00 order_id=83d13b79-3d30-426a-a20d-4741c023cd12
+21:26:22 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=72160c6e-cd9e-4ca8-ae04-95e34304d791
+21:26:22 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=72160c6e-cd9e-4ca8-ae04-95e34304d791
+21:26:22 INFO CREATE_OK | side=no price_dollars=0.6500 remaining_contracts=3.00 order_id=cecca77c-140f-4588-95ae-0212a2c1c918
+21:26:28 INFO AMEND_OK | side=no price_dollars=0.2800 total_fillable_contracts=6.00 order_id=cecca77c-140f-4588-95ae-0212a2c1c918
+21:26:28 INFO AMEND_OK | side=no price_dollars=0.0800 total_fillable_contracts=24.00 order_id=cecca77c-140f-4588-95ae-0212a2c1c918
+21:26:28 INFO CANCEL_REQUESTED | side=no reason=quote_disabled order_id=cecca77c-140f-4588-95ae-0212a2c1c918
+21:26:28 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=cecca77c-140f-4588-95ae-0212a2c1c918
+21:26:34 INFO CREATE_OK | side=no price_dollars=0.6600 remaining_contracts=2.00 order_id=9d1deb84-ec2c-40fc-906d-345b682ab585
+21:26:34 INFO AMEND_OK | side=no price_dollars=0.6500 total_fillable_contracts=3.00 order_id=9d1deb84-ec2c-40fc-906d-345b682ab585
+21:26:39 INFO AMEND_OK | side=no price_dollars=0.6600 total_fillable_contracts=2.00 order_id=9d1deb84-ec2c-40fc-906d-345b682ab585
+21:26:39 INFO AMEND_OK | side=no price_dollars=0.6500 total_fillable_contracts=3.00 order_id=9d1deb84-ec2c-40fc-906d-345b682ab585
+21:26:40 INFO AMEND_OK | side=no price_dollars=0.6600 total_fillable_contracts=2.00 order_id=9d1deb84-ec2c-40fc-906d-345b682ab585
+21:26:40 INFO AMEND_OK | side=no price_dollars=0.6700 total_fillable_contracts=2.00 order_id=9d1deb84-ec2c-40fc-906d-345b682ab585
+21:27:02 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=83d13b79-3d30-426a-a20d-4741c023cd12
+21:27:02 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=83d13b79-3d30-426a-a20d-4741c023cd12
+21:27:02 INFO CREATE_OK | side=yes price_dollars=0.3000 remaining_contracts=6.00 order_id=ff9e25c3-3aba-4084-87e5-6d5ca60535ff
+21:27:13 INFO AMEND_OK | side=yes price_dollars=0.2300 total_fillable_contracts=8.00 order_id=ff9e25c3-3aba-4084-87e5-6d5ca60535ff
+21:27:14 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=9d1deb84-ec2c-40fc-906d-345b682ab585
+21:27:14 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=9d1deb84-ec2c-40fc-906d-345b682ab585
+21:27:14 INFO CREATE_OK | side=no price_dollars=0.6700 remaining_contracts=2.00 order_id=e8910c90-138c-4b34-8a53-b5939e9d12bc
+21:27:15 INFO AMEND_OK | side=yes price_dollars=0.2200 total_fillable_contracts=8.00 order_id=ff9e25c3-3aba-4084-87e5-6d5ca60535ff
+21:27:17 INFO AMEND_OK | side=yes price_dollars=0.3000 total_fillable_contracts=6.00 order_id=ff9e25c3-3aba-4084-87e5-6d5ca60535ff
+21:27:47 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=ff9e25c3-3aba-4084-87e5-6d5ca60535ff
+21:27:47 INFO CREATE_OK | side=yes price_dollars=0.3100 remaining_contracts=1.00 order_id=875443a2-8dff-44a1-96d6-6c5018f2e09e
+21:27:47 INFO AMEND_OK | side=yes price_dollars=0.3000 total_fillable_contracts=1.00 order_id=875443a2-8dff-44a1-96d6-6c5018f2e09e
+21:27:59 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=e8910c90-138c-4b34-8a53-b5939e9d12bc
+21:27:59 INFO CREATE_OK | side=no price_dollars=0.6800 remaining_contracts=2.00 order_id=f803f2d7-9f60-484d-848a-e7fd140ba8db
+21:27:59 INFO AMEND_OK | side=no price_dollars=0.6700 total_fillable_contracts=2.00 order_id=f803f2d7-9f60-484d-848a-e7fd140ba8db
+21:28:32 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=875443a2-8dff-44a1-96d6-6c5018f2e09e
+21:28:32 INFO CREATE_OK | side=yes price_dollars=0.3100 remaining_contracts=1.00 order_id=6c9284e2-97aa-4764-a2fd-5b2f524a7507
+21:28:32 INFO AMEND_OK | side=yes price_dollars=0.3000 total_fillable_contracts=1.00 order_id=6c9284e2-97aa-4764-a2fd-5b2f524a7507
+21:28:44 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=f803f2d7-9f60-484d-848a-e7fd140ba8db
+21:28:44 INFO CREATE_OK | side=no price_dollars=0.6800 remaining_contracts=2.00 order_id=3b91cba8-7a40-461b-915a-9b47462a0eab
+21:28:44 INFO AMEND_OK | side=no price_dollars=0.6700 total_fillable_contracts=2.00 order_id=3b91cba8-7a40-461b-915a-9b47462a0eab
+21:29:06 INFO AMEND_OK | side=yes price_dollars=0.2000 total_fillable_contracts=4.00 order_id=6c9284e2-97aa-4764-a2fd-5b2f524a7507
+21:29:06 INFO AMEND_OK | side=no price_dollars=0.6800 total_fillable_contracts=2.00 order_id=3b91cba8-7a40-461b-915a-9b47462a0eab
+21:29:06 INFO AMEND_OK | side=no price_dollars=0.6900 total_fillable_contracts=2.00 order_id=3b91cba8-7a40-461b-915a-9b47462a0eab
+21:29:17 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=6c9284e2-97aa-4764-a2fd-5b2f524a7507
+21:29:17 INFO CREATE_OK | side=yes price_dollars=0.2100 remaining_contracts=4.00 order_id=e04f8fed-7dbc-4af6-a7f6-8b0d117bbff6
+21:29:17 INFO AMEND_OK | side=yes price_dollars=0.2000 total_fillable_contracts=4.00 order_id=e04f8fed-7dbc-4af6-a7f6-8b0d117bbff6
+21:29:24 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=3b91cba8-7a40-461b-915a-9b47462a0eab
+21:29:24 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=3b91cba8-7a40-461b-915a-9b47462a0eab
+21:29:24 INFO CREATE_OK | side=no price_dollars=0.6900 remaining_contracts=2.00 order_id=a5941ed8-6d48-43ba-878f-75b3cce3eeb3
+21:29:24 INFO AMEND_OK | side=no price_dollars=0.4200 total_fillable_contracts=4.00 order_id=a5941ed8-6d48-43ba-878f-75b3cce3eeb3
+21:29:24 INFO AMEND_OK | side=no price_dollars=0.6800 total_fillable_contracts=2.00 order_id=a5941ed8-6d48-43ba-878f-75b3cce3eeb3
+21:29:24 INFO AMEND_OK | side=no price_dollars=0.6900 total_fillable_contracts=2.00 order_id=a5941ed8-6d48-43ba-878f-75b3cce3eeb3
+21:29:24 INFO AMEND_OK | side=no price_dollars=0.6800 total_fillable_contracts=2.00 order_id=a5941ed8-6d48-43ba-878f-75b3cce3eeb3
+21:29:25 INFO AMEND_OK | side=no price_dollars=0.4200 total_fillable_contracts=4.00 order_id=a5941ed8-6d48-43ba-878f-75b3cce3eeb3
+21:29:46 INFO ORDER_NOT_RESTING | side=yes status=executed order_id=e04f8fed-7dbc-4af6-a7f6-8b0d117bbff6
+21:29:46 INFO AMEND_OK | side=no price_dollars=0.4300 total_fillable_contracts=4.00 order_id=a5941ed8-6d48-43ba-878f-75b3cce3eeb3
+21:29:46 INFO AMEND_OK | side=no price_dollars=0.4400 total_fillable_contracts=4.00 order_id=a5941ed8-6d48-43ba-878f-75b3cce3eeb3
+21:30:06 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=a5941ed8-6d48-43ba-878f-75b3cce3eeb3
+21:30:06 INFO CREATE_OK | side=no price_dollars=0.4500 remaining_contracts=4.00 order_id=1b7a4e9c-3767-45e8-9e53-3108b5ba5515
+21:30:06 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=a5941ed8-6d48-43ba-878f-75b3cce3eeb3
+21:30:06 INFO AMEND_OK | side=no price_dollars=0.4700 total_fillable_contracts=4.00 order_id=1b7a4e9c-3767-45e8-9e53-3108b5ba5515
+21:30:06 INFO AMEND_OK | side=no price_dollars=0.4500 total_fillable_contracts=4.00 order_id=1b7a4e9c-3767-45e8-9e53-3108b5ba5515
+21:30:14 INFO AMEND_OK | side=no price_dollars=0.7200 total_fillable_contracts=2.00 order_id=1b7a4e9c-3767-45e8-9e53-3108b5ba5515
+21:30:19 INFO AMEND_OK | side=no price_dollars=0.7300 total_fillable_contracts=2.00 order_id=1b7a4e9c-3767-45e8-9e53-3108b5ba5515
+21:30:20 INFO AMEND_OK | side=no price_dollars=0.7200 total_fillable_contracts=2.00 order_id=1b7a4e9c-3767-45e8-9e53-3108b5ba5515
+21:30:20 INFO AMEND_OK | side=no price_dollars=0.7300 total_fillable_contracts=2.00 order_id=1b7a4e9c-3767-45e8-9e53-3108b5ba5515
+21:30:20 INFO AMEND_OK | side=no price_dollars=0.7200 total_fillable_contracts=2.00 order_id=1b7a4e9c-3767-45e8-9e53-3108b5ba5515
+21:30:20 INFO AMEND_OK | side=no price_dollars=0.7300 total_fillable_contracts=2.00 order_id=1b7a4e9c-3767-45e8-9e53-3108b5ba5515
+21:30:20 INFO AMEND_OK | side=no price_dollars=0.7200 total_fillable_contracts=2.00 order_id=1b7a4e9c-3767-45e8-9e53-3108b5ba5515
+21:30:20 INFO AMEND_OK | side=no price_dollars=0.7300 total_fillable_contracts=2.00 order_id=1b7a4e9c-3767-45e8-9e53-3108b5ba5515
+21:30:21 INFO AMEND_OK | side=no price_dollars=0.7400 total_fillable_contracts=2.00 order_id=1b7a4e9c-3767-45e8-9e53-3108b5ba5515
+21:30:46 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=1b7a4e9c-3767-45e8-9e53-3108b5ba5515
+21:30:46 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=1b7a4e9c-3767-45e8-9e53-3108b5ba5515
+21:30:46 INFO CREATE_OK | side=no price_dollars=0.7400 remaining_contracts=2.00 order_id=9b31d777-1207-47f3-be33-7f558e821cd7
+21:30:47 INFO AMEND_OK | side=no price_dollars=0.7500 total_fillable_contracts=2.00 order_id=9b31d777-1207-47f3-be33-7f558e821cd7
+21:31:26 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=9b31d777-1207-47f3-be33-7f558e821cd7
+21:31:26 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=9b31d777-1207-47f3-be33-7f558e821cd7
+21:31:26 INFO CREATE_OK | side=no price_dollars=0.7500 remaining_contracts=2.00 order_id=2bca7ad8-b33d-47e6-a727-f6115ba17994
+21:31:26 INFO AMEND_OK | side=no price_dollars=0.5600 total_fillable_contracts=3.00 order_id=2bca7ad8-b33d-47e6-a727-f6115ba17994
+21:31:37 INFO AMEND_OK | side=no price_dollars=0.7200 total_fillable_contracts=2.00 order_id=2bca7ad8-b33d-47e6-a727-f6115ba17994
+21:32:11 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=2bca7ad8-b33d-47e6-a727-f6115ba17994
+21:32:11 INFO CREATE_OK | side=no price_dollars=0.7300 remaining_contracts=2.00 order_id=ca725824-bdfc-4e12-ba14-3bfde30937a8
+21:32:11 INFO AMEND_OK | side=no price_dollars=0.7200 total_fillable_contracts=2.00 order_id=ca725824-bdfc-4e12-ba14-3bfde30937a8
+21:32:22 INFO AMEND_OK | side=no price_dollars=0.7300 total_fillable_contracts=2.00 order_id=ca725824-bdfc-4e12-ba14-3bfde30937a8
+21:32:22 INFO AMEND_OK | side=no price_dollars=0.7200 total_fillable_contracts=2.00 order_id=ca725824-bdfc-4e12-ba14-3bfde30937a8
+21:32:24 INFO AMEND_OK | side=no price_dollars=0.7300 total_fillable_contracts=2.00 order_id=ca725824-bdfc-4e12-ba14-3bfde30937a8
+21:32:56 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=ca725824-bdfc-4e12-ba14-3bfde30937a8
+21:32:56 INFO CREATE_OK | side=no price_dollars=0.7400 remaining_contracts=2.00 order_id=6effc245-1bec-4765-8207-f7d3d28a837e
+21:32:56 INFO AMEND_OK | side=no price_dollars=0.7300 total_fillable_contracts=2.00 order_id=6effc245-1bec-4765-8207-f7d3d28a837e
+21:33:17 INFO AMEND_OK | side=no price_dollars=0.7400 total_fillable_contracts=2.00 order_id=6effc245-1bec-4765-8207-f7d3d28a837e
+21:33:17 INFO AMEND_OK | side=no price_dollars=0.7500 total_fillable_contracts=2.00 order_id=6effc245-1bec-4765-8207-f7d3d28a837e
+21:33:17 INFO ORDER_NOT_RESTING | side=no status=executed order_id=6effc245-1bec-4765-8207-f7d3d28a837e
+21:33:18 INFO CREATE_OK | side=no price_dollars=0.7400 remaining_contracts=2.00 order_id=4aaa36e2-d726-411d-8aa6-fb5d7e1d59ff
+21:33:18 INFO AMEND_OK | side=no price_dollars=0.7300 total_fillable_contracts=2.00 order_id=4aaa36e2-d726-411d-8aa6-fb5d7e1d59ff
+21:33:27 INFO AMEND_OK | side=no price_dollars=0.7400 total_fillable_contracts=2.00 order_id=4aaa36e2-d726-411d-8aa6-fb5d7e1d59ff
+21:33:57 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=4aaa36e2-d726-411d-8aa6-fb5d7e1d59ff
+21:33:57 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=4aaa36e2-d726-411d-8aa6-fb5d7e1d59ff
+21:33:57 INFO CREATE_OK | side=no price_dollars=0.7400 remaining_contracts=2.00 order_id=bf8630f0-bcb5-4918-8193-e8e81c73dcbe
+21:34:42 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=bf8630f0-bcb5-4918-8193-e8e81c73dcbe
+21:34:42 INFO CREATE_OK | side=no price_dollars=0.7500 remaining_contracts=2.00 order_id=ceb8212b-986d-4aef-b064-326208bd62c7
+21:34:42 INFO AMEND_OK | side=no price_dollars=0.7400 total_fillable_contracts=2.00 order_id=ceb8212b-986d-4aef-b064-326208bd62c7
+21:35:27 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=ceb8212b-986d-4aef-b064-326208bd62c7
+21:35:27 INFO CREATE_OK | side=no price_dollars=0.7500 remaining_contracts=2.00 order_id=830f0132-7e6a-428f-bb6c-5632b8739ad2
+21:35:27 INFO AMEND_OK | side=no price_dollars=0.7400 total_fillable_contracts=2.00 order_id=830f0132-7e6a-428f-bb6c-5632b8739ad2
+21:35:48 INFO AMEND_OK | side=no price_dollars=0.7500 total_fillable_contracts=2.00 order_id=830f0132-7e6a-428f-bb6c-5632b8739ad2
+21:35:48 INFO ORDER_NOT_RESTING | side=no status=executed order_id=830f0132-7e6a-428f-bb6c-5632b8739ad2
+21:35:48 INFO CREATE_OK | side=yes price_dollars=0.2000 remaining_contracts=9.00 order_id=cfff1903-35a9-477d-9f57-e41866958075
+21:35:48 INFO CREATE_OK | side=no price_dollars=0.5600 remaining_contracts=3.00 order_id=34ad667a-52ed-49ec-ba46-bf7a58bc5cf5
+21:35:49 INFO AMEND_OK | side=yes price_dollars=0.1900 total_fillable_contracts=10.00 order_id=cfff1903-35a9-477d-9f57-e41866958075
+21:35:49 INFO AMEND_OK | side=no price_dollars=0.5500 total_fillable_contracts=3.00 order_id=34ad667a-52ed-49ec-ba46-bf7a58bc5cf5
+21:35:55 INFO AMEND_OK | side=yes price_dollars=0.0200 total_fillable_contracts=97.00 order_id=cfff1903-35a9-477d-9f57-e41866958075
+21:35:56 INFO AMEND_OK | side=yes price_dollars=0.0300 total_fillable_contracts=65.00 order_id=cfff1903-35a9-477d-9f57-e41866958075
+21:35:57 INFO AMEND_OK | side=no price_dollars=0.5600 total_fillable_contracts=3.00 order_id=34ad667a-52ed-49ec-ba46-bf7a58bc5cf5
+21:36:22 INFO AMEND_OK | side=yes price_dollars=0.0400 total_fillable_contracts=48.00 order_id=cfff1903-35a9-477d-9f57-e41866958075
+21:36:33 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=34ad667a-52ed-49ec-ba46-bf7a58bc5cf5
+21:36:33 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=cfff1903-35a9-477d-9f57-e41866958075
+21:36:33 INFO CANCEL_SKIPPED_ORDER_MISSING | side=yes reason=refresh_expiring_quote order_id=cfff1903-35a9-477d-9f57-e41866958075
+21:36:33 INFO CREATE_OK | side=yes price_dollars=0.0400 remaining_contracts=48.00 order_id=52328db1-a5bb-40ba-9c7e-cce760f7baa9
+21:36:33 INFO CREATE_OK | side=no price_dollars=0.5700 remaining_contracts=3.00 order_id=70555748-ebfb-4e9d-9c13-41aee9096934
+21:36:33 INFO AMEND_OK | side=no price_dollars=0.5600 total_fillable_contracts=3.00 order_id=70555748-ebfb-4e9d-9c13-41aee9096934
+21:36:55 INFO AMEND_OK | side=no price_dollars=0.5700 total_fillable_contracts=3.00 order_id=70555748-ebfb-4e9d-9c13-41aee9096934
+21:36:55 INFO AMEND_OK | side=no price_dollars=0.5800 total_fillable_contracts=3.00 order_id=70555748-ebfb-4e9d-9c13-41aee9096934
+21:37:18 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=70555748-ebfb-4e9d-9c13-41aee9096934
+21:37:18 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=52328db1-a5bb-40ba-9c7e-cce760f7baa9
+21:37:18 INFO CANCEL_SKIPPED_ORDER_MISSING | side=yes reason=refresh_expiring_quote order_id=52328db1-a5bb-40ba-9c7e-cce760f7baa9
+21:37:18 INFO CREATE_OK | side=yes price_dollars=0.0400 remaining_contracts=48.00 order_id=469889d6-d3ab-47d2-a94d-fabcb187bd37
+21:37:18 INFO CREATE_OK | side=no price_dollars=0.5900 remaining_contracts=3.00 order_id=d1553909-9beb-497e-81db-bc10e3a523e4
+21:37:18 INFO AMEND_OK | side=no price_dollars=0.5800 total_fillable_contracts=3.00 order_id=d1553909-9beb-497e-81db-bc10e3a523e4
+21:37:19 INFO AMEND_OK | side=yes price_dollars=0.0300 total_fillable_contracts=65.00 order_id=469889d6-d3ab-47d2-a94d-fabcb187bd37
+21:37:21 INFO AMEND_OK | side=yes price_dollars=0.0400 total_fillable_contracts=48.00 order_id=469889d6-d3ab-47d2-a94d-fabcb187bd37
+21:37:22 INFO AMEND_OK | side=yes price_dollars=0.0300 total_fillable_contracts=65.00 order_id=469889d6-d3ab-47d2-a94d-fabcb187bd37
+21:37:23 INFO AMEND_OK | side=yes price_dollars=0.0400 total_fillable_contracts=48.00 order_id=469889d6-d3ab-47d2-a94d-fabcb187bd37
+21:37:37 INFO AMEND_OK | side=yes price_dollars=0.0500 total_fillable_contracts=39.00 order_id=469889d6-d3ab-47d2-a94d-fabcb187bd37
+21:37:42 INFO AMEND_OK | side=yes price_dollars=0.0600 total_fillable_contracts=32.00 order_id=469889d6-d3ab-47d2-a94d-fabcb187bd37
+21:37:56 INFO AMEND_OK | side=no price_dollars=0.5900 total_fillable_contracts=3.00 order_id=d1553909-9beb-497e-81db-bc10e3a523e4
+21:37:56 INFO AMEND_OK | side=no price_dollars=0.6000 total_fillable_contracts=3.00 order_id=d1553909-9beb-497e-81db-bc10e3a523e4
+21:38:00 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=469889d6-d3ab-47d2-a94d-fabcb187bd37
+21:38:00 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=469889d6-d3ab-47d2-a94d-fabcb187bd37
+21:38:00 INFO CREATE_OK | side=yes price_dollars=0.0600 remaining_contracts=32.00 order_id=33e740fc-5b7b-4416-a241-d3e0e3b67294
+21:38:00 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=d1553909-9beb-497e-81db-bc10e3a523e4
+21:38:00 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=d1553909-9beb-497e-81db-bc10e3a523e4
+21:38:00 INFO CREATE_OK | side=no price_dollars=0.6000 remaining_contracts=3.00 order_id=327661b7-7ff4-4782-b6ed-728cbb2455b7
+21:38:22 INFO AMEND_OK | side=yes price_dollars=0.0700 total_fillable_contracts=27.00 order_id=33e740fc-5b7b-4416-a241-d3e0e3b67294
+21:38:22 INFO AMEND_OK | side=yes price_dollars=0.0800 total_fillable_contracts=24.00 order_id=33e740fc-5b7b-4416-a241-d3e0e3b67294
+21:38:42 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=33e740fc-5b7b-4416-a241-d3e0e3b67294
+21:38:42 INFO CREATE_OK | side=yes price_dollars=0.0800 remaining_contracts=24.00 order_id=6b5c8fb7-f396-413e-b186-8e6262af0dc6
+21:38:42 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=33e740fc-5b7b-4416-a241-d3e0e3b67294
+21:38:42 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=327661b7-7ff4-4782-b6ed-728cbb2455b7
+21:38:42 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=327661b7-7ff4-4782-b6ed-728cbb2455b7
+21:38:42 INFO CREATE_OK | side=no price_dollars=0.6000 remaining_contracts=3.00 order_id=ccb7d921-f800-4519-9dc2-34b545bcee05
+21:38:56 INFO AMEND_OK | side=no price_dollars=0.6100 total_fillable_contracts=3.00 order_id=ccb7d921-f800-4519-9dc2-34b545bcee05
+21:38:56 INFO AMEND_OK | side=no price_dollars=0.6200 total_fillable_contracts=3.00 order_id=ccb7d921-f800-4519-9dc2-34b545bcee05
+21:39:20 INFO AMEND_OK | side=yes price_dollars=0.0300 total_fillable_contracts=65.00 order_id=6b5c8fb7-f396-413e-b186-8e6262af0dc6
+21:39:27 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=6b5c8fb7-f396-413e-b186-8e6262af0dc6
+21:39:27 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=ccb7d921-f800-4519-9dc2-34b545bcee05
+21:39:27 INFO CREATE_OK | side=yes price_dollars=0.0400 remaining_contracts=48.00 order_id=43155843-7d90-4ad7-8663-d744949618f9
+21:39:27 INFO CREATE_OK | side=no price_dollars=0.6200 remaining_contracts=3.00 order_id=6d331db2-bdec-434f-b786-233d0f5923bb
+21:39:27 INFO AMEND_OK | side=yes price_dollars=0.0300 total_fillable_contracts=65.00 order_id=43155843-7d90-4ad7-8663-d744949618f9
+21:39:56 INFO AMEND_OK | side=no price_dollars=0.6300 total_fillable_contracts=3.00 order_id=6d331db2-bdec-434f-b786-233d0f5923bb
+21:39:56 INFO AMEND_OK | side=no price_dollars=0.6400 total_fillable_contracts=3.00 order_id=6d331db2-bdec-434f-b786-233d0f5923bb
+21:40:12 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=43155843-7d90-4ad7-8663-d744949618f9
+21:40:12 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=6d331db2-bdec-434f-b786-233d0f5923bb
+21:40:12 INFO CREATE_OK | side=yes price_dollars=0.0400 remaining_contracts=48.00 order_id=3ec61b30-8d83-4f1f-bc5b-c231d6b06eaa
+21:40:12 INFO CREATE_OK | side=no price_dollars=0.6400 remaining_contracts=3.00 order_id=2587fac8-b3b5-4d72-9950-6edbb0497d00
+21:40:12 INFO AMEND_OK | side=yes price_dollars=0.0300 total_fillable_contracts=65.00 order_id=3ec61b30-8d83-4f1f-bc5b-c231d6b06eaa
+21:40:22 INFO AMEND_OK | side=yes price_dollars=0.0400 total_fillable_contracts=48.00 order_id=3ec61b30-8d83-4f1f-bc5b-c231d6b06eaa
+21:40:56 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=3ec61b30-8d83-4f1f-bc5b-c231d6b06eaa
+21:40:56 INFO CREATE_OK | side=yes price_dollars=0.0400 remaining_contracts=48.00 order_id=1d21e524-5e75-4927-829b-9ec4ac321724
+21:40:56 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=3ec61b30-8d83-4f1f-bc5b-c231d6b06eaa
+21:40:56 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=2587fac8-b3b5-4d72-9950-6edbb0497d00
+21:40:56 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=2587fac8-b3b5-4d72-9950-6edbb0497d00
+21:40:56 INFO CREATE_OK | side=no price_dollars=0.6500 remaining_contracts=3.00 order_id=fed71a04-a5b3-473e-9976-cd6e6ba78380
+21:40:56 INFO AMEND_OK | side=no price_dollars=0.6600 total_fillable_contracts=2.00 order_id=fed71a04-a5b3-473e-9976-cd6e6ba78380
+21:41:41 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=1d21e524-5e75-4927-829b-9ec4ac321724
+21:41:41 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=fed71a04-a5b3-473e-9976-cd6e6ba78380
+21:41:41 INFO CREATE_OK | side=yes price_dollars=0.0500 remaining_contracts=39.00 order_id=9bff87aa-a0fe-4d32-98a1-1f117fd899ee
+21:41:41 INFO CREATE_OK | side=no price_dollars=0.6600 remaining_contracts=2.00 order_id=b414a259-e30b-4c65-b906-477aa0d84682
+21:41:41 INFO AMEND_OK | side=yes price_dollars=0.0400 total_fillable_contracts=48.00 order_id=9bff87aa-a0fe-4d32-98a1-1f117fd899ee
+21:41:56 INFO AMEND_OK | side=no price_dollars=0.6700 total_fillable_contracts=2.00 order_id=b414a259-e30b-4c65-b906-477aa0d84682
+21:41:56 INFO AMEND_OK | side=no price_dollars=0.6800 total_fillable_contracts=2.00 order_id=b414a259-e30b-4c65-b906-477aa0d84682
+21:42:16 INFO AMEND_OK | side=yes price_dollars=0.0200 total_fillable_contracts=97.00 order_id=9bff87aa-a0fe-4d32-98a1-1f117fd899ee
+21:42:22 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=9bff87aa-a0fe-4d32-98a1-1f117fd899ee
+21:42:22 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=9bff87aa-a0fe-4d32-98a1-1f117fd899ee
+21:42:22 INFO CREATE_OK | side=yes price_dollars=0.0500 remaining_contracts=39.00 order_id=1f5a8975-2bd4-40c5-9bf4-22df802c0261
+21:42:22 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=b414a259-e30b-4c65-b906-477aa0d84682
+21:42:22 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=b414a259-e30b-4c65-b906-477aa0d84682
+21:42:22 INFO CREATE_OK | side=no price_dollars=0.6800 remaining_contracts=2.00 order_id=ecc065e4-770b-432f-8ed8-8e483209a1e7
+21:42:57 INFO AMEND_OK | side=no price_dollars=0.6900 total_fillable_contracts=2.00 order_id=ecc065e4-770b-432f-8ed8-8e483209a1e7
+21:42:57 INFO AMEND_OK | side=no price_dollars=0.7000 total_fillable_contracts=2.00 order_id=ecc065e4-770b-432f-8ed8-8e483209a1e7
+21:43:07 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=1f5a8975-2bd4-40c5-9bf4-22df802c0261
+21:43:07 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=ecc065e4-770b-432f-8ed8-8e483209a1e7
+21:43:07 INFO CREATE_OK | side=yes price_dollars=0.0600 remaining_contracts=32.00 order_id=09b4f6bf-292c-492e-8d10-9816c3928ad4
+21:43:07 INFO CREATE_OK | side=no price_dollars=0.7000 remaining_contracts=2.00 order_id=d70996a8-763e-4640-920f-bbf757e13c37
+21:43:07 INFO AMEND_OK | side=yes price_dollars=0.0500 total_fillable_contracts=39.00 order_id=09b4f6bf-292c-492e-8d10-9816c3928ad4
+21:43:24 INFO AMEND_OK | side=no price_dollars=0.7100 total_fillable_contracts=2.00 order_id=d70996a8-763e-4640-920f-bbf757e13c37
+21:43:24 INFO AMEND_OK | side=no price_dollars=0.7200 total_fillable_contracts=2.00 order_id=d70996a8-763e-4640-920f-bbf757e13c37
+21:43:50 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=09b4f6bf-292c-492e-8d10-9816c3928ad4
+21:43:50 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=09b4f6bf-292c-492e-8d10-9816c3928ad4
+21:43:50 INFO CREATE_OK | side=yes price_dollars=0.0500 remaining_contracts=39.00 order_id=d21361ae-1a62-47d3-981f-671f7b7d4e01
+21:43:50 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=d70996a8-763e-4640-920f-bbf757e13c37
+21:43:50 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=d70996a8-763e-4640-920f-bbf757e13c37
+21:43:50 INFO CREATE_OK | side=no price_dollars=0.7200 remaining_contracts=2.00 order_id=07e28fee-82df-47da-8386-1233794bae62
+21:44:21 INFO AMEND_OK | side=yes price_dollars=0.0600 total_fillable_contracts=32.00 order_id=d21361ae-1a62-47d3-981f-671f7b7d4e01
+21:44:35 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=07e28fee-82df-47da-8386-1233794bae62
+21:44:35 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=d21361ae-1a62-47d3-981f-671f7b7d4e01
+21:44:35 INFO CANCEL_SKIPPED_ORDER_MISSING | side=yes reason=refresh_expiring_quote order_id=d21361ae-1a62-47d3-981f-671f7b7d4e01
+21:44:35 INFO CREATE_OK | side=yes price_dollars=0.0600 remaining_contracts=32.00 order_id=45bafce7-c4e9-4562-9269-f1b5fee89668
+21:44:35 INFO CREATE_OK | side=no price_dollars=0.7300 remaining_contracts=2.00 order_id=79795945-3253-4c33-ad1f-3c5be9a85b7b
+21:44:35 INFO AMEND_OK | side=no price_dollars=0.7200 total_fillable_contracts=2.00 order_id=79795945-3253-4c33-ad1f-3c5be9a85b7b
+21:44:58 INFO AMEND_OK | side=no price_dollars=0.7300 total_fillable_contracts=2.00 order_id=79795945-3253-4c33-ad1f-3c5be9a85b7b
+21:44:58 INFO AMEND_OK | side=no price_dollars=0.7400 total_fillable_contracts=2.00 order_id=79795945-3253-4c33-ad1f-3c5be9a85b7b
+21:45:18 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=45bafce7-c4e9-4562-9269-f1b5fee89668
+21:45:18 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=45bafce7-c4e9-4562-9269-f1b5fee89668
+21:45:18 INFO CREATE_OK | side=yes price_dollars=0.0600 remaining_contracts=32.00 order_id=071e9108-cf7b-4a10-87e4-83aa1d8381a4
+21:45:18 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=79795945-3253-4c33-ad1f-3c5be9a85b7b
+21:45:18 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=79795945-3253-4c33-ad1f-3c5be9a85b7b
+21:45:18 INFO CREATE_OK | side=no price_dollars=0.7400 remaining_contracts=2.00 order_id=b1f05647-5530-4564-aea9-83c31fda7b7e
+21:45:18 INFO AMEND_OK | side=yes price_dollars=0.0300 total_fillable_contracts=65.00 order_id=071e9108-cf7b-4a10-87e4-83aa1d8381a4
+21:45:54 INFO AMEND_OK | side=no price_dollars=0.7500 total_fillable_contracts=2.00 order_id=b1f05647-5530-4564-aea9-83c31fda7b7e
+21:46:03 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=071e9108-cf7b-4a10-87e4-83aa1d8381a4
+21:46:03 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=b1f05647-5530-4564-aea9-83c31fda7b7e
+21:46:03 INFO CREATE_OK | side=yes price_dollars=0.0400 remaining_contracts=48.00 order_id=61d0cd9c-0d4b-48c3-b7fd-744814c753aa
+21:46:03 INFO CREATE_OK | side=no price_dollars=0.7500 remaining_contracts=2.00 order_id=2d988140-e614-45c8-b9cf-ba3965591b18
+21:46:03 INFO AMEND_OK | side=yes price_dollars=0.0300 total_fillable_contracts=65.00 order_id=61d0cd9c-0d4b-48c3-b7fd-744814c753aa
+21:46:13 INFO AMEND_OK | side=yes price_dollars=0.0200 total_fillable_contracts=97.00 order_id=61d0cd9c-0d4b-48c3-b7fd-744814c753aa
+21:46:21 INFO AMEND_OK | side=yes price_dollars=0.0400 total_fillable_contracts=48.00 order_id=61d0cd9c-0d4b-48c3-b7fd-744814c753aa
+21:46:48 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=61d0cd9c-0d4b-48c3-b7fd-744814c753aa
+21:46:48 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=2d988140-e614-45c8-b9cf-ba3965591b18
+21:46:48 INFO CREATE_OK | side=yes price_dollars=0.0500 remaining_contracts=39.00 order_id=5bdbe463-a989-4d82-b4a1-4ab4977f0b05
+21:46:48 INFO CREATE_OK | side=no price_dollars=0.7500 remaining_contracts=2.00 order_id=95eadf7d-301e-4d97-be81-8df27d763014
+21:46:48 INFO AMEND_OK | side=yes price_dollars=0.0400 total_fillable_contracts=48.00 order_id=5bdbe463-a989-4d82-b4a1-4ab4977f0b05
+21:46:56 INFO AMEND_OK | side=no price_dollars=0.7600 total_fillable_contracts=2.00 order_id=95eadf7d-301e-4d97-be81-8df27d763014
+21:46:56 INFO AMEND_OK | side=no price_dollars=0.7700 total_fillable_contracts=2.00 order_id=95eadf7d-301e-4d97-be81-8df27d763014
+21:47:18 INFO AMEND_OK | side=yes price_dollars=0.0200 total_fillable_contracts=97.00 order_id=5bdbe463-a989-4d82-b4a1-4ab4977f0b05
+21:47:33 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=95eadf7d-301e-4d97-be81-8df27d763014
+21:47:33 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=5bdbe463-a989-4d82-b4a1-4ab4977f0b05
+21:47:33 INFO CANCEL_SKIPPED_ORDER_MISSING | side=yes reason=refresh_expiring_quote order_id=5bdbe463-a989-4d82-b4a1-4ab4977f0b05
+21:47:33 INFO CREATE_OK | side=yes price_dollars=0.0200 remaining_contracts=97.00 order_id=2e2de70f-1eeb-4cbc-8dda-076505aa8375
+21:47:33 INFO CREATE_OK | side=no price_dollars=0.7800 remaining_contracts=2.00 order_id=bf5afe4f-237f-4720-bb8c-885bfc023c50
+21:47:33 INFO AMEND_OK | side=no price_dollars=0.7700 total_fillable_contracts=2.00 order_id=bf5afe4f-237f-4720-bb8c-885bfc023c50
+21:48:18 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=2e2de70f-1eeb-4cbc-8dda-076505aa8375
+21:48:18 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=bf5afe4f-237f-4720-bb8c-885bfc023c50
+21:48:18 INFO CREATE_OK | side=yes price_dollars=0.0300 remaining_contracts=65.00 order_id=ca5c047b-5c2d-4705-ac60-c9b5220f5b5c
+21:48:18 INFO CREATE_OK | side=no price_dollars=0.7700 remaining_contracts=2.00 order_id=f09151de-7541-490f-9e6f-98f19e6e7e56
+21:48:18 INFO AMEND_OK | side=yes price_dollars=0.0200 total_fillable_contracts=97.00 order_id=ca5c047b-5c2d-4705-ac60-c9b5220f5b5c
+21:48:21 INFO AMEND_OK | side=yes price_dollars=0.0300 total_fillable_contracts=65.00 order_id=ca5c047b-5c2d-4705-ac60-c9b5220f5b5c
+21:49:03 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=f09151de-7541-490f-9e6f-98f19e6e7e56
+21:49:03 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=ca5c047b-5c2d-4705-ac60-c9b5220f5b5c
+21:49:03 INFO CANCEL_SKIPPED_ORDER_MISSING | side=yes reason=refresh_expiring_quote order_id=ca5c047b-5c2d-4705-ac60-c9b5220f5b5c
+21:49:03 INFO CREATE_OK | side=yes price_dollars=0.0300 remaining_contracts=65.00 order_id=70e730a6-5e34-44d9-b17d-e70f88d111dc
+21:49:03 INFO CREATE_OK | side=no price_dollars=0.7800 remaining_contracts=2.00 order_id=a0d2a1de-cacf-46dd-bce6-c3a8b3479c04
+21:49:03 INFO AMEND_OK | side=no price_dollars=0.7700 total_fillable_contracts=2.00 order_id=a0d2a1de-cacf-46dd-bce6-c3a8b3479c04
+21:49:18 INFO AMEND_OK | side=yes price_dollars=0.0200 total_fillable_contracts=97.00 order_id=70e730a6-5e34-44d9-b17d-e70f88d111dc
+21:49:48 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=70e730a6-5e34-44d9-b17d-e70f88d111dc
+21:49:48 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=a0d2a1de-cacf-46dd-bce6-c3a8b3479c04
+21:49:48 INFO CREATE_OK | side=yes price_dollars=0.0300 remaining_contracts=65.00 order_id=9e938c31-4bff-4c46-b375-43d39092f741
+21:49:48 INFO CREATE_OK | side=no price_dollars=0.7700 remaining_contracts=2.00 order_id=0b86adc2-df11-48e8-a6aa-a08fa60455f8
+21:49:48 INFO AMEND_OK | side=yes price_dollars=0.0200 total_fillable_contracts=97.00 order_id=9e938c31-4bff-4c46-b375-43d39092f741
+21:50:22 INFO AMEND_OK | side=yes price_dollars=0.0300 total_fillable_contracts=65.00 order_id=9e938c31-4bff-4c46-b375-43d39092f741
+21:50:33 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=9e938c31-4bff-4c46-b375-43d39092f741
+21:50:33 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=0b86adc2-df11-48e8-a6aa-a08fa60455f8
+21:50:33 INFO CREATE_OK | side=yes price_dollars=0.0400 remaining_contracts=48.00 order_id=a11fe5f0-d59c-4381-bad4-4673632ee524
+21:50:33 INFO CREATE_OK | side=no price_dollars=0.7700 remaining_contracts=2.00 order_id=e1b83f71-3409-45e8-8c24-f62275364d63
+21:50:33 INFO AMEND_OK | side=yes price_dollars=0.0300 total_fillable_contracts=65.00 order_id=a11fe5f0-d59c-4381-bad4-4673632ee524
+21:51:17 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=a11fe5f0-d59c-4381-bad4-4673632ee524
+21:51:17 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=a11fe5f0-d59c-4381-bad4-4673632ee524
+21:51:17 INFO CREATE_OK | side=yes price_dollars=0.0300 remaining_contracts=65.00 order_id=85878695-5bd4-4e7c-84e8-d9b6fd09bf5f
+21:51:17 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=e1b83f71-3409-45e8-8c24-f62275364d63
+21:51:17 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=e1b83f71-3409-45e8-8c24-f62275364d63
+21:51:17 INFO CREATE_OK | side=no price_dollars=0.7700 remaining_contracts=2.00 order_id=8307765b-c0d7-478c-95fa-64065bc65fc2
+21:51:18 INFO AMEND_OK | side=yes price_dollars=0.0200 total_fillable_contracts=97.00 order_id=85878695-5bd4-4e7c-84e8-d9b6fd09bf5f
+21:52:02 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=85878695-5bd4-4e7c-84e8-d9b6fd09bf5f
+21:52:02 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=8307765b-c0d7-478c-95fa-64065bc65fc2
+21:52:02 INFO CREATE_OK | side=yes price_dollars=0.0300 remaining_contracts=65.00 order_id=59ae3cb1-66fe-452c-a430-8a9c1fd18b18
+21:52:02 INFO CREATE_OK | side=no price_dollars=0.7700 remaining_contracts=2.00 order_id=a0ab496e-9835-4c53-9822-e2f046481527
+21:52:02 INFO AMEND_OK | side=yes price_dollars=0.0200 total_fillable_contracts=97.00 order_id=59ae3cb1-66fe-452c-a430-8a9c1fd18b18
+21:52:21 INFO AMEND_OK | side=yes price_dollars=0.0300 total_fillable_contracts=65.00 order_id=59ae3cb1-66fe-452c-a430-8a9c1fd18b18
+21:52:47 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=59ae3cb1-66fe-452c-a430-8a9c1fd18b18
+21:52:47 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=a0ab496e-9835-4c53-9822-e2f046481527
+21:52:47 INFO CREATE_OK | side=yes price_dollars=0.0400 remaining_contracts=48.00 order_id=0ca439e1-c794-4a87-8b7c-00c3bea3846b
+21:52:47 INFO CREATE_OK | side=no price_dollars=0.7700 remaining_contracts=2.00 order_id=889a062b-a1e5-41ac-969a-71583ca4960d
+21:52:47 INFO AMEND_OK | side=yes price_dollars=0.0300 total_fillable_contracts=65.00 order_id=0ca439e1-c794-4a87-8b7c-00c3bea3846b
+21:53:18 INFO AMEND_OK | side=yes price_dollars=0.0200 total_fillable_contracts=97.00 order_id=0ca439e1-c794-4a87-8b7c-00c3bea3846b
+21:53:32 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=0ca439e1-c794-4a87-8b7c-00c3bea3846b
+21:53:32 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=889a062b-a1e5-41ac-969a-71583ca4960d
+21:53:32 INFO CREATE_OK | side=yes price_dollars=0.0300 remaining_contracts=65.00 order_id=49f07df7-3f62-4f17-be56-039783b653fc
+21:53:32 INFO CREATE_OK | side=no price_dollars=0.7700 remaining_contracts=2.00 order_id=245da343-0c69-4a3b-8e08-e3d44f1e1126
+21:53:32 INFO AMEND_OK | side=yes price_dollars=0.0200 total_fillable_contracts=97.00 order_id=49f07df7-3f62-4f17-be56-039783b653fc
+21:53:40 INFO AMEND_OK | side=yes price_dollars=0.0100 total_fillable_contracts=195.00 order_id=49f07df7-3f62-4f17-be56-039783b653fc
+21:54:17 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=49f07df7-3f62-4f17-be56-039783b653fc
+21:54:17 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=245da343-0c69-4a3b-8e08-e3d44f1e1126
+21:54:17 INFO CREATE_OK | side=yes price_dollars=0.0200 remaining_contracts=97.00 order_id=4c7dcaec-317c-4c43-a469-d0747743fe84
+21:54:17 INFO CREATE_OK | side=no price_dollars=0.7800 remaining_contracts=2.00 order_id=63326bcf-6689-4eeb-8ff5-0808e28006bc
+21:54:17 INFO AMEND_OK | side=yes price_dollars=0.0100 total_fillable_contracts=195.00 order_id=4c7dcaec-317c-4c43-a469-d0747743fe84
+21:54:17 INFO AMEND_OK | side=no price_dollars=0.7700 total_fillable_contracts=2.00 order_id=63326bcf-6689-4eeb-8ff5-0808e28006bc
+21:54:21 INFO AMEND_OK | side=yes price_dollars=0.0200 total_fillable_contracts=97.00 order_id=4c7dcaec-317c-4c43-a469-d0747743fe84
+21:54:58 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=4c7dcaec-317c-4c43-a469-d0747743fe84
+21:54:58 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=4c7dcaec-317c-4c43-a469-d0747743fe84
+21:54:58 INFO CREATE_OK | side=yes price_dollars=0.0200 remaining_contracts=97.00 order_id=616f54ad-9e74-48c4-8835-7aa2126e0e8a
+21:54:58 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=63326bcf-6689-4eeb-8ff5-0808e28006bc
+21:54:58 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=63326bcf-6689-4eeb-8ff5-0808e28006bc
+21:54:58 INFO CREATE_OK | side=no price_dollars=0.7800 remaining_contracts=2.00 order_id=a85eab5f-19da-43ca-a1f5-932ca5cd13e4
+21:54:58 INFO AMEND_OK | side=no price_dollars=0.7900 total_fillable_contracts=2.00 order_id=a85eab5f-19da-43ca-a1f5-932ca5cd13e4
+21:55:42 INFO CANCEL_REQUESTED | side=yes reason=refresh_expiring_quote order_id=616f54ad-9e74-48c4-8835-7aa2126e0e8a
+21:55:42 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=616f54ad-9e74-48c4-8835-7aa2126e0e8a
+21:55:42 INFO CREATE_OK | side=yes price_dollars=0.0200 remaining_contracts=97.00 order_id=e370e89a-aad4-4f10-8aad-73215835e2fc
+21:55:42 INFO CANCEL_REQUESTED | side=no reason=refresh_expiring_quote order_id=a85eab5f-19da-43ca-a1f5-932ca5cd13e4
+21:55:42 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=a85eab5f-19da-43ca-a1f5-932ca5cd13e4
+21:55:42 INFO CREATE_OK | side=no price_dollars=0.7900 remaining_contracts=2.00 order_id=6b984b3f-d200-4723-a6b0-7b8d6cda0a4c
+21:55:48 INFO CANCEL_REQUESTED | side=yes reason=quote_disabled order_id=e370e89a-aad4-4f10-8aad-73215835e2fc
+21:55:48 INFO ORDER_NOT_RESTING | side=yes status=canceled order_id=e370e89a-aad4-4f10-8aad-73215835e2fc
+21:56:27 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=6b984b3f-d200-4723-a6b0-7b8d6cda0a4c
+21:56:27 INFO CREATE_OK | side=no price_dollars=0.8000 remaining_contracts=2.00 order_id=46b82165-ce67-4e3f-8661-811ee34a271c
+21:56:27 INFO AMEND_OK | side=no price_dollars=0.7900 total_fillable_contracts=2.00 order_id=46b82165-ce67-4e3f-8661-811ee34a271c
+21:56:41 INFO CANCEL_REQUESTED | side=no reason=quote_disabled order_id=46b82165-ce67-4e3f-8661-811ee34a271c
+21:56:41 INFO ORDER_NOT_RESTING | side=no status=canceled order_id=46b82165-ce67-4e3f-8661-811ee34a271c

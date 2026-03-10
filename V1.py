@@ -147,36 +147,36 @@ class BotSettings:
     # --- Quote behavior ---
     post_only_quotes: bool = True
     cancel_quotes_if_exchange_pauses: bool = True
-    minimum_milliseconds_between_requotes: int = 150
+    minimum_milliseconds_between_requotes: int = 6000
 
     # Use short expirations to avoid stale resting orders after crashes.
     # Set to 0 to disable expirations and use good_till_canceled instead.
-    resting_order_expiration_seconds: int = 45
+    resting_order_expiration_seconds: int = 400
     expiration_refresh_lead_seconds: int = 5
 
     # When spread is wide enough, the bot may improve by this many ticks.
     # 0 means "do not improve; only join or sit behind".
     aggressive_improvement_ticks_when_spread_is_wide: int = 0
-    minimum_spread_ticks_required_for_aggressive_improvement: int = 5
+    minimum_spread_ticks_required_for_aggressive_improvement: int = 8
 
     # When not improving, the bot can sit behind the current best bid by this many ticks.
-    passive_offset_ticks_when_not_improving: int = 1
+    passive_offset_ticks_when_not_improving: int = 2
 
     # After a fill, disable aggressive improvement briefly to reduce adverse selection.
-    post_fill_no_improve_cooldown_ms: int = 150
+    post_fill_no_improve_cooldown_ms: int = 10000
 
     # Stop quoting new interest on a side if the current market is too close to zero.
-    minimum_best_bid_cents_required_to_quote: int = 10
-    minimum_implied_ask_cents_required_to_quote: int = 10
+    minimum_best_bid_cents_required_to_quote: int = 22
+    minimum_implied_ask_cents_required_to_quote: int = 22
 
     # Keep our bid at least one valid tick below the implied ask on the opposite side.
     enforce_one_tick_safety_below_implied_ask: bool = True
 
     # --- Inventory controls ---
     enable_one_way_inventory_guard: bool = True
-    one_way_inventory_guard_contracts: int = 20
+    one_way_inventory_guard_contracts: int = 10
 
-    inventory_skew_contracts_per_tick: int = 20
+    inventory_skew_contracts_per_tick: int = 10
     maximum_inventory_skew_ticks: int = 5
 
     # --- Pair / spread protection ---
@@ -205,7 +205,7 @@ class BotSettings:
     subscribe_to_market_positions_channel: bool = True
 
     # Optional queue-position polling (disabled by default to save API calls).
-    enable_queue_position_logging: bool = False
+    enable_queue_position_logging: bool = True
     queue_position_log_interval_seconds: float = 15.0
 
     # Client-order-id prefixes owned by this strategy. Legacy `tob:` support is
