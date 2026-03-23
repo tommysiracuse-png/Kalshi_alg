@@ -26,44 +26,45 @@ REM ------------------------------------
 
 if not exist "%BOT_SCRIPT%" (
     echo ERROR: bot script not found: %BOT_SCRIPT%
-    exit /b 2
-)
-
-if not exist "%SCREEN_FILE%" (
-    echo ERROR: screener file not found: %SCREEN_FILE%
-    echo Export your notebook screener as screener_export.csv into this folder.
-    exit /b 2
-)
-
-if "%DRY_RUN%"=="0" (
-    if "%KALSHI_API_KEY_ID%"=="" (
-        echo ERROR: KALSHI_API_KEY_ID is empty.
         exit /b 2
-    )
-    if not exist "%KALSHI_PRIVATE_KEY_PATH%" (
-        echo ERROR: private key file not found: %KALSHI_PRIVATE_KEY_PATH%
-        exit /b 2
-    )
-)
+        )
 
-set "USE_DEMO_FLAG="
-if "%USE_DEMO%"=="1" set "USE_DEMO_FLAG=--use-demo"
+        if not exist "%SCREEN_FILE%" (
+            echo ERROR: screener file not found: %SCREEN_FILE%
+                echo Export your notebook screener as screener_export.csv into this folder.
+                    exit /b 2
+                    )
 
-set "DRY_RUN_FLAG="
-if "%DRY_RUN%"=="1" set "DRY_RUN_FLAG=--dry-run"
+                    if "%DRY_RUN%"=="0" (
+                        if "%KALSHI_API_KEY_ID%"=="" (
+                                echo ERROR: KALSHI_API_KEY_ID is empty.
+                                        exit /b 2
+                                            )
+                                                if not exist "%KALSHI_PRIVATE_KEY_PATH%" (
+                                                        echo ERROR: private key file not found: %KALSHI_PRIVATE_KEY_PATH%
+                                                                exit /b 2
+                                                                    )
+                                                                    )
 
-set "SUBACCOUNT_FLAG="
-if not "%SUBACCOUNT%"=="" set "SUBACCOUNT_FLAG=--subaccount %SUBACCOUNT%"
+                                                                    set "USE_DEMO_FLAG="
+                                                                    if "%USE_DEMO%"=="1" set "USE_DEMO_FLAG=--use-demo"
 
-python "%ROOT%lip_launcher.py" ^
-  --screen-file "%SCREEN_FILE%" ^
-  --bot-script "%BOT_SCRIPT%" ^
-  --max-bots %MAX_BOTS% ^
-  --yes-budget-cents %YES_BUDGET_CENTS% ^
-  --no-budget-cents %NO_BUDGET_CENTS% ^
-  --launch-delay-seconds %LAUNCH_DELAY_SECONDS% ^
-  %USE_DEMO_FLAG% ^
-  %DRY_RUN_FLAG% ^
-  %SUBACCOUNT_FLAG%
+                                                                    set "DRY_RUN_FLAG="
+                                                                    if "%DRY_RUN%"=="1" set "DRY_RUN_FLAG=--dry-run"
 
-endlocal
+                                                                    set "SUBACCOUNT_FLAG="
+                                                                    if not "%SUBACCOUNT%"=="" set "SUBACCOUNT_FLAG=--subaccount %SUBACCOUNT%"
+
+                                                                    python "%ROOT%lip_launcher.py" ^
+                                                                      --screen-file "%SCREEN_FILE%" ^
+                                                                        --bot-script "%BOT_SCRIPT%" ^
+                                                                          --max-bots %MAX_BOTS% ^
+                                                                            --yes-budget-cents %YES_BUDGET_CENTS% ^
+                                                                              --no-budget-cents %NO_BUDGET_CENTS% ^
+                                                                                --launch-delay-seconds %LAUNCH_DELAY_SECONDS% ^
+                                                                                  %USE_DEMO_FLAG% ^
+                                                                                    %DRY_RUN_FLAG% ^
+                                                                                      %SUBACCOUNT_FLAG%
+
+                                                                                      endlocal
+                                                                                      

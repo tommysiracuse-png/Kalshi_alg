@@ -3,22 +3,20 @@
 Kalshi single-market top-of-book market-maker.
 
 This version keeps the fixed-point, inventory-aware, expiration-aware structure
-of the upgraded bot and adds three production-hardening behaviors that were
-missing from the earlier runtime:
+of the upgraded bot and adds the production fixes requested from the trade
+review:
 
-1. Shared write throttling across bot processes to reduce create/amend/cancel
-   bursts and avoid 429 write-rate spikes.
-2. Queue-abandonment logic so the bot stops wasting time in hopeless queues.
-3. Same-side post-fill re-entry suppression so the bot does not immediately
-   step back into the same side after getting hit.
-
-The default settings are intentionally quieter and more conservative than the
-previous production run:
-- slower repricing
-- longer expirations
-- passive placement further behind the best bid
-- stronger same-side cooldowns after fills
-- queue-position polling and side shutoffs enabled by default
+1. Order-fill deduplication keyed by order ID so cancel / terminal updates
+   cannot double-count fills.
+2. Exchange position reconciliation through websocket and periodic REST checks,
+   with exchange position treated as the source of truth.
+3. Symmetric amend hysteresis so one-tick oscillation does not keep resetting
+   queue priority.
+4. Tighter queue abandonment defaults and longer cooldowns.
+5. Hysteresis around the market-level low-probability quote guard.
+6. A hard directional exposure cap with inventory-unwind mode.
+7. Sell / unwind orders that reduce excess net exposure at passive midpoint
+   prices instead of only accumulating inventory with buy orders.
 """
 
 from __future__ import annotations
@@ -26,6 +24,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
+import collections
 import hashlib
 import json
 import logging
@@ -294,14 +293,14 @@ class BotSettings:
     yes_order_budget_cents: int = 100
     no_order_budget_cents: int = 100
     maximum_contracts_per_order: int = 2_000
-    budget_fee_buffer_cents: int = 5
+    budget_fee_buffer_cents: int = 0
     allow_fractional_order_entry_when_supported: bool = False
     refill_resting_size_after_partial_fill: bool = False
 
     # --- Quote behavior ---
     post_only_quotes: bool = True
     cancel_quotes_if_exchange_pauses: bool = True
-    minimum_milliseconds_between_requotes: int = 1_000
+    minimum_milliseconds_between_requotes: int = 200
 
     # Use longer expirations than the earlier version so we stop resetting queue
     # priority every 45 seconds.
@@ -310,36 +309,56 @@ class BotSettings:
     expiration_jitter_seconds: int = 20
     stagger_yes_no_expiration_offsets_seconds: int = 10
 
-    aggressive_improvement_ticks_when_spread_is_wide: int = 1
-    minimum_spread_ticks_required_for_aggressive_improvement: int = 10
+    aggressive_improvement_ticks_when_spread_is_wide: int = 0
+    minimum_spread_ticks_required_for_aggressive_improvement: int = 5
     passive_offset_ticks_when_not_improving: int = 2
     join_current_best_bid_when_starting_new_quote_cycle: bool = False
 
     # After any fill, suppress same-side quoting for a while to reduce the
     # "got filled, stepped right back in, got filled again" pattern.
-    post_fill_no_improve_cooldown_ms: int = 4_000
-    same_side_reentry_cooldown_ms: int = 4_000
+    post_fill_no_improve_cooldown_ms: int = 750
+    same_side_reentry_cooldown_ms: int = 60_000
     suppress_same_side_quotes_during_reentry_cooldown: bool = True
 
-    # Only chase upward when the market moved materially. Downward / de-risking
-    # reprices still happen immediately.
-    minimum_upward_reprice_ticks_required: int = 2
+    # Reprice only when the price change is meaningful in either direction,
+    # unless a safety cap forces a move or the queue ahead is materially poor.
+    minimum_price_change_ticks_required_to_reprice: int = 1
+    queue_position_contracts_ahead_to_force_small_reprice: int = 500
+    queue_position_multiple_of_our_remaining_size_to_force_small_reprice: float = 40
 
-    minimum_best_bid_cents_required_to_quote: int = 20
-    minimum_implied_ask_cents_required_to_quote: int = 20
-    minimum_market_best_bid_cents_required_to_quote_any_side: int = 20
+    minimum_best_bid_cents_required_to_quote: int = 15
+    minimum_implied_ask_cents_required_to_quote: int = 15
+    minimum_market_best_bid_cents_required_to_disable_quotes: int = 5
+    minimum_market_best_bid_cents_required_to_reenable_quotes: int = 6
+    market_probability_reenable_dwell_seconds: float = 10.0
+    allow_inventory_exit_side_while_market_probability_guard_is_active: bool = True
+
+    # Toxicity guard: if a large amount of resting liquidity is pulled from the
+    # top of book in a very short window, stop quoting briefly to avoid getting
+    # picked off by informed flow.
+    enable_toxicity_guard: bool = True
+    toxicity_top_levels_to_watch: int = 3
+    toxicity_detection_window_milliseconds: int = 500
+    toxicity_removed_contracts_threshold: int = 50
+    toxicity_pause_milliseconds: int = 10_000
+    toxicity_pause_market_wide: bool = False
+
     enforce_one_tick_safety_below_implied_ask: bool = True
 
     # --- Inventory controls ---
-    enable_one_way_inventory_guard: bool = True
-    one_way_inventory_guard_contracts: int = 30
-    inventory_skew_contracts_per_tick: int = 15
-    maximum_inventory_skew_ticks: int = 5
+    enable_one_way_inventory_guard: bool = False
+    one_way_inventory_guard_contracts: int = 20
+    inventory_skew_contracts_per_tick: int = 10
+    maximum_inventory_skew_ticks: int = 2
+
+    enable_directional_inventory_unwind: bool = True
+    maximum_unpaired_contracts_per_market: int = 30
+    directional_inventory_unwind_resume_contracts: int = 15
 
     # --- Pair / spread protection ---
     enable_pair_guard: bool = True
-    maximum_combined_bid_cents: int = 98
-    additional_profit_buffer_cents: int = 1
+    maximum_combined_bid_cents: int = 99
+    additional_profit_buffer_cents: int = 2
     pair_guard_priority: str = "auto"
 
     # --- Post-only collision handling ---
@@ -354,11 +373,17 @@ class BotSettings:
 
     # Queue-abandonment logic.
     enable_queue_abandonment_guard: bool = True
-    maximum_queue_ahead_contracts_before_abandonment: int = 100
-    maximum_queue_ahead_multiple_of_our_remaining_size: float = 20.0
-    queue_abandonment_consecutive_polls_required: int = 3
+    maximum_queue_ahead_contracts_before_abandonment: int = 500
+    maximum_queue_ahead_multiple_of_our_remaining_size: float = 20
+    queue_abandonment_consecutive_polls_required: int = 2
     queue_abandonment_side_cooldown_seconds: int = 60
-    queue_abandonment_market_cooldown_seconds: int = 60
+    queue_abandonment_market_cooldown_seconds: int = 300
+
+    # Exchange position is the source of truth. Websocket updates are applied
+    # immediately, and REST reconciliation periodically snaps provisional
+    # inventory back to the live exchange position when needed.
+    enable_periodic_rest_position_reconciliation: bool = True
+    position_reconciliation_interval_seconds: float = 30.0
 
     # Cross-process shared write throttling.
     enable_shared_write_rate_limiter: bool = True
@@ -403,18 +428,42 @@ class BotSettings:
             raise ValueError("post_fill_no_improve_cooldown_ms must be >= 0")
         if self.same_side_reentry_cooldown_ms < 0:
             raise ValueError("same_side_reentry_cooldown_ms must be >= 0")
-        if self.minimum_upward_reprice_ticks_required < 0:
-            raise ValueError("minimum_upward_reprice_ticks_required must be >= 0")
+        if self.minimum_price_change_ticks_required_to_reprice < 0:
+            raise ValueError("minimum_price_change_ticks_required_to_reprice must be >= 0")
+        if self.queue_position_contracts_ahead_to_force_small_reprice < 0:
+            raise ValueError("queue_position_contracts_ahead_to_force_small_reprice must be >= 0")
+        if self.queue_position_multiple_of_our_remaining_size_to_force_small_reprice < 0:
+            raise ValueError("queue_position_multiple_of_our_remaining_size_to_force_small_reprice must be >= 0")
         if self.minimum_best_bid_cents_required_to_quote < 0 or self.minimum_implied_ask_cents_required_to_quote < 0:
             raise ValueError("Quote-threshold cents must be >= 0")
-        if self.minimum_market_best_bid_cents_required_to_quote_any_side < 0:
-            raise ValueError("minimum_market_best_bid_cents_required_to_quote_any_side must be >= 0")
+        if self.minimum_market_best_bid_cents_required_to_disable_quotes < 0:
+            raise ValueError("minimum_market_best_bid_cents_required_to_disable_quotes must be >= 0")
+        if self.minimum_market_best_bid_cents_required_to_reenable_quotes < 0:
+            raise ValueError("minimum_market_best_bid_cents_required_to_reenable_quotes must be >= 0")
+        if self.minimum_market_best_bid_cents_required_to_reenable_quotes < self.minimum_market_best_bid_cents_required_to_disable_quotes:
+            raise ValueError("minimum_market_best_bid_cents_required_to_reenable_quotes must be >= minimum_market_best_bid_cents_required_to_disable_quotes")
+        if self.market_probability_reenable_dwell_seconds < 0:
+            raise ValueError("market_probability_reenable_dwell_seconds must be >= 0")
+        if self.toxicity_top_levels_to_watch < 0:
+            raise ValueError("toxicity_top_levels_to_watch must be >= 0")
+        if self.toxicity_detection_window_milliseconds < 0:
+            raise ValueError("toxicity_detection_window_milliseconds must be >= 0")
+        if self.toxicity_removed_contracts_threshold < 0:
+            raise ValueError("toxicity_removed_contracts_threshold must be >= 0")
+        if self.toxicity_pause_milliseconds < 0:
+            raise ValueError("toxicity_pause_milliseconds must be >= 0")
         if self.one_way_inventory_guard_contracts < 0:
             raise ValueError("one_way_inventory_guard_contracts must be >= 0")
         if self.inventory_skew_contracts_per_tick <= 0:
             raise ValueError("inventory_skew_contracts_per_tick must be > 0")
         if self.maximum_inventory_skew_ticks < 0:
             raise ValueError("maximum_inventory_skew_ticks must be >= 0")
+        if self.maximum_unpaired_contracts_per_market < 0:
+            raise ValueError("maximum_unpaired_contracts_per_market must be >= 0")
+        if self.directional_inventory_unwind_resume_contracts < 0:
+            raise ValueError("directional_inventory_unwind_resume_contracts must be >= 0")
+        if self.directional_inventory_unwind_resume_contracts > self.maximum_unpaired_contracts_per_market:
+            raise ValueError("directional_inventory_unwind_resume_contracts must be <= maximum_unpaired_contracts_per_market")
         if self.maximum_combined_bid_cents < 0:
             raise ValueError("maximum_combined_bid_cents must be >= 0")
         if self.additional_profit_buffer_cents < 0:
@@ -435,6 +484,8 @@ class BotSettings:
             raise ValueError("queue_abandonment_side_cooldown_seconds must be >= 0")
         if self.queue_abandonment_market_cooldown_seconds < 0:
             raise ValueError("queue_abandonment_market_cooldown_seconds must be >= 0")
+        if self.position_reconciliation_interval_seconds <= 0:
+            raise ValueError("position_reconciliation_interval_seconds must be > 0")
         if self.shared_write_rate_limit_writes_per_second <= 0:
             raise ValueError("shared_write_rate_limit_writes_per_second must be > 0")
         if self.shared_write_rate_limit_burst_capacity <= 0:
@@ -453,10 +504,19 @@ def build_settings_from_args(bot_args: argparse.Namespace) -> BotSettings:
     defaults = BotSettings()
 
     market_ticker = bot_args.ticker.strip() if bot_args.ticker else defaults.market_ticker
-    api_key_id = (bot_args.api_key_id or env_api_key or defaults.api_key_id).strip()
-    private_key_path = (bot_args.private_key or env_private_key_path or defaults.private_key_path).strip()
 
-    settings = BotSettings(
+    api_key_id = bot_args.api_key_id or env_api_key
+    if api_key_id is not None:
+        api_key_id = api_key_id.strip()
+    else:
+        api_key_id = ""
+
+    private_key_path = bot_args.private_key or env_private_key_path or defaults.private_key_path
+    if private_key_path is not None:
+        private_key_path = private_key_path.strip()
+    else:
+        private_key_path = ""
+        settings = BotSettings(
         market_ticker=market_ticker,
         api_key_id=api_key_id,
         private_key_path=private_key_path,
@@ -832,7 +892,7 @@ class KalshiApiClient:
         self.websocket_path = "/trade-api/ws/v2"
         self.session = requests.Session()
 
-        if not settings.api_key_id or settings.api_key_id == "<YOUR_API_KEY_ID>":
+        if not settings.api_key_id:
             raise ValueError(
                 "A valid Kalshi API key ID is required. Pass --api-key-id or set KALSHI_API_KEY_ID."
             )
@@ -982,6 +1042,7 @@ class KalshiApiClient:
         *,
         market_ticker: str,
         side: str,
+        action: str,
         price_units: int,
         count_units: int,
         client_order_id: str,
@@ -990,7 +1051,7 @@ class KalshiApiClient:
         body = {
             "ticker": market_ticker,
             "side": side,
-            "action": "buy",
+            "action": action,
             "client_order_id": client_order_id,
             "count_fp": format_count_fp(count_units),
             "post_only": bool(self.settings.post_only_quotes),
@@ -1011,6 +1072,7 @@ class KalshiApiClient:
             log_event(
                 "DRY_CREATE",
                 side=side,
+                action=action,
                 price_dollars=format_price_dollars(price_units),
                 contracts=format_count_fp(count_units),
             )
@@ -1031,6 +1093,7 @@ class KalshiApiClient:
         order_id: str,
         market_ticker: str,
         side: str,
+        action: str,
         new_price_units: int,
         new_total_fillable_count_units: int,
         previous_client_order_id: str,
@@ -1039,7 +1102,7 @@ class KalshiApiClient:
         body = {
             "ticker": market_ticker,
             "side": side,
-            "action": "buy",
+            "action": action,
             "subaccount": self.settings.subaccount_number,
             "client_order_id": previous_client_order_id,
             "updated_client_order_id": updated_client_order_id,
@@ -1055,6 +1118,7 @@ class KalshiApiClient:
             log_event(
                 "DRY_AMEND",
                 side=side,
+                action=action,
                 order_id=order_id,
                 price_dollars=format_price_dollars(new_price_units),
                 total_contracts=format_count_fp(new_total_fillable_count_units),
@@ -1123,6 +1187,7 @@ class ManagedOrderState:
     side: str
     order_id: Optional[str] = None
     client_order_id: Optional[str] = None
+    action: str = "buy"
     price_units: Optional[int] = None
     remaining_count_units: int = 0
     current_order_filled_units: int = 0
@@ -1134,18 +1199,30 @@ class ManagedOrderState:
     same_side_reentry_cooldown_until_ms: int = 0
     queue_abandonment_cooldown_until_ms: int = 0
     last_positive_fill_timestamp_ms: int = 0
+    cancel_requested: bool = False
+    reset_quote_cycle_on_terminal: bool = False
+
+    @property
+    def has_exchange_resting_order(self) -> bool:
+        return bool(self.order_id) and self.status == "resting"
 
     @property
     def has_active_resting_order(self) -> bool:
-        return bool(self.order_id) and self.status == "resting"
+        return self.has_exchange_resting_order and not self.cancel_requested
 
     @property
     def current_order_total_fillable_units(self) -> int:
         return int(self.remaining_count_units) + int(self.current_order_filled_units)
 
+    def mark_cancel_requested(self, *, reset_quote_cycle: bool) -> None:
+        self.cancel_requested = True
+        if reset_quote_cycle:
+            self.reset_quote_cycle_on_terminal = True
+
     def clear_active_order(self, *, preserve_quote_cycle: bool) -> None:
         self.order_id = None
         self.client_order_id = None
+        self.action = "buy"
         self.price_units = None
         self.remaining_count_units = 0
         self.current_order_filled_units = 0
@@ -1153,8 +1230,19 @@ class ManagedOrderState:
         self.expiration_time_ms = None
         self.last_queue_position_units = None
         self.consecutive_queue_ahead_breaches = 0
+        self.cancel_requested = False
+        self.reset_quote_cycle_on_terminal = False
         if not preserve_quote_cycle:
             self.quote_cycle_filled_units = 0
+
+
+@dataclass(frozen=True)
+class DesiredOrderPlan:
+    side: str
+    action: str
+    price_units: Optional[int]
+    remaining_count_units_override: Optional[int] = None
+    reset_quote_cycle_when_disabled: bool = True
 
 
 # ---------------------------------------------------------------------------
@@ -1176,10 +1264,19 @@ class TopOfBookBot:
         self.last_fill_timestamp_ms = 0
         self.last_requote_action_timestamp_ms = 0
         self.market_wide_queue_cooldown_until_ms = 0
-        self.last_market_probability_guard_state: Optional[bool] = None
+        self.market_probability_guard_active = False
+        self.market_probability_guard_clear_candidate_since_ms: Optional[int] = None
         self.last_market_queue_cooldown_logged_state: Optional[bool] = None
+        self.directional_unwind_side: Optional[str] = None
+        self.toxicity_market_pause_until_ms = 0
+        self.toxicity_side_pause_until_ms = {"yes": 0, "no": 0}
+        self.recent_toxicity_liquidity_removals = collections.deque()
+        self.force_immediate_requote_once = False
 
         self.net_position_units = 0
+        self.exchange_confirmed_position_units = 0
+        self.last_exchange_position_update_ms = 0
+        self.accounted_fill_units_by_order_key: Dict[str, int] = {}
 
         self.orders: Dict[str, ManagedOrderState] = {
             "yes": ManagedOrderState(side="yes"),
@@ -1203,17 +1300,30 @@ class TopOfBookBot:
             return False
         return client_order_id.startswith(self.settings.legacy_client_order_prefixes)
 
+    def reconcile_net_position_from_exchange(self, exchange_position_units: int, *, source: str) -> None:
+        exchange_position_units = int(exchange_position_units)
+        if exchange_position_units != self.net_position_units:
+            log_event(
+                "POSITION_RECONCILED",
+                source=source,
+                previous_contracts=format_count_fp(self.net_position_units),
+                live_contracts=format_count_fp(exchange_position_units),
+            )
+        self.net_position_units = exchange_position_units
+        self.exchange_confirmed_position_units = exchange_position_units
+        self.last_exchange_position_update_ms = now_ms()
+
     def load_startup_position(self) -> None:
         response = self.api_client.get_positions(self.settings.market_ticker)
         market_positions = response.get("market_positions") or []
         if not market_positions:
-            self.net_position_units = 0
+            self.reconcile_net_position_from_exchange(0, source="startup_rest")
             log_event("STARTUP_POSITION", contracts="0.00")
             return
 
         position_payload = market_positions[0]
         position_units = parse_optional_count_units(position_payload, "position_fp", "position")
-        self.net_position_units = int(position_units or 0)
+        self.reconcile_net_position_from_exchange(int(position_units or 0), source="startup_rest")
         log_event("STARTUP_POSITION", contracts=format_count_fp(self.net_position_units))
 
     def cancel_owned_resting_quotes_on_startup(self) -> None:
@@ -1313,6 +1423,76 @@ class TopOfBookBot:
     def market_queue_cooldown_active(self) -> bool:
         return now_ms() < self.market_wide_queue_cooldown_until_ms
 
+    def market_toxicity_pause_active(self) -> bool:
+        return now_ms() < self.toxicity_market_pause_until_ms
+
+    def side_toxicity_pause_active(self, side: str) -> bool:
+        return now_ms() < self.toxicity_side_pause_until_ms.get(side, 0)
+
+    def toxicity_pause_active_for_side(self, side: str) -> bool:
+        return self.market_toxicity_pause_active() or self.side_toxicity_pause_active(side)
+
+    def maybe_trigger_toxicity_guard_from_delta(
+        self,
+        *,
+        side: str,
+        price_units: int,
+        delta_units: int,
+        best_yes_bid_units_before: Optional[int],
+        best_no_bid_units_before: Optional[int],
+    ) -> bool:
+        if not self.settings.enable_toxicity_guard:
+            return False
+        if delta_units >= 0:
+            return False
+
+        best_bid_units_before = best_yes_bid_units_before if side == "yes" else best_no_bid_units_before
+        if best_bid_units_before is None or price_units > best_bid_units_before:
+            return False
+
+        tick_distance_from_best = self.market.price_grid.tick_distance(best_bid_units_before, price_units)
+        if tick_distance_from_best >= self.settings.toxicity_top_levels_to_watch:
+            return False
+
+        current_timestamp_ms = now_ms()
+        removed_units = abs(int(delta_units))
+        self.recent_toxicity_liquidity_removals.append((current_timestamp_ms, side, removed_units))
+
+        cutoff_timestamp_ms = current_timestamp_ms - self.settings.toxicity_detection_window_milliseconds
+        while self.recent_toxicity_liquidity_removals and self.recent_toxicity_liquidity_removals[0][0] < cutoff_timestamp_ms:
+            self.recent_toxicity_liquidity_removals.popleft()
+
+        removed_units_for_side = sum(
+            entry_removed_units
+            for _, entry_side, entry_removed_units in self.recent_toxicity_liquidity_removals
+            if entry_side == side
+        )
+        threshold_units = contracts_to_count_units(self.settings.toxicity_removed_contracts_threshold)
+        if removed_units_for_side < threshold_units:
+            return False
+
+        pause_until_ms = current_timestamp_ms + self.settings.toxicity_pause_milliseconds
+        already_active = self.market_toxicity_pause_active() if self.settings.toxicity_pause_market_wide else self.side_toxicity_pause_active(side)
+
+        if self.settings.toxicity_pause_market_wide:
+            self.toxicity_market_pause_until_ms = max(self.toxicity_market_pause_until_ms, pause_until_ms)
+        else:
+            self.toxicity_side_pause_until_ms[side] = max(self.toxicity_side_pause_until_ms.get(side, 0), pause_until_ms)
+
+        if already_active:
+            return False
+
+        log_event(
+            "TOXICITY_GUARD_TRIGGER",
+            side=side,
+            removed_contracts=format_count_fp(removed_units_for_side),
+            threshold_contracts=self.settings.toxicity_removed_contracts_threshold,
+            pause_ms=self.settings.toxicity_pause_milliseconds,
+            market_wide=self.settings.toxicity_pause_market_wide,
+        )
+        self.force_immediate_requote_once = True
+        return True
+
     def quote_allowed_for_side(
         self,
         *,
@@ -1340,6 +1520,8 @@ class TopOfBookBot:
         if self.side_queue_abandonment_cooldown_active(side):
             allowed = False
         if self.market_queue_cooldown_active():
+            allowed = False
+        if self.toxicity_pause_active_for_side(side):
             allowed = False
 
         return allowed
@@ -1478,24 +1660,133 @@ class TopOfBookBot:
         return self.market.price_grid.move_price_by_ticks(base_price_units, +skew_ticks)
 
     def maybe_market_probability_guard_triggered(self, *, best_yes_bid_units: int, best_no_bid_units: int) -> bool:
-        threshold_cents = self.settings.minimum_market_best_bid_cents_required_to_quote_any_side
-        if threshold_cents <= 0:
-            guard_active = False
-        else:
-            threshold_units = cents_to_price_units(threshold_cents)
-            guard_active = best_yes_bid_units < threshold_units or best_no_bid_units < threshold_units
+        disable_cents = self.settings.minimum_market_best_bid_cents_required_to_disable_quotes
+        reenable_cents = self.settings.minimum_market_best_bid_cents_required_to_reenable_quotes
+        minimum_bid_units = min(best_yes_bid_units, best_no_bid_units)
+        minimum_bid_cents = minimum_bid_units // PRICE_UNITS_PER_CENT
+        now_timestamp_ms = now_ms()
 
-        if guard_active != self.last_market_probability_guard_state:
+        if not self.market_probability_guard_active:
+            if disable_cents > 0 and minimum_bid_cents < disable_cents:
+                self.market_probability_guard_active = True
+                self.market_probability_guard_clear_candidate_since_ms = None
+        else:
+            if minimum_bid_cents >= reenable_cents:
+                if self.market_probability_guard_clear_candidate_since_ms is None:
+                    self.market_probability_guard_clear_candidate_since_ms = now_timestamp_ms
+                elif now_timestamp_ms - self.market_probability_guard_clear_candidate_since_ms >= int(self.settings.market_probability_reenable_dwell_seconds * 1000):
+                    self.market_probability_guard_active = False
+                    self.market_probability_guard_clear_candidate_since_ms = None
+            else:
+                self.market_probability_guard_clear_candidate_since_ms = None
+
+        log_active = getattr(self, "_last_logged_market_probability_guard_active", None)
+        if self.market_probability_guard_active != log_active:
             log_event(
                 "MARKET_PROBABILITY_GUARD",
-                active=guard_active,
+                active=self.market_probability_guard_active,
                 best_yes_bid_cents=best_yes_bid_units // PRICE_UNITS_PER_CENT,
                 best_no_bid_cents=best_no_bid_units // PRICE_UNITS_PER_CENT,
-                threshold_cents=threshold_cents,
+                disable_threshold_cents=disable_cents,
+                reenable_threshold_cents=reenable_cents,
+                reenable_dwell_seconds=self.settings.market_probability_reenable_dwell_seconds,
             )
-            self.last_market_probability_guard_state = guard_active
+            self._last_logged_market_probability_guard_active = self.market_probability_guard_active
 
-        return guard_active
+        return self.market_probability_guard_active
+
+    def price_change_is_large_enough_to_reprice(
+        self,
+        *,
+        side: str,
+        current_price_units: int,
+        target_price_units: int,
+    ) -> bool:
+        if current_price_units == target_price_units:
+            return False
+        minimum_ticks = self.settings.minimum_price_change_ticks_required_to_reprice
+        if minimum_ticks <= 0:
+            return True
+
+        state = self.orders[side]
+        queue_force_threshold_units = max(
+            contracts_to_count_units(self.settings.queue_position_contracts_ahead_to_force_small_reprice),
+            int(math.ceil(state.remaining_count_units * self.settings.queue_position_multiple_of_our_remaining_size_to_force_small_reprice)),
+        )
+        if state.last_queue_position_units is not None and state.last_queue_position_units >= queue_force_threshold_units:
+            return True
+
+        tick_distance = self.market.price_grid.tick_distance(current_price_units, target_price_units)
+        return tick_distance >= minimum_ticks
+
+    def current_directional_unwind_side(self) -> Optional[str]:
+        if not self.settings.enable_directional_inventory_unwind:
+            self.directional_unwind_side = None
+            return None
+
+        trigger_units = contracts_to_count_units(self.settings.maximum_unpaired_contracts_per_market)
+        resume_units = contracts_to_count_units(self.settings.directional_inventory_unwind_resume_contracts)
+        current_unwind_side = self.directional_unwind_side
+
+        if current_unwind_side == "yes":
+            if self.net_position_units <= resume_units:
+                current_unwind_side = None
+        elif current_unwind_side == "no":
+            if self.net_position_units >= -resume_units:
+                current_unwind_side = None
+
+        if current_unwind_side is None:
+            if self.net_position_units >= trigger_units:
+                current_unwind_side = "yes"
+            elif self.net_position_units <= -trigger_units:
+                current_unwind_side = "no"
+
+        if current_unwind_side != self.directional_unwind_side:
+            log_event(
+                "DIRECTIONAL_UNWIND_MODE",
+                active=bool(current_unwind_side),
+                side=(current_unwind_side or "none"),
+                net_position_contracts=format_count_fp(self.net_position_units),
+                trigger_contracts=self.settings.maximum_unpaired_contracts_per_market,
+                resume_contracts=self.settings.directional_inventory_unwind_resume_contracts,
+            )
+            self.directional_unwind_side = current_unwind_side
+
+        return self.directional_unwind_side
+
+    def directional_unwind_remaining_units(self, side: str) -> int:
+        resume_units = contracts_to_count_units(self.settings.directional_inventory_unwind_resume_contracts)
+        if side == "yes" and self.net_position_units > resume_units:
+            return self.net_position_units - resume_units
+        if side == "no" and self.net_position_units < -resume_units:
+            return abs(self.net_position_units) - resume_units
+        return 0
+
+    def directional_unwind_price_units(self, side: str) -> Optional[int]:
+        best_side_bid_units = self.best_bid(side)
+        opposite_best_bid_units = self.best_bid("no" if side == "yes" else "yes")
+        if best_side_bid_units is None or opposite_best_bid_units is None:
+            return None
+
+        implied_side_ask_units = (
+            self.implied_yes_ask(opposite_best_bid_units)
+            if side == "yes"
+            else self.implied_no_ask(opposite_best_bid_units)
+        )
+        if implied_side_ask_units <= best_side_bid_units:
+            return None
+
+        midpoint_units = (best_side_bid_units + implied_side_ask_units) // 2
+        target_units = self.market.price_grid.ceil_to_valid(midpoint_units)
+        if target_units is None or target_units <= best_side_bid_units:
+            target_units = self.market.price_grid.next_price(best_side_bid_units)
+        if target_units is None:
+            return None
+        if target_units > implied_side_ask_units:
+            target_units = self.market.price_grid.floor_to_valid(implied_side_ask_units)
+        if target_units is None or target_units <= best_side_bid_units:
+            return None
+        return target_units
 
     def maybe_log_market_queue_cooldown(self) -> None:
         active = self.market_queue_cooldown_active()
@@ -1512,15 +1803,6 @@ class TopOfBookBot:
             return False
         minimum_bid_units = cents_to_price_units(self.settings.minimum_best_bid_cents_required_to_quote)
         return desired_price_units >= minimum_bid_units
-
-    def should_skip_small_upward_reprice(self, current_price_units: int, target_price_units: int) -> bool:
-        if target_price_units <= current_price_units:
-            return False
-        minimum_ticks = self.settings.minimum_upward_reprice_ticks_required
-        if minimum_ticks <= 0:
-            return False
-        tick_distance = self.market.price_grid.tick_distance(current_price_units, target_price_units)
-        return tick_distance < minimum_ticks
 
     def compute_side_desired_quote_price(
         self,
@@ -1561,9 +1843,11 @@ class TopOfBookBot:
         if current_price_units > maximum_bid_units:
             return maximum_bid_units
 
-        if target_units < current_price_units:
-            return target_units
-        if target_units > current_price_units and self.should_skip_small_upward_reprice(current_price_units, target_units):
+        if not self.price_change_is_large_enough_to_reprice(
+            side=side,
+            current_price_units=current_price_units,
+            target_price_units=target_units,
+        ):
             return current_price_units
         return target_units
 
@@ -1573,9 +1857,13 @@ class TopOfBookBot:
         if best_yes_bid_units is None or best_no_bid_units is None:
             return None, None
 
-        if self.maybe_market_probability_guard_triggered(
+        market_probability_guard_active = self.maybe_market_probability_guard_triggered(
             best_yes_bid_units=best_yes_bid_units,
             best_no_bid_units=best_no_bid_units,
+        )
+        if market_probability_guard_active and (
+            self.net_position_units == 0
+            or not self.settings.allow_inventory_exit_side_while_market_probability_guard_is_active
         ):
             return None, None
 
@@ -1601,6 +1889,15 @@ class TopOfBookBot:
             best_bid_units=best_no_bid_units,
             implied_ask_units=implied_no_ask_units,
         )
+
+        if market_probability_guard_active and self.settings.allow_inventory_exit_side_while_market_probability_guard_is_active:
+            if self.net_position_units > 0:
+                yes_quote_allowed = False
+            elif self.net_position_units < 0:
+                no_quote_allowed = False
+            else:
+                yes_quote_allowed = False
+                no_quote_allowed = False
 
         allow_aggressive_improvement = (
             self.settings.aggressive_improvement_ticks_when_spread_is_wide > 0
@@ -1660,6 +1957,31 @@ class TopOfBookBot:
             desired_no_units = None
 
         return desired_yes_units, desired_no_units
+
+    def desired_order_plans(self) -> Dict[str, DesiredOrderPlan]:
+        unwind_side = self.current_directional_unwind_side()
+        if unwind_side is not None:
+            unwind_price_units = self.directional_unwind_price_units(unwind_side)
+            unwind_remaining_units = self.directional_unwind_remaining_units(unwind_side)
+            plans = {
+                "yes": DesiredOrderPlan(side="yes", action="buy", price_units=None, reset_quote_cycle_when_disabled=True),
+                "no": DesiredOrderPlan(side="no", action="buy", price_units=None, reset_quote_cycle_when_disabled=True),
+            }
+            if unwind_price_units is not None and unwind_remaining_units > 0:
+                plans[unwind_side] = DesiredOrderPlan(
+                    side=unwind_side,
+                    action="sell",
+                    price_units=unwind_price_units,
+                    remaining_count_units_override=unwind_remaining_units,
+                    reset_quote_cycle_when_disabled=True,
+                )
+            return plans
+
+        desired_yes_units, desired_no_units = self.desired_quote_prices()
+        return {
+            "yes": DesiredOrderPlan(side="yes", action="buy", price_units=desired_yes_units, reset_quote_cycle_when_disabled=True),
+            "no": DesiredOrderPlan(side="no", action="buy", price_units=desired_no_units, reset_quote_cycle_when_disabled=True),
+        }
 
     # -------------------------
     # Sizing
@@ -1723,7 +2045,7 @@ class TopOfBookBot:
 
     async def cancel_side_quote(self, side: str, *, reason: str, reset_quote_cycle: bool) -> None:
         state = self.orders[side]
-        if not state.has_active_resting_order:
+        if not state.has_exchange_resting_order:
             if reset_quote_cycle:
                 state.quote_cycle_filled_units = 0
             return
@@ -1733,40 +2055,69 @@ class TopOfBookBot:
             state.clear_active_order(preserve_quote_cycle=not reset_quote_cycle)
             return
 
+        if state.cancel_requested:
+            if reset_quote_cycle:
+                state.reset_quote_cycle_on_terminal = True
+            return
+
         try:
             await asyncio.to_thread(self.api_client.cancel_order, order_id=order_id)
-            log_event("CANCEL_REQUESTED", side=side, reason=reason, order_id=order_id)
+            log_event("CANCEL_REQUESTED", side=side, action=state.action, reason=reason, order_id=order_id)
+            state.mark_cancel_requested(reset_quote_cycle=reset_quote_cycle)
         except Exception as exc:
             if is_order_not_found_error(exc):
                 log_event("CANCEL_SKIPPED_ORDER_MISSING", side=side, reason=reason, order_id=order_id)
+                state.clear_active_order(preserve_quote_cycle=not reset_quote_cycle)
             elif is_rate_limit_error(exc):
                 log_event("CANCEL_RATE_LIMITED", side=side, reason=reason, order_id=order_id, error=str(exc))
                 raise
             else:
                 raise
 
-        state.clear_active_order(preserve_quote_cycle=not reset_quote_cycle)
-
-    async def ensure_side_quote(self, side: str, desired_price_units: Optional[int]) -> None:
+    async def ensure_side_quote(self, side: str, desired_plan: DesiredOrderPlan) -> None:
         state = self.orders[side]
 
-        if desired_price_units is None:
-            await self.cancel_side_quote(side, reason="quote_disabled", reset_quote_cycle=True)
+        if desired_plan.price_units is None:
+            await self.cancel_side_quote(
+                side,
+                reason="quote_disabled",
+                reset_quote_cycle=desired_plan.reset_quote_cycle_when_disabled,
+            )
             return
 
-        desired_remaining_units = self.desired_remaining_units(side, desired_price_units, state.quote_cycle_filled_units)
+        desired_action = desired_plan.action
+        desired_price_units = desired_plan.price_units
+
+        if state.has_exchange_resting_order and state.action != desired_action:
+            await self.cancel_side_quote(side, reason=f"switch_action_to_{desired_action}", reset_quote_cycle=True)
+            return
+
+        if state.cancel_requested:
+            return
+
+        if desired_plan.remaining_count_units_override is not None:
+            desired_remaining_units = int(desired_plan.remaining_count_units_override)
+        else:
+            desired_remaining_units = self.desired_remaining_units(side, desired_price_units, state.quote_cycle_filled_units)
         if desired_remaining_units <= 0:
             await self.cancel_side_quote(side, reason="target_size_zero", reset_quote_cycle=True)
             return
 
         if state.has_active_resting_order and self.order_needs_expiration_refresh(state):
             await self.cancel_side_quote(side, reason="refresh_expiring_quote", reset_quote_cycle=False)
+            return
 
         attempt_price_units = desired_price_units
 
         for attempt_index in range(self.settings.maximum_post_only_reprice_attempts):
             state = self.orders[side]
-            desired_remaining_units = self.desired_remaining_units(side, attempt_price_units, state.quote_cycle_filled_units)
+            if state.cancel_requested:
+                return
+
+            if desired_plan.remaining_count_units_override is not None:
+                desired_remaining_units = int(desired_plan.remaining_count_units_override)
+            else:
+                desired_remaining_units = self.desired_remaining_units(side, attempt_price_units, state.quote_cycle_filled_units)
             if desired_remaining_units <= 0:
                 await self.cancel_side_quote(side, reason="target_size_zero", reset_quote_cycle=True)
                 return
@@ -1777,17 +2128,19 @@ class TopOfBookBot:
             if state.has_active_resting_order:
                 price_unchanged = state.price_units == attempt_price_units
                 size_unchanged = current_order_total_fillable_units == desired_current_order_total_fillable_units
-                if price_unchanged and size_unchanged and not self.order_needs_expiration_refresh(state):
+                action_unchanged = state.action == desired_action
+                if price_unchanged and size_unchanged and action_unchanged and not self.order_needs_expiration_refresh(state):
                     return
 
             try:
                 if not state.has_active_resting_order:
-                    new_client_order_id = f"{self.settings.primary_client_order_prefix}:{side}:{uuid.uuid4().hex[:16]}"
+                    new_client_order_id = f"{self.settings.primary_client_order_prefix}:{desired_action}:{side}:{uuid.uuid4().hex[:16]}"
                     expiration_ts = self.expiration_timestamp_for_side(side)
                     response = await asyncio.to_thread(
                         self.api_client.create_order,
                         market_ticker=self.settings.market_ticker,
                         side=side,
+                        action=desired_action,
                         price_units=attempt_price_units,
                         count_units=desired_remaining_units,
                         client_order_id=new_client_order_id,
@@ -1796,14 +2149,18 @@ class TopOfBookBot:
                     order_payload = (response or {}).get("order") or {}
                     state.order_id = order_payload.get("order_id") or (response or {}).get("order_id")
                     state.client_order_id = order_payload.get("client_order_id") or new_client_order_id
+                    state.action = desired_action
                     state.price_units = attempt_price_units
                     state.remaining_count_units = desired_remaining_units
                     state.current_order_filled_units = 0
                     state.status = "resting"
+                    state.cancel_requested = False
+                    state.reset_quote_cycle_on_terminal = False
                     state.expiration_time_ms = parse_iso_utc_timestamp_to_ms(order_payload.get("expiration_time"))
                     log_event(
                         "CREATE_OK",
                         side=side,
+                        action=desired_action,
                         price_dollars=format_price_dollars(attempt_price_units),
                         remaining_contracts=format_count_fp(desired_remaining_units),
                         order_id=state.order_id,
@@ -1814,12 +2171,13 @@ class TopOfBookBot:
                     state.clear_active_order(preserve_quote_cycle=False)
                     continue
 
-                updated_client_order_id = f"{self.settings.primary_client_order_prefix}:{side}:{uuid.uuid4().hex[:16]}"
+                updated_client_order_id = f"{self.settings.primary_client_order_prefix}:{desired_action}:{side}:{uuid.uuid4().hex[:16]}"
                 response = await asyncio.to_thread(
                     self.api_client.amend_order,
                     order_id=state.order_id,
                     market_ticker=self.settings.market_ticker,
                     side=side,
+                    action=desired_action,
                     new_price_units=attempt_price_units,
                     new_total_fillable_count_units=desired_current_order_total_fillable_units,
                     previous_client_order_id=state.client_order_id,
@@ -1827,12 +2185,14 @@ class TopOfBookBot:
                 )
                 amended_order_payload = (response or {}).get("order") or {}
                 state.client_order_id = amended_order_payload.get("client_order_id") or updated_client_order_id
+                state.action = desired_action
                 state.price_units = attempt_price_units
                 state.remaining_count_units = desired_remaining_units
                 state.expiration_time_ms = parse_iso_utc_timestamp_to_ms(amended_order_payload.get("expiration_time"))
                 log_event(
                     "AMEND_OK",
                     side=side,
+                    action=desired_action,
                     price_dollars=format_price_dollars(attempt_price_units),
                     total_fillable_contracts=format_count_fp(desired_current_order_total_fillable_units),
                     order_id=state.order_id,
@@ -1841,24 +2201,28 @@ class TopOfBookBot:
 
             except Exception as exc:
                 if is_missing_or_non_resting_amend_target(exc):
-                    log_event("STALE_ORDER_RECOVER", side=side, order_id=state.order_id)
+                    log_event("STALE_ORDER_RECOVER", side=side, action=state.action, order_id=state.order_id)
                     state.clear_active_order(preserve_quote_cycle=False)
                     continue
 
                 if is_post_only_cross_error(exc):
-                    next_lower_price_units = self.market.price_grid.previous_price(attempt_price_units)
+                    if desired_action == "buy":
+                        next_price_units = self.market.price_grid.previous_price(attempt_price_units)
+                    else:
+                        next_price_units = self.market.price_grid.next_price(attempt_price_units)
                     log_event(
                         "POST_ONLY_RETRY",
                         side=side,
+                        action=desired_action,
                         attempt=attempt_index + 1,
                         old_price_dollars=format_price_dollars(attempt_price_units),
-                        next_price_dollars=(format_price_dollars(next_lower_price_units) if next_lower_price_units is not None else "none"),
+                        next_price_dollars=(format_price_dollars(next_price_units) if next_price_units is not None else "none"),
                     )
-                    if next_lower_price_units is None:
+                    if next_price_units is None:
                         return
-                    attempt_price_units = next_lower_price_units
+                    attempt_price_units = next_price_units
                     if attempt_index + 1 >= self.settings.maximum_post_only_reprice_attempts:
-                        log_event("POST_ONLY_COOLDOWN", side=side, seconds=self.settings.post_only_reprice_cooldown_seconds)
+                        log_event("POST_ONLY_COOLDOWN", side=side, action=desired_action, seconds=self.settings.post_only_reprice_cooldown_seconds)
                         await asyncio.sleep(self.settings.post_only_reprice_cooldown_seconds)
                     continue
 
@@ -1877,6 +2241,10 @@ class TopOfBookBot:
     async def process_queue_position_update(self, side: str, queue_position_units: Optional[int]) -> None:
         state = self.orders[side]
         if queue_position_units is None or not state.has_active_resting_order:
+            state.consecutive_queue_ahead_breaches = 0
+            return
+
+        if state.action != "buy":
             state.consecutive_queue_ahead_breaches = 0
             return
 
@@ -1974,6 +2342,16 @@ class TopOfBookBot:
         if price_units is None or delta_units is None:
             return
 
+        best_yes_bid_units_before = self.best_bid("yes")
+        best_no_bid_units_before = self.best_bid("no")
+        self.maybe_trigger_toxicity_guard_from_delta(
+            side=side,
+            price_units=price_units,
+            delta_units=delta_units,
+            best_yes_bid_units_before=best_yes_bid_units_before,
+            best_no_bid_units_before=best_no_bid_units_before,
+        )
+
         levels = self.book_yes if side == "yes" else self.book_no
         levels[price_units] = levels.get(price_units, 0) + delta_units
         if levels[price_units] <= 0:
@@ -1988,7 +2366,50 @@ class TopOfBookBot:
         if position_units is None:
             return
 
-        self.net_position_units = int(position_units)
+        self.reconcile_net_position_from_exchange(int(position_units), source="market_position_ws")
+
+    def apply_fill_delta_to_net_position(self, *, side: str, action: str, fill_delta_units: int) -> None:
+        if action == "buy":
+            if side == "yes":
+                self.net_position_units += fill_delta_units
+            else:
+                self.net_position_units -= fill_delta_units
+        else:
+            if side == "yes":
+                self.net_position_units -= fill_delta_units
+            else:
+                self.net_position_units += fill_delta_units
+
+    def order_fill_tracking_key(self, *, order_id: Optional[str], client_order_id: str, side: str, action: str) -> Optional[str]:
+        if order_id:
+            return str(order_id)
+        if client_order_id:
+            return f"{action}:{side}:{client_order_id}"
+        return None
+
+    def infer_order_action_from_message(
+        self,
+        *,
+        order_message: dict,
+        state: ManagedOrderState,
+        client_order_id: str,
+        incoming_order_id: Optional[str],
+    ) -> str:
+        raw_action = str(order_message.get("action") or "").strip().lower()
+        if raw_action in {"buy", "sell"}:
+            return raw_action
+
+        client_order_parts = client_order_id.split(":") if client_order_id else []
+        if len(client_order_parts) >= 4 and client_order_parts[1] in {"buy", "sell"}:
+            return client_order_parts[1]
+
+        if incoming_order_id and state.order_id and str(incoming_order_id) == str(state.order_id) and state.action in {"buy", "sell"}:
+            return state.action
+
+        if client_order_id and state.client_order_id and client_order_id == state.client_order_id and state.action in {"buy", "sell"}:
+            return state.action
+
+        return "buy"
 
     def handle_user_order_update(self, order_message: dict) -> None:
         if order_message.get("ticker") != self.settings.market_ticker:
@@ -2008,42 +2429,70 @@ class TopOfBookBot:
         state = self.orders[side]
         incoming_order_id = order_message.get("order_id")
         incoming_status = order_message.get("status")
+        incoming_action = self.infer_order_action_from_message(
+            order_message=order_message,
+            state=state,
+            client_order_id=client_order_id,
+            incoming_order_id=(str(incoming_order_id) if incoming_order_id else None),
+        )
 
-        if incoming_order_id and state.order_id and incoming_order_id != state.order_id:
-            state.order_id = incoming_order_id
-            state.current_order_filled_units = 0
-            state.remaining_count_units = 0
+        tracking_key = self.order_fill_tracking_key(
+            order_id=(str(incoming_order_id) if incoming_order_id else None),
+            client_order_id=client_order_id,
+            side=side,
+            action=incoming_action,
+        )
 
-        if incoming_order_id:
-            state.order_id = incoming_order_id
-        state.client_order_id = client_order_id
-        state.status = incoming_status
+        message_matches_current_state = False
+        if incoming_order_id and state.order_id and str(incoming_order_id) == str(state.order_id):
+            message_matches_current_state = True
+        elif client_order_id and state.client_order_id and client_order_id == state.client_order_id:
+            message_matches_current_state = True
+        elif state.order_id is None and state.client_order_id is None:
+            message_matches_current_state = True
 
         fill_units = parse_optional_count_units(order_message, "fill_count_fp", "fill_count")
         if fill_units is not None:
             fill_units = int(fill_units)
-            fill_delta_units = fill_units - state.current_order_filled_units
+            last_accounted_fill_units = self.accounted_fill_units_by_order_key.get(tracking_key or "", 0)
+            fill_delta_units = fill_units - last_accounted_fill_units
             if fill_delta_units > 0:
                 event_timestamp_ms = now_ms()
-                state.quote_cycle_filled_units += fill_delta_units
-                state.last_positive_fill_timestamp_ms = event_timestamp_ms
-                state.same_side_reentry_cooldown_until_ms = max(
-                    state.same_side_reentry_cooldown_until_ms,
-                    event_timestamp_ms + self.settings.same_side_reentry_cooldown_ms,
-                )
-                self.last_fill_timestamp_ms = event_timestamp_ms
-                if side == "yes":
-                    self.net_position_units += fill_delta_units
-                else:
-                    self.net_position_units -= fill_delta_units
+                self.accounted_fill_units_by_order_key[tracking_key or ""] = fill_units
+                if incoming_action == "buy" and message_matches_current_state:
+                    state.quote_cycle_filled_units += fill_delta_units
+                    state.same_side_reentry_cooldown_until_ms = max(
+                        state.same_side_reentry_cooldown_until_ms,
+                        event_timestamp_ms + self.settings.same_side_reentry_cooldown_ms,
+                    )
+                    self.last_fill_timestamp_ms = event_timestamp_ms
+                if message_matches_current_state:
+                    state.last_positive_fill_timestamp_ms = event_timestamp_ms
+                self.apply_fill_delta_to_net_position(side=side, action=incoming_action, fill_delta_units=fill_delta_units)
                 log_event(
                     "FILL_DETECTED",
                     side=side,
+                    action=incoming_action,
                     fill_contracts=format_count_fp(fill_delta_units),
-                    cooldown_ms=self.settings.same_side_reentry_cooldown_ms,
+                    cooldown_ms=(self.settings.same_side_reentry_cooldown_ms if incoming_action == "buy" and message_matches_current_state else 0),
                     net_position_contracts=format_count_fp(self.net_position_units),
                 )
-            state.current_order_filled_units = fill_units
+            else:
+                self.accounted_fill_units_by_order_key[tracking_key or ""] = max(last_accounted_fill_units, fill_units)
+
+        if not message_matches_current_state:
+            self.requote_event.set()
+            return
+
+        if incoming_order_id:
+            state.order_id = str(incoming_order_id)
+        state.client_order_id = client_order_id
+        state.action = incoming_action
+        state.status = incoming_status
+        state.cancel_requested = False if incoming_status == "resting" else state.cancel_requested
+
+        if fill_units is not None:
+            state.current_order_filled_units = int(fill_units)
 
         remaining_units = parse_optional_count_units(order_message, "remaining_count_fp", "remaining_count")
         if remaining_units is not None:
@@ -2062,8 +2511,11 @@ class TopOfBookBot:
             state.expiration_time_ms = expiration_time_ms
 
         if state.status != "resting":
-            preserve_cycle = state.status == "canceled"
-            log_event("ORDER_NOT_RESTING", side=side, status=state.status, order_id=state.order_id)
+            preserve_cycle = (
+                state.status == "canceled"
+                and not state.reset_quote_cycle_on_terminal
+            )
+            log_event("ORDER_NOT_RESTING", side=side, action=state.action, status=state.status, order_id=state.order_id)
             state.clear_active_order(preserve_quote_cycle=preserve_cycle)
 
         self.requote_event.set()
@@ -2080,17 +2532,20 @@ class TopOfBookBot:
             if not self.book_ready:
                 continue
 
-            milliseconds_since_last_requote = now_ms() - self.last_requote_action_timestamp_ms
-            if milliseconds_since_last_requote < self.settings.minimum_milliseconds_between_requotes:
-                await asyncio.sleep(
-                    (self.settings.minimum_milliseconds_between_requotes - milliseconds_since_last_requote) / 1000.0
-                )
+            if self.force_immediate_requote_once:
+                self.force_immediate_requote_once = False
+            else:
+                milliseconds_since_last_requote = now_ms() - self.last_requote_action_timestamp_ms
+                if milliseconds_since_last_requote < self.settings.minimum_milliseconds_between_requotes:
+                    await asyncio.sleep(
+                        (self.settings.minimum_milliseconds_between_requotes - milliseconds_since_last_requote) / 1000.0
+                    )
 
             async with self.requote_lock:
-                desired_yes_units, desired_no_units = self.desired_quote_prices()
+                desired_plans = self.desired_order_plans()
                 try:
-                    await self.ensure_side_quote("yes", desired_yes_units)
-                    await self.ensure_side_quote("no", desired_no_units)
+                    await self.ensure_side_quote("yes", desired_plans["yes"])
+                    await self.ensure_side_quote("no", desired_plans["no"])
                     self.last_requote_action_timestamp_ms = now_ms()
                 except Exception as exc:
                     if is_post_only_cross_error(exc):
@@ -2130,6 +2585,22 @@ class TopOfBookBot:
                     await self.process_queue_position_update(side, queue_position_units)
                 except Exception as exc:
                     log_event("QUEUE_POSITION_ERROR", side=side, order_id=state.order_id, error=str(exc))
+
+    async def position_reconciliation_worker(self) -> None:
+        if not self.settings.enable_periodic_rest_position_reconciliation:
+            return
+
+        while True:
+            await asyncio.sleep(self.settings.position_reconciliation_interval_seconds)
+            try:
+                response = await asyncio.to_thread(self.api_client.get_positions, self.settings.market_ticker)
+                market_positions = response.get("market_positions") or []
+                position_payload = market_positions[0] if market_positions else {}
+                position_units = parse_optional_count_units(position_payload, "position_fp", "position")
+                self.reconcile_net_position_from_exchange(int(position_units or 0), source="periodic_rest")
+                self.requote_event.set()
+            except Exception as exc:
+                log_event("POSITION_RECONCILE_ERROR", error=str(exc))
 
     async def websocket_main(self) -> None:
         backoff_seconds = 1
@@ -2246,6 +2717,7 @@ class TopOfBookBot:
             expiration_seconds=self.settings.resting_order_expiration_seconds,
             same_side_reentry_cooldown_ms=self.settings.same_side_reentry_cooldown_ms,
             queue_guard=self.settings.enable_queue_abandonment_guard,
+            directional_cap_contracts=self.settings.maximum_unpaired_contracts_per_market,
         )
 
         self.load_startup_position()
@@ -2253,6 +2725,7 @@ class TopOfBookBot:
 
         asyncio.create_task(self.requote_worker())
         asyncio.create_task(self.queue_position_worker())
+        asyncio.create_task(self.position_reconciliation_worker())
 
         await self.websocket_main()
 

@@ -6,11 +6,11 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # ---- EDIT THESE VALUES IF NEEDED ----
 export KALSHI_API_KEY_ID="2622245b-4c4d-46f4-8a89-2e69069e7c70"
 export KALSHI_PRIVATE_KEY_PATH="$ROOT/tizzler2003.txt"
-BOT_SCRIPT="$ROOT/V1.py"
+BOT_SCRIPT="$ROOT/v1_orederbook_replay.py"
 SCREEN_FILE="$ROOT/screener_export.csv"
-MAX_BOTS=6
-YES_BUDGET_CENTS=2000
-NO_BUDGET_CENTS=2000
+MAX_BOTS=60
+YES_BUDGET_CENTS=1600
+NO_BUDGET_CENTS=1600
 USE_DEMO=0
 DRY_RUN=0
 SUBACCOUNT=""
@@ -18,7 +18,7 @@ LAUNCH_DELAY_SECONDS=8
 # ------------------------------------
 
 if [[ ! -f "$BOT_SCRIPT" ]]; then
-  echo "ERROR: bot script not found: $BOT_SCRIPT"
+  echo "ERROR: bot script not found: $BOT_SCRIPT"s
   exit 2
 fi
 
