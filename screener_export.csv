@@ -1,7 +1,0 @@
-Quoted edge(c),Quote YES bid(c),Quote NO bid(c),Spread(c),YES bid(c),YES ask(c),NO bid(c),NO ask(c),Tick(c),Vol24h,OI,Hrs->Cutoff,CutoffUTC,Ticker,SeriesURL,SearchText,Theo gross($) if both fill
-4,58,38,6,55,61,39,45,1,15395.0,14943.0,1.4084555255555558,2026-03-10T20:05:00Z,KXMLBSTGAME-26MAR101305MINTB-TB,https://kalshi.com/markets/kxmlbstgame,Minnesota vs Tampa Bay Winner?,2.0
-4,50,46,5,47,52,48,53,1,15391.0,23912.0,2.325133571111111,2026-03-10T21:00:00Z,KXNCAAMBSPREAD-26MAR10PITTSTAN-STAN2,https://kalshi.com/markets/kxncaambspread,Stanford wins by over 2.5 Points?,2.0
-4,58,38,6,55,61,39,45,1,16584.0,14534.0,2.3251336747222227,2026-03-10T21:00:00Z,KXNCAAMBTOTAL-26MAR10PITTSTAN-127,https://kalshi.com/markets/kxncaambtotal,Pittsburgh at Stanford: Total Points,2.0
-4,40,56,7,37,44,56,63,1,22195.0,22550.0,2.325133686111111,2026-03-10T21:00:00Z,KXNCAAMBTOTAL-26MAR10PITTSTAN-133,https://kalshi.com/markets/kxncaambtotal,Pittsburgh at Stanford: Total Points,2.0
-4,31,65,6,28,34,66,72,1,89440.0,83746.0,2.3251336944444443,2026-03-10T21:00:00Z,KXNCAAMBTOTAL-26MAR10PITTSTAN-136,https://kalshi.com/markets/kxncaambtotal,Pittsburgh at Stanford: Total Points,2.0
-4,25,71,6,22,28,72,78,1,53808.0,40403.0,2.3251337091666664,2026-03-10T21:00:00Z,KXNCAAMBTOTAL-26MAR10PITTSTAN-139,https://kalshi.com/markets/kxncaambtotal,Pittsburgh at Stanford: Total Points,2.0
