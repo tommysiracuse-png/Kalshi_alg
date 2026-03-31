@@ -1,23 +1,23 @@
-
 #!/usr/bin/env python3
 """
 Launch one single-market Kalshi bot per ticker from a screener CSV.
 
 This launcher intentionally does NOT do market selection by itself.
-It only reads the rows you already chose in your screener export.
+It reads the rows from your screener export, starts one bot per market,
+and can periodically refresh the entire bot set by rerunning the screener.
 
-Safety / quality improvements in this version:
-- Clear, explicit argument names and validation.
-- Conservative default budgets that match the bot defaults.
-- Credentials are passed to child bots through environment variables by default,
-  not on the command line.
-- Log files store a redacted launch command instead of exposing secrets.
-- Optional per-row YES / NO budget columns are supported.
+Periodic refresh behavior in this version:
+- Optionally rerun the screener before the initial launch.
+- Every refresh interval, stop all child bots.
+- Rerun the screener.
+- Relaunch the new screener markets plus any previously running markets that
+  still have non-zero inventory, so you never leave held inventory without a bot.
 """
 
 from __future__ import annotations
 
 import argparse
+import base64
 import csv
 import os
 import signal
@@ -27,6 +27,10 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, IO, List, Optional
+
+import requests
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import padding
 
 
 # ---------------------------------------------------------------------------
@@ -48,6 +52,8 @@ class ChildProcess:
     process: subprocess.Popen
     log_path: Path
     log_handle: IO[str]
+    slot_index: int
+    pick: LaunchPick
 
 
 # ---------------------------------------------------------------------------
@@ -72,7 +78,7 @@ def parse_args() -> argparse.Namespace:
         "--max-bots",
         type=int,
         default=3,
-        help="Maximum number of rows / bots to launch. Use 0 or a negative value to launch every row.",
+        help="Maximum number of screener rows / bots to launch. Use 0 or a negative value to launch every screener row.",
     )
     parser.add_argument(
         "--ticker-column",
@@ -147,6 +153,33 @@ def parse_args() -> argparse.Namespace:
         "--pass-credentials-via-cli",
         action="store_true",
         help="Pass credentials to child bots on the command line instead of environment variables. This is less secure and normally not needed.",
+    )
+    parser.add_argument(
+        "--screener-script",
+        default="",
+        help="Path to the screener script used to refresh markets.",
+    )
+    parser.add_argument(
+        "--screener-output",
+        default="",
+        help="CSV path the screener writes to. Defaults to --screen-file.",
+    )
+    parser.add_argument(
+        "--run-screener-on-start",
+        action="store_true",
+        help="Run the screener once before the initial launch.",
+    )
+    parser.add_argument(
+        "--refresh-interval-seconds",
+        type=float,
+        default=1800.0,
+        help="If > 0, rerun the screener and restart bots on this interval.",
+    )
+    parser.add_argument(
+        "--poll-seconds",
+        type=float,
+        default=2.0,
+        help="Polling interval for monitoring child processes and refresh timing.",
     )
     return parser.parse_args()
 
@@ -280,6 +313,71 @@ def build_launch_picks(
 
 
 # ---------------------------------------------------------------------------
+# Kalshi position lookup
+# ---------------------------------------------------------------------------
+
+class KalshiPositionClient:
+    def __init__(self, *, api_key_id: str, private_key_path: str, use_demo: bool, subaccount: int) -> None:
+        self.api_key_id = api_key_id
+        self.private_key_path = private_key_path
+        self.use_demo = bool(use_demo)
+        self.subaccount = int(subaccount)
+        self.host = "https://demo-api.kalshi.co" if self.use_demo else "https://api.elections.kalshi.com"
+        self.api_prefix = "/trade-api/v2"
+        self.session = requests.Session()
+
+        with open(self.private_key_path, "rb") as private_key_file:
+            self.private_key = serialization.load_pem_private_key(private_key_file.read(), password=None)
+
+    def sign_message(self, message_bytes: bytes) -> str:
+        signature = self.private_key.sign(
+            message_bytes,
+            padding.PSS(
+                mgf=padding.MGF1(hashes.SHA256()),
+                salt_length=padding.PSS.DIGEST_LENGTH,
+            ),
+            hashes.SHA256(),
+        )
+        return base64.b64encode(signature).decode("utf-8")
+
+    def _headers(self, method: str, path: str) -> dict:
+        timestamp_ms = str(int(time.time() * 1000))
+        path_without_query = path.split("?")[0]
+        signed_message = f"{timestamp_ms}{method.upper()}{path_without_query}".encode("utf-8")
+        return {
+            "Content-Type": "application/json",
+            "KALSHI-ACCESS-KEY": self.api_key_id,
+            "KALSHI-ACCESS-TIMESTAMP": timestamp_ms,
+            "KALSHI-ACCESS-SIGNATURE": self.sign_message(signed_message),
+        }
+
+    def get_position_count_units(self, market_ticker: str) -> int:
+        path = f"{self.api_prefix}/portfolio/positions"
+        response = self.session.get(
+            self.host + path,
+            headers=self._headers("GET", path),
+            params={
+                "ticker": market_ticker,
+                "subaccount": self.subaccount,
+                "limit": 1,
+            },
+            timeout=15,
+        )
+        if response.status_code >= 400:
+            raise RuntimeError(f"GET positions failed {response.status_code}: {response.text[:500]}")
+        payload = response.json() if response.text.strip() else {}
+        market_positions = payload.get("market_positions") or []
+        if not market_positions:
+            return 0
+        position_payload = market_positions[0]
+        if position_payload.get("position_fp") not in (None, ""):
+            return int(round(float(position_payload["position_fp"]) * 100))
+        if position_payload.get("position") not in (None, ""):
+            return int(position_payload["position"]) * 100
+        return 0
+
+
+# ---------------------------------------------------------------------------
 # Launch helpers
 # ---------------------------------------------------------------------------
 
@@ -289,15 +387,21 @@ def resolve_credentials(arguments: argparse.Namespace) -> tuple[Optional[str], O
     return api_key_id, private_key_path
 
 
+def run_screener_once(screener_script: Path, screener_output: Path) -> None:
+    subprocess.run(
+        [sys.executable, str(screener_script), "--output", str(screener_output)],
+        check=True,
+    )
+
+
 def redacted_command(command: List[str]) -> str:
     redacted_parts: List[str] = []
     skip_next = False
 
-    for index, token in enumerate(command):
+    for token in command:
         if skip_next:
             skip_next = False
             continue
-
         if token in {"--api-key-id", "--private-key"}:
             redacted_parts.append(token)
             redacted_parts.append("<redacted>")
@@ -308,8 +412,8 @@ def redacted_command(command: List[str]) -> str:
     return " ".join(redacted_parts)
 
 
-def print_launch_plan(picks: List[LaunchPick]) -> None:
-    print("\n=== Launch plan ===")
+def print_launch_plan(picks: List[LaunchPick], *, header: str = "=== Launch plan ===") -> None:
+    print(f"\n{header}")
     for index, pick in enumerate(picks, start=1):
         extra_parts: List[str] = []
 
@@ -366,6 +470,74 @@ def build_child_command(
     return command
 
 
+def spawn_single_bot(
+    *,
+    pick: LaunchPick,
+    slot_index: int,
+    bot_script_path: Path,
+    logs_directory: Path,
+    api_key_id: Optional[str],
+    private_key_path: Optional[str],
+    use_demo: bool,
+    dry_run: bool,
+    subaccount: Optional[int],
+    pass_credentials_via_cli: bool,
+) -> Optional[ChildProcess]:
+    if dry_run:
+        return None
+
+    logs_directory.mkdir(parents=True, exist_ok=True)
+    bot_working_directory = bot_script_path.parent.resolve()
+
+    child_command = build_child_command(
+        python_executable=sys.executable,
+        bot_script_path=bot_script_path,
+        pick=pick,
+        use_demo=use_demo,
+        dry_run=dry_run,
+        subaccount=subaccount,
+        api_key_id=api_key_id,
+        private_key_path=private_key_path,
+        pass_credentials_via_cli=pass_credentials_via_cli,
+    )
+
+    child_environment = dict(os.environ)
+    child_environment["PYTHONUNBUFFERED"] = "1"
+
+    if not pass_credentials_via_cli:
+        if api_key_id:
+            child_environment["KALSHI_API_KEY_ID"] = api_key_id
+        if private_key_path:
+            child_environment["KALSHI_PRIVATE_KEY_PATH"] = private_key_path
+
+    safe_ticker = pick.ticker.replace("/", "_").replace("\\", "_")
+    log_path = logs_directory / f"{safe_ticker}.log"
+    log_handle = log_path.open("a", encoding="utf-8", buffering=1)
+    log_handle.write(f"\n=== START {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
+    log_handle.write("CMD: " + redacted_command(child_command) + "\n")
+    if subaccount is not None:
+        log_handle.write(f"SUBACCOUNT: {subaccount}\n")
+    log_handle.flush()
+
+    print(f"Spawning {pick.ticker} -> {log_path}")
+    process = subprocess.Popen(
+        child_command,
+        cwd=str(bot_working_directory),
+        stdout=log_handle,
+        stderr=subprocess.STDOUT,
+        env=child_environment,
+    )
+
+    return ChildProcess(
+        ticker=pick.ticker,
+        process=process,
+        log_path=log_path,
+        log_handle=log_handle,
+        slot_index=slot_index,
+        pick=pick,
+    )
+
+
 def spawn_bots(
     *,
     picks: List[LaunchPick],
@@ -385,59 +557,23 @@ def spawn_bots(
         print("\n(DRY RUN) No bot processes were started.")
         return []
 
-    logs_directory.mkdir(parents=True, exist_ok=True)
-    bot_working_directory = bot_script_path.parent.resolve()
-
     child_processes: List[ChildProcess] = []
 
-    for pick in picks:
-        child_command = build_child_command(
-            python_executable=sys.executable,
-            bot_script_path=bot_script_path,
+    for slot_index, pick in enumerate(picks):
+        child = spawn_single_bot(
             pick=pick,
+            slot_index=slot_index,
+            bot_script_path=bot_script_path,
+            logs_directory=logs_directory,
+            api_key_id=api_key_id,
+            private_key_path=private_key_path,
             use_demo=use_demo,
             dry_run=dry_run,
             subaccount=subaccount,
-            api_key_id=api_key_id,
-            private_key_path=private_key_path,
             pass_credentials_via_cli=pass_credentials_via_cli,
         )
-
-        child_environment = dict(os.environ)
-        child_environment["PYTHONUNBUFFERED"] = "1"
-
-        if not pass_credentials_via_cli:
-            if api_key_id:
-                child_environment["KALSHI_API_KEY_ID"] = api_key_id
-            if private_key_path:
-                child_environment["KALSHI_PRIVATE_KEY_PATH"] = private_key_path
-
-        safe_ticker = pick.ticker.replace("/", "_").replace("\\", "_")
-        log_path = logs_directory / f"{safe_ticker}.log"
-        log_handle = log_path.open("a", encoding="utf-8", buffering=1)
-        log_handle.write(f"\n=== START {time.strftime('%Y-%m-%d %H:%M:%S')} ===\n")
-        log_handle.write("CMD: " + redacted_command(child_command) + "\n")
-        if subaccount is not None:
-            log_handle.write(f"SUBACCOUNT: {subaccount}\n")
-        log_handle.flush()
-
-        print(f"Spawning {pick.ticker} -> {log_path}")
-        process = subprocess.Popen(
-            child_command,
-            cwd=str(bot_working_directory),
-            stdout=log_handle,
-            stderr=subprocess.STDOUT,
-            env=child_environment,
-        )
-
-        child_processes.append(
-            ChildProcess(
-                ticker=pick.ticker,
-                process=process,
-                log_path=log_path,
-                log_handle=log_handle,
-            )
-        )
+        if child is not None:
+            child_processes.append(child)
 
         if launch_delay_seconds > 0:
             time.sleep(launch_delay_seconds)
@@ -453,52 +589,256 @@ def close_child_log(child: ChildProcess) -> None:
         pass
 
 
-def watch_children(children: List[ChildProcess]) -> int:
+def stop_children(children: List[ChildProcess]) -> None:
+    if not children:
+        return
+
+    for child in children:
+        try:
+            child.process.send_signal(signal.SIGINT)
+        except Exception:
+            pass
+
+    time.sleep(1.0)
+
+    for child in children:
+        try:
+            if child.process.poll() is None:
+                child.process.terminate()
+        except Exception:
+            pass
+
+    time.sleep(0.5)
+
+    for child in children:
+        try:
+            if child.process.poll() is None:
+                child.process.kill()
+        except Exception:
+            pass
+
+    for child in children:
+        close_child_log(child)
+
+
+def load_screen_picks(
+    *,
+    screen_file_path: Path,
+    ticker_column: str,
+    title_column: str,
+    yes_budget_cents: int,
+    no_budget_cents: int,
+    yes_budget_column: str,
+    no_budget_column: str,
+    max_bots: int,
+) -> List[LaunchPick]:
+    rows = read_csv_rows(screen_file_path)
+    if not rows:
+        return []
+
+    validate_requested_columns(
+        rows[0],
+        ticker_column=ticker_column,
+        yes_budget_column=yes_budget_column,
+        no_budget_column=no_budget_column,
+    )
+
+    return build_launch_picks(
+        rows=rows,
+        ticker_column=ticker_column,
+        title_column=title_column,
+        default_yes_budget_cents=yes_budget_cents,
+        default_no_budget_cents=no_budget_cents,
+        yes_budget_column=yes_budget_column,
+        no_budget_column=no_budget_column,
+        max_bots=max_bots,
+    )
+
+
+def merge_inventory_picks(
+    *,
+    screener_picks: List[LaunchPick],
+    inventory_tickers: List[str],
+    previous_pick_by_ticker: Dict[str, LaunchPick],
+    default_yes_budget_cents: int,
+    default_no_budget_cents: int,
+) -> List[LaunchPick]:
+    merged: List[LaunchPick] = []
+    seen: set[str] = set()
+
+    for pick in screener_picks:
+        if pick.ticker in seen:
+            continue
+        merged.append(pick)
+        seen.add(pick.ticker)
+
+    for ticker in inventory_tickers:
+        if ticker in seen:
+            continue
+        previous_pick = previous_pick_by_ticker.get(ticker)
+        if previous_pick is not None:
+            merged.append(previous_pick)
+        else:
+            merged.append(
+                LaunchPick(
+                    ticker=ticker,
+                    title="Inventory carryover",
+                    yes_budget_cents=int(default_yes_budget_cents),
+                    no_budget_cents=int(default_no_budget_cents),
+                    raw_row={"Ticker": ticker, "SearchText": "Inventory carryover"},
+                )
+            )
+        seen.add(ticker)
+
+    return merged
+
+
+def lookup_inventory_tickers(
+    *,
+    tickers: List[str],
+    api_key_id: Optional[str],
+    private_key_path: Optional[str],
+    use_demo: bool,
+    subaccount: Optional[int],
+) -> List[str]:
+    if not tickers or not api_key_id or not private_key_path:
+        return []
+
+    client = KalshiPositionClient(
+        api_key_id=api_key_id,
+        private_key_path=private_key_path,
+        use_demo=use_demo,
+        subaccount=(0 if subaccount is None else int(subaccount)),
+    )
+
+    inventory_tickers: List[str] = []
+    for ticker in tickers:
+        try:
+            position_units = client.get_position_count_units(ticker)
+        except Exception as exc:
+            print(f"[WARN] failed to check position for {ticker}: {exc}")
+            continue
+        if position_units != 0:
+            inventory_tickers.append(ticker)
+    return inventory_tickers
+
+
+# ---------------------------------------------------------------------------
+# Main monitoring / refresh loop
+# ---------------------------------------------------------------------------
+
+def monitor_and_refresh(
+    children: List[ChildProcess],
+    *,
+    screen_file_path: Path,
+    screener_script_path: Optional[Path],
+    screener_output_path: Path,
+    bot_script_path: Path,
+    logs_directory: Path,
+    api_key_id: Optional[str],
+    private_key_path: Optional[str],
+    use_demo: bool,
+    dry_run: bool,
+    subaccount: Optional[int],
+    launch_delay_seconds: float,
+    pass_credentials_via_cli: bool,
+    ticker_column: str,
+    title_column: str,
+    yes_budget_cents: int,
+    no_budget_cents: int,
+    yes_budget_column: str,
+    no_budget_column: str,
+    max_bots: int,
+    refresh_interval_seconds: float,
+    poll_seconds: float,
+) -> int:
     if not children:
         return 0
 
     print("\nBots running. Press Ctrl+C to stop them all.")
+    next_refresh_at = (time.time() + refresh_interval_seconds) if refresh_interval_seconds > 0 else None
 
     try:
         while True:
-            alive_count = 0
-
+            # Print and drop dead children between refreshes.
             for child in list(children):
                 return_code = child.process.poll()
                 if return_code is None:
-                    alive_count += 1
                     continue
-
                 print(f"[WARN] {child.ticker} exited with code {return_code} | log={child.log_path}")
                 close_child_log(child)
                 children.remove(child)
 
-            if alive_count == 0:
+            if next_refresh_at is not None and time.time() >= next_refresh_at:
+                previous_pick_by_ticker = {child.ticker: child.pick for child in children}
+                current_tickers = list(previous_pick_by_ticker.keys())
+                inventory_tickers = lookup_inventory_tickers(
+                    tickers=current_tickers,
+                    api_key_id=api_key_id,
+                    private_key_path=private_key_path,
+                    use_demo=use_demo,
+                    subaccount=subaccount,
+                )
+
+                if inventory_tickers:
+                    print("\nInventory carryover tickers: " + ", ".join(sorted(inventory_tickers)))
+                else:
+                    print("\nInventory carryover tickers: none")
+
+                stop_children(children)
+                children.clear()
+
+                if screener_script_path is not None:
+                    print("Rerunning screener...")
+                    run_screener_once(screener_script_path, screener_output_path)
+
+                screener_picks = load_screen_picks(
+                    screen_file_path=screener_output_path,
+                    ticker_column=ticker_column,
+                    title_column=title_column,
+                    yes_budget_cents=yes_budget_cents,
+                    no_budget_cents=no_budget_cents,
+                    yes_budget_column=yes_budget_column,
+                    no_budget_column=no_budget_column,
+                    max_bots=max_bots,
+                )
+                merged_picks = merge_inventory_picks(
+                    screener_picks=screener_picks,
+                    inventory_tickers=inventory_tickers,
+                    previous_pick_by_ticker=previous_pick_by_ticker,
+                    default_yes_budget_cents=yes_budget_cents,
+                    default_no_budget_cents=no_budget_cents,
+                )
+
+                if not merged_picks:
+                    print("[WARN] refresh produced no markets to launch")
+                else:
+                    print_launch_plan(merged_picks, header="=== Refresh launch plan ===")
+                    children.extend(
+                        spawn_bots(
+                            picks=merged_picks,
+                            bot_script_path=bot_script_path,
+                            logs_directory=logs_directory,
+                            api_key_id=api_key_id,
+                            private_key_path=private_key_path,
+                            use_demo=use_demo,
+                            dry_run=dry_run,
+                            subaccount=subaccount,
+                            launch_delay_seconds=launch_delay_seconds,
+                            pass_credentials_via_cli=pass_credentials_via_cli,
+                        )
+                    )
+                next_refresh_at = time.time() + refresh_interval_seconds
+
+            if not children and next_refresh_at is None:
                 print("All bots exited.")
                 return 0
 
-            time.sleep(2)
+            time.sleep(poll_seconds)
 
     except KeyboardInterrupt:
         print("\nStopping bots...")
-        for child in children:
-            try:
-                child.process.send_signal(signal.SIGINT)
-            except Exception:
-                pass
-
-        time.sleep(1)
-
-        for child in children:
-            try:
-                if child.process.poll() is None:
-                    child.process.terminate()
-            except Exception:
-                pass
-
-        for child in children:
-            close_child_log(child)
-
+        stop_children(children)
         return 0
 
 
@@ -516,12 +856,22 @@ def main() -> int:
         if arguments.logs_dir
         else bot_script_path.parent.resolve() / "logs"
     )
+    screener_script_path = (
+        Path(arguments.screener_script).expanduser().resolve()
+        if arguments.screener_script
+        else None
+    )
+    screener_output_path = (
+        Path(arguments.screener_output).expanduser().resolve()
+        if arguments.screener_output
+        else screen_file_path
+    )
 
-    if not screen_file_path.exists():
-        print(f"ERROR: screen file not found: {screen_file_path}")
-        return 2
     if not bot_script_path.exists():
         print(f"ERROR: bot script not found: {bot_script_path}")
+        return 2
+    if screener_script_path is not None and not screener_script_path.exists():
+        print(f"ERROR: screener script not found: {screener_script_path}")
         return 2
 
     if arguments.max_bots == 0:
@@ -531,6 +881,12 @@ def main() -> int:
 
     if arguments.launch_delay_seconds < 0:
         print("ERROR: --launch-delay-seconds must be >= 0")
+        return 2
+    if arguments.refresh_interval_seconds < 0:
+        print("ERROR: --refresh-interval-seconds must be >= 0")
+        return 2
+    if arguments.poll_seconds <= 0:
+        print("ERROR: --poll-seconds must be > 0")
         return 2
     if arguments.subaccount is not None and arguments.subaccount < 0:
         print("ERROR: --subaccount must be >= 0")
@@ -549,29 +905,24 @@ def main() -> int:
             print(f"ERROR: private key file not found: {Path(private_key_path).expanduser()}")
             return 2
 
-    rows = read_csv_rows(screen_file_path)
-    if not rows:
-        print("ERROR: screen file has no data rows")
+    if arguments.run_screener_on_start:
+        if screener_script_path is None:
+            print("ERROR: --run-screener-on-start requires --screener-script")
+            return 2
+        print("Running screener before initial launch...")
+        run_screener_once(screener_script_path, screener_output_path)
+
+    if not screener_output_path.exists():
+        print(f"ERROR: screen file not found: {screener_output_path}")
         return 2
 
     try:
-        validate_requested_columns(
-            rows[0],
-            ticker_column=arguments.ticker_column,
-            yes_budget_column=arguments.yes_budget_column,
-            no_budget_column=arguments.no_budget_column,
-        )
-    except ValueError as exc:
-        print(f"ERROR: {exc}")
-        return 2
-
-    try:
-        launch_picks = build_launch_picks(
-            rows=rows,
+        launch_picks = load_screen_picks(
+            screen_file_path=screener_output_path,
             ticker_column=arguments.ticker_column,
             title_column=arguments.title_column,
-            default_yes_budget_cents=arguments.yes_budget_cents,
-            default_no_budget_cents=arguments.no_budget_cents,
+            yes_budget_cents=arguments.yes_budget_cents,
+            no_budget_cents=arguments.no_budget_cents,
             yes_budget_column=arguments.yes_budget_column,
             no_budget_column=arguments.no_budget_column,
             max_bots=max_bots,
@@ -596,7 +947,31 @@ def main() -> int:
         launch_delay_seconds=arguments.launch_delay_seconds,
         pass_credentials_via_cli=arguments.pass_credentials_via_cli,
     )
-    return watch_children(children)
+
+    return monitor_and_refresh(
+        children,
+        screen_file_path=screen_file_path,
+        screener_script_path=screener_script_path,
+        screener_output_path=screener_output_path,
+        bot_script_path=bot_script_path,
+        logs_directory=logs_directory,
+        api_key_id=api_key_id,
+        private_key_path=private_key_path,
+        use_demo=arguments.use_demo,
+        dry_run=arguments.dry_run,
+        subaccount=arguments.subaccount,
+        launch_delay_seconds=arguments.launch_delay_seconds,
+        pass_credentials_via_cli=arguments.pass_credentials_via_cli,
+        ticker_column=arguments.ticker_column,
+        title_column=arguments.title_column,
+        yes_budget_cents=arguments.yes_budget_cents,
+        no_budget_cents=arguments.no_budget_cents,
+        yes_budget_column=arguments.yes_budget_column,
+        no_budget_column=arguments.no_budget_column,
+        max_bots=max_bots,
+        refresh_interval_seconds=arguments.refresh_interval_seconds,
+        poll_seconds=arguments.poll_seconds,
+    )
 
 
 if __name__ == "__main__":

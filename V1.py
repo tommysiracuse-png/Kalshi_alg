@@ -3,20 +3,22 @@
 Kalshi single-market top-of-book market-maker.
 
 This version keeps the fixed-point, inventory-aware, expiration-aware structure
-of the upgraded bot and adds the production fixes requested from the trade
-review:
+of the upgraded bot and adds three production-hardening behaviors that were
+missing from the earlier runtime:
 
-1. Order-fill deduplication keyed by order ID so cancel / terminal updates
-   cannot double-count fills.
-2. Exchange position reconciliation through websocket and periodic REST checks,
-   with exchange position treated as the source of truth.
-3. Symmetric amend hysteresis so one-tick oscillation does not keep resetting
-   queue priority.
-4. Tighter queue abandonment defaults and longer cooldowns.
-5. Hysteresis around the market-level low-probability quote guard.
-6. A hard directional exposure cap with inventory-unwind mode.
-7. Sell / unwind orders that reduce excess net exposure at passive midpoint
-   prices instead of only accumulating inventory with buy orders.
+1. Shared write throttling across bot processes to reduce create/amend/cancel
+   bursts and avoid 429 write-rate spikes.
+2. Queue-abandonment logic so the bot stops wasting time in hopeless queues.
+3. Same-side post-fill re-entry suppression so the bot does not immediately
+   step back into the same side after getting hit.
+
+The default settings are intentionally quieter and more conservative than the
+previous production run:
+- slower repricing
+- longer expirations
+- passive placement further behind the best bid
+- stronger same-side cooldowns after fills
+- queue-position polling and side shutoffs enabled by default
 """
 
 from __future__ import annotations
@@ -24,21 +26,23 @@ from __future__ import annotations
 import argparse
 import asyncio
 import base64
-import collections
 import hashlib
 import json
 import logging
 import math
 import os
 import random
+import sqlite3
 import tempfile
 import time
 import traceback
 import uuid
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
-from typing import Dict, Iterable, List, Optional, Tuple
+from threading import Lock
+from typing import Deque, Dict, Iterable, List, Optional, Tuple
 
 import requests
 import websockets
@@ -77,6 +81,20 @@ ONE_DOLLAR_PRICE_UNITS = PRICE_SCALE
 
 def now_ms() -> int:
     return int(time.time() * 1000)
+
+
+
+def normalize_exchange_timestamp_to_ms(raw_value: object) -> int:
+    if raw_value in (None, ""):
+        return now_ms()
+    try:
+        value = int(raw_value)
+    except Exception:
+        parsed = parse_iso_utc_timestamp_to_ms(str(raw_value))
+        return int(parsed or now_ms())
+    if value < 10_000_000_000:
+        return value * 1000
+    return value
 
 
 
@@ -282,9 +300,9 @@ def parse_bot_args() -> argparse.Namespace:
 @dataclass(frozen=True)
 class BotSettings:
     # --- Core identity / credentials ---
-    market_ticker: str = "KXNCAAMBSPREAD-26MAR03WVUKSU-WVU1"
-    api_key_id: str = "<YOUR_API_KEY_ID>"
-    private_key_path: str = "./private_key.pem"
+    market_ticker: str = "KXNHLGAME-26MAR11WSHPHI-WSH"
+    api_key_id: str = "2622245b-4c4d-46f4-8a89-2e69069e7c70"
+    private_key_path: str = "./tizzler2003.txt"
     use_demo_environment: bool = False
     dry_run: bool = False
     subaccount_number: int = 0
@@ -293,7 +311,7 @@ class BotSettings:
     yes_order_budget_cents: int = 100
     no_order_budget_cents: int = 100
     maximum_contracts_per_order: int = 2_000
-    budget_fee_buffer_cents: int = 0
+    budget_fee_buffer_cents: int = 2
     allow_fractional_order_entry_when_supported: bool = False
     refill_resting_size_after_partial_fill: bool = False
 
@@ -310,54 +328,34 @@ class BotSettings:
     stagger_yes_no_expiration_offsets_seconds: int = 10
 
     aggressive_improvement_ticks_when_spread_is_wide: int = 0
-    minimum_spread_ticks_required_for_aggressive_improvement: int = 5
-    passive_offset_ticks_when_not_improving: int = 2
-    join_current_best_bid_when_starting_new_quote_cycle: bool = False
+    minimum_spread_ticks_required_for_aggressive_improvement: int = 2
+    passive_offset_ticks_when_not_improving: int = 1
+    join_current_best_bid_when_starting_new_quote_cycle: bool = True
 
     # After any fill, suppress same-side quoting for a while to reduce the
     # "got filled, stepped right back in, got filled again" pattern.
-    post_fill_no_improve_cooldown_ms: int = 750
-    same_side_reentry_cooldown_ms: int = 60_000
+    post_fill_no_improve_cooldown_ms: int = 4_000
+    same_side_reentry_cooldown_ms: int = 4_000
     suppress_same_side_quotes_during_reentry_cooldown: bool = True
 
-    # Reprice only when the price change is meaningful in either direction,
-    # unless a safety cap forces a move or the queue ahead is materially poor.
-    minimum_price_change_ticks_required_to_reprice: int = 1
-    queue_position_contracts_ahead_to_force_small_reprice: int = 500
-    queue_position_multiple_of_our_remaining_size_to_force_small_reprice: float = 40
+    # Only chase upward when the market moved materially. Downward / de-risking
+    # reprices still happen immediately.
+    minimum_upward_reprice_ticks_required: int = 4
 
     minimum_best_bid_cents_required_to_quote: int = 15
     minimum_implied_ask_cents_required_to_quote: int = 15
-    minimum_market_best_bid_cents_required_to_disable_quotes: int = 5
-    minimum_market_best_bid_cents_required_to_reenable_quotes: int = 6
-    market_probability_reenable_dwell_seconds: float = 10.0
-    allow_inventory_exit_side_while_market_probability_guard_is_active: bool = True
-
-    # Toxicity guard: if a large amount of resting liquidity is pulled from the
-    # top of book in a very short window, stop quoting briefly to avoid getting
-    # picked off by informed flow.
-    enable_toxicity_guard: bool = True
-    toxicity_top_levels_to_watch: int = 3
-    toxicity_detection_window_milliseconds: int = 500
-    toxicity_removed_contracts_threshold: int = 50
-    toxicity_pause_milliseconds: int = 10_000
-    toxicity_pause_market_wide: bool = False
-
+    minimum_market_best_bid_cents_required_to_quote_any_side: int = 15
     enforce_one_tick_safety_below_implied_ask: bool = True
 
     # --- Inventory controls ---
-    enable_one_way_inventory_guard: bool = False
-    one_way_inventory_guard_contracts: int = 20
-    inventory_skew_contracts_per_tick: int = 10
-    maximum_inventory_skew_ticks: int = 2
-
-    enable_directional_inventory_unwind: bool = True
-    maximum_unpaired_contracts_per_market: int = 30
-    directional_inventory_unwind_resume_contracts: int = 15
+    enable_one_way_inventory_guard: bool = True
+    one_way_inventory_guard_contracts: int = 30
+    inventory_skew_contracts_per_tick: int = 15
+    maximum_inventory_skew_ticks: int = 5
 
     # --- Pair / spread protection ---
     enable_pair_guard: bool = True
-    maximum_combined_bid_cents: int = 99
+    maximum_combined_bid_cents: int = 98
     additional_profit_buffer_cents: int = 2
     pair_guard_priority: str = "auto"
 
@@ -371,19 +369,51 @@ class BotSettings:
     enable_queue_position_logging: bool = True
     queue_position_log_interval_seconds: float = 10.0
 
+    # --- Telemetry / model inputs ---
+    enable_sqlite_telemetry: bool = True
+    telemetry_sqlite_path: str = ""
+    trade_history_window_seconds: int = 60
+    model_refresh_interval_seconds: int = 600
+    markout_horizons_seconds: Tuple[int, ...] = (1, 5, 30, 120)
+
+    # --- Fill-probability model ---
+    fill_probability_horizon_seconds: int = 30
+    fill_probability_prior_fills: float = 2.0
+    fill_probability_prior_misses: float = 3.0
+
+    # --- EV-based quoting model ---
+    minimum_expected_edge_cents_to_keep_quote: int = 1
+    minimum_expected_edge_cents_to_quote: int = 3
+    inventory_reduction_max_negative_edge_cents: int = 7
+    strong_edge_threshold_cents: int = 6
+    default_toxicity_cents: int = 3
+    default_fee_factor_for_maker_quotes: float = 0.25
+    fair_value_mid_weight: float = 0.55
+    fair_value_ticker_weight: float = 0.25
+    fair_value_trade_weight: float = 0.20
+    fair_value_max_orderbook_imbalance_adjust_cents: int = 4
+    fair_value_max_trade_bias_adjust_cents: int = 6
+    quote_size_min_fraction_of_budget: float = 0.20
+    quote_size_max_fraction_of_budget: float = 1.50
+    candidate_price_levels_to_scan: int = 16
+
+    # Order-book pull toxicity guard.
+    enable_orderbook_pull_toxicity_guard: bool = True
+    orderbook_pull_window_ms: int = 1000
+    orderbook_pull_top_levels_to_track: int = 12
+    orderbook_pull_absolute_threshold_contracts: int = 300
+    orderbook_pull_relative_depth_threshold: float = 0.3
+    orderbook_pull_side_cooldown_ms: int = 4_500
+    orderbook_pull_market_cooldown_ms: int = 4_500
+    orderbook_pull_penalty_cents: int = 5
+
     # Queue-abandonment logic.
     enable_queue_abandonment_guard: bool = True
-    maximum_queue_ahead_contracts_before_abandonment: int = 500
-    maximum_queue_ahead_multiple_of_our_remaining_size: float = 20
-    queue_abandonment_consecutive_polls_required: int = 2
-    queue_abandonment_side_cooldown_seconds: int = 60
-    queue_abandonment_market_cooldown_seconds: int = 300
-
-    # Exchange position is the source of truth. Websocket updates are applied
-    # immediately, and REST reconciliation periodically snaps provisional
-    # inventory back to the live exchange position when needed.
-    enable_periodic_rest_position_reconciliation: bool = True
-    position_reconciliation_interval_seconds: float = 30.0
+    maximum_queue_ahead_contracts_before_abandonment: int = 300
+    maximum_queue_ahead_multiple_of_our_remaining_size: float = 20.0
+    queue_abandonment_consecutive_polls_required: int = 3
+    queue_abandonment_side_cooldown_seconds: int = 30
+    queue_abandonment_market_cooldown_seconds: int = 30
 
     # Cross-process shared write throttling.
     enable_shared_write_rate_limiter: bool = True
@@ -428,42 +458,18 @@ class BotSettings:
             raise ValueError("post_fill_no_improve_cooldown_ms must be >= 0")
         if self.same_side_reentry_cooldown_ms < 0:
             raise ValueError("same_side_reentry_cooldown_ms must be >= 0")
-        if self.minimum_price_change_ticks_required_to_reprice < 0:
-            raise ValueError("minimum_price_change_ticks_required_to_reprice must be >= 0")
-        if self.queue_position_contracts_ahead_to_force_small_reprice < 0:
-            raise ValueError("queue_position_contracts_ahead_to_force_small_reprice must be >= 0")
-        if self.queue_position_multiple_of_our_remaining_size_to_force_small_reprice < 0:
-            raise ValueError("queue_position_multiple_of_our_remaining_size_to_force_small_reprice must be >= 0")
+        if self.minimum_upward_reprice_ticks_required < 0:
+            raise ValueError("minimum_upward_reprice_ticks_required must be >= 0")
         if self.minimum_best_bid_cents_required_to_quote < 0 or self.minimum_implied_ask_cents_required_to_quote < 0:
             raise ValueError("Quote-threshold cents must be >= 0")
-        if self.minimum_market_best_bid_cents_required_to_disable_quotes < 0:
-            raise ValueError("minimum_market_best_bid_cents_required_to_disable_quotes must be >= 0")
-        if self.minimum_market_best_bid_cents_required_to_reenable_quotes < 0:
-            raise ValueError("minimum_market_best_bid_cents_required_to_reenable_quotes must be >= 0")
-        if self.minimum_market_best_bid_cents_required_to_reenable_quotes < self.minimum_market_best_bid_cents_required_to_disable_quotes:
-            raise ValueError("minimum_market_best_bid_cents_required_to_reenable_quotes must be >= minimum_market_best_bid_cents_required_to_disable_quotes")
-        if self.market_probability_reenable_dwell_seconds < 0:
-            raise ValueError("market_probability_reenable_dwell_seconds must be >= 0")
-        if self.toxicity_top_levels_to_watch < 0:
-            raise ValueError("toxicity_top_levels_to_watch must be >= 0")
-        if self.toxicity_detection_window_milliseconds < 0:
-            raise ValueError("toxicity_detection_window_milliseconds must be >= 0")
-        if self.toxicity_removed_contracts_threshold < 0:
-            raise ValueError("toxicity_removed_contracts_threshold must be >= 0")
-        if self.toxicity_pause_milliseconds < 0:
-            raise ValueError("toxicity_pause_milliseconds must be >= 0")
+        if self.minimum_market_best_bid_cents_required_to_quote_any_side < 0:
+            raise ValueError("minimum_market_best_bid_cents_required_to_quote_any_side must be >= 0")
         if self.one_way_inventory_guard_contracts < 0:
             raise ValueError("one_way_inventory_guard_contracts must be >= 0")
         if self.inventory_skew_contracts_per_tick <= 0:
             raise ValueError("inventory_skew_contracts_per_tick must be > 0")
         if self.maximum_inventory_skew_ticks < 0:
             raise ValueError("maximum_inventory_skew_ticks must be >= 0")
-        if self.maximum_unpaired_contracts_per_market < 0:
-            raise ValueError("maximum_unpaired_contracts_per_market must be >= 0")
-        if self.directional_inventory_unwind_resume_contracts < 0:
-            raise ValueError("directional_inventory_unwind_resume_contracts must be >= 0")
-        if self.directional_inventory_unwind_resume_contracts > self.maximum_unpaired_contracts_per_market:
-            raise ValueError("directional_inventory_unwind_resume_contracts must be <= maximum_unpaired_contracts_per_market")
         if self.maximum_combined_bid_cents < 0:
             raise ValueError("maximum_combined_bid_cents must be >= 0")
         if self.additional_profit_buffer_cents < 0:
@@ -474,6 +480,54 @@ class BotSettings:
             raise ValueError("post_only_reprice_cooldown_seconds must be >= 0")
         if self.queue_position_log_interval_seconds <= 0:
             raise ValueError("queue_position_log_interval_seconds must be > 0")
+        if self.trade_history_window_seconds <= 0:
+            raise ValueError("trade_history_window_seconds must be > 0")
+        if self.model_refresh_interval_seconds <= 0:
+            raise ValueError("model_refresh_interval_seconds must be > 0")
+        if not self.markout_horizons_seconds or any(value <= 0 for value in self.markout_horizons_seconds):
+            raise ValueError("markout_horizons_seconds must contain positive values")
+        if self.fill_probability_horizon_seconds <= 0:
+            raise ValueError("fill_probability_horizon_seconds must be > 0")
+        if self.fill_probability_prior_fills < 0:
+            raise ValueError("fill_probability_prior_fills must be >= 0")
+        if self.fill_probability_prior_misses < 0:
+            raise ValueError("fill_probability_prior_misses must be >= 0")
+        if self.minimum_expected_edge_cents_to_quote < 0:
+            raise ValueError("minimum_expected_edge_cents_to_quote must be >= 0")
+        if self.inventory_reduction_max_negative_edge_cents < 0:
+            raise ValueError("inventory_reduction_max_negative_edge_cents must be >= 0")
+        if self.strong_edge_threshold_cents <= 0:
+            raise ValueError("strong_edge_threshold_cents must be > 0")
+        if self.default_toxicity_cents < 0:
+            raise ValueError("default_toxicity_cents must be >= 0")
+        if not 0 <= self.default_fee_factor_for_maker_quotes <= 2:
+            raise ValueError("default_fee_factor_for_maker_quotes must be between 0 and 2")
+        if self.fair_value_mid_weight < 0 or self.fair_value_ticker_weight < 0 or self.fair_value_trade_weight < 0:
+            raise ValueError("fair value weights must be >= 0")
+        if (self.fair_value_mid_weight + self.fair_value_ticker_weight + self.fair_value_trade_weight) <= 0:
+            raise ValueError("At least one fair value weight must be > 0")
+        if self.fair_value_max_orderbook_imbalance_adjust_cents < 0 or self.fair_value_max_trade_bias_adjust_cents < 0:
+            raise ValueError("fair value adjustment caps must be >= 0")
+        if self.quote_size_min_fraction_of_budget <= 0 or self.quote_size_max_fraction_of_budget <= 0:
+            raise ValueError("quote size fractions must be > 0")
+        if self.quote_size_max_fraction_of_budget < self.quote_size_min_fraction_of_budget:
+            raise ValueError("quote_size_max_fraction_of_budget must be >= quote_size_min_fraction_of_budget")
+        if self.candidate_price_levels_to_scan <= 0:
+            raise ValueError("candidate_price_levels_to_scan must be > 0")
+        if self.orderbook_pull_window_ms < 0:
+            raise ValueError("orderbook_pull_window_ms must be >= 0")
+        if self.orderbook_pull_top_levels_to_track <= 0:
+            raise ValueError("orderbook_pull_top_levels_to_track must be > 0")
+        if self.orderbook_pull_absolute_threshold_contracts < 0:
+            raise ValueError("orderbook_pull_absolute_threshold_contracts must be >= 0")
+        if not 0 <= self.orderbook_pull_relative_depth_threshold <= 1.0:
+            raise ValueError("orderbook_pull_relative_depth_threshold must be between 0 and 1")
+        if self.orderbook_pull_side_cooldown_ms < 0:
+            raise ValueError("orderbook_pull_side_cooldown_ms must be >= 0")
+        if self.orderbook_pull_market_cooldown_ms < 0:
+            raise ValueError("orderbook_pull_market_cooldown_ms must be >= 0")
+        if self.orderbook_pull_penalty_cents < 0:
+            raise ValueError("orderbook_pull_penalty_cents must be >= 0")
         if self.maximum_queue_ahead_contracts_before_abandonment < 0:
             raise ValueError("maximum_queue_ahead_contracts_before_abandonment must be >= 0")
         if self.maximum_queue_ahead_multiple_of_our_remaining_size < 0:
@@ -484,8 +538,6 @@ class BotSettings:
             raise ValueError("queue_abandonment_side_cooldown_seconds must be >= 0")
         if self.queue_abandonment_market_cooldown_seconds < 0:
             raise ValueError("queue_abandonment_market_cooldown_seconds must be >= 0")
-        if self.position_reconciliation_interval_seconds <= 0:
-            raise ValueError("position_reconciliation_interval_seconds must be > 0")
         if self.shared_write_rate_limit_writes_per_second <= 0:
             raise ValueError("shared_write_rate_limit_writes_per_second must be > 0")
         if self.shared_write_rate_limit_burst_capacity <= 0:
@@ -494,6 +546,8 @@ class BotSettings:
             raise ValueError("global_rate_limit_backoff_seconds must be >= 0")
         if self.pair_guard_priority.lower() not in {"yes", "no", "auto"}:
             raise ValueError("pair_guard_priority must be 'yes', 'no', or 'auto'")
+        if self.minimum_expected_edge_cents_to_keep_quote < 0:
+            raise ValueError("minimum_expected_edge_cents_to_keep_quote must be >= 0")
 
 
 
@@ -504,19 +558,10 @@ def build_settings_from_args(bot_args: argparse.Namespace) -> BotSettings:
     defaults = BotSettings()
 
     market_ticker = bot_args.ticker.strip() if bot_args.ticker else defaults.market_ticker
+    api_key_id = (bot_args.api_key_id or env_api_key or defaults.api_key_id).strip()
+    private_key_path = (bot_args.private_key or env_private_key_path or defaults.private_key_path).strip()
 
-    api_key_id = bot_args.api_key_id or env_api_key
-    if api_key_id is not None:
-        api_key_id = api_key_id.strip()
-    else:
-        api_key_id = ""
-
-    private_key_path = bot_args.private_key or env_private_key_path or defaults.private_key_path
-    if private_key_path is not None:
-        private_key_path = private_key_path.strip()
-    else:
-        private_key_path = ""
-        settings = BotSettings(
+    settings = BotSettings(
         market_ticker=market_ticker,
         api_key_id=api_key_id,
         private_key_path=private_key_path,
@@ -1042,7 +1087,6 @@ class KalshiApiClient:
         *,
         market_ticker: str,
         side: str,
-        action: str,
         price_units: int,
         count_units: int,
         client_order_id: str,
@@ -1051,7 +1095,7 @@ class KalshiApiClient:
         body = {
             "ticker": market_ticker,
             "side": side,
-            "action": action,
+            "action": "buy",
             "client_order_id": client_order_id,
             "count_fp": format_count_fp(count_units),
             "post_only": bool(self.settings.post_only_quotes),
@@ -1072,7 +1116,6 @@ class KalshiApiClient:
             log_event(
                 "DRY_CREATE",
                 side=side,
-                action=action,
                 price_dollars=format_price_dollars(price_units),
                 contracts=format_count_fp(count_units),
             )
@@ -1093,7 +1136,6 @@ class KalshiApiClient:
         order_id: str,
         market_ticker: str,
         side: str,
-        action: str,
         new_price_units: int,
         new_total_fillable_count_units: int,
         previous_client_order_id: str,
@@ -1102,7 +1144,7 @@ class KalshiApiClient:
         body = {
             "ticker": market_ticker,
             "side": side,
-            "action": action,
+            "action": "buy",
             "subaccount": self.settings.subaccount_number,
             "client_order_id": previous_client_order_id,
             "updated_client_order_id": updated_client_order_id,
@@ -1118,7 +1160,6 @@ class KalshiApiClient:
             log_event(
                 "DRY_AMEND",
                 side=side,
-                action=action,
                 order_id=order_id,
                 price_dollars=format_price_dollars(new_price_units),
                 total_contracts=format_count_fp(new_total_fillable_count_units),
@@ -1166,6 +1207,34 @@ class KalshiApiClient:
     def get_order_queue_position(self, order_id: str) -> dict:
         return self.rest_get(f"{self.api_prefix}/portfolio/orders/{order_id}/queue_position")
 
+    def get_series(self, series_ticker: str) -> dict:
+        response = self.rest_get(
+            f"{self.api_prefix}/series/{series_ticker}",
+            params={"include_volume": True},
+        )
+        return response["series"]
+
+    def get_series_fee_changes(self, series_ticker: str, *, show_historical: bool = False) -> List[dict]:
+        response = self.rest_get(
+            f"{self.api_prefix}/series/fee_changes",
+            params={
+                "series_ticker": series_ticker,
+                "show_historical": bool(show_historical),
+            },
+        )
+        return list(response.get("series_fee_change_arr") or [])
+
+    def get_incentive_programs(self, *, status: str = "active", incentive_type: str = "all", limit: int = 10_000) -> List[dict]:
+        response = self.rest_get(
+            f"{self.api_prefix}/incentive_programs",
+            params={
+                "status": status,
+                "type": incentive_type,
+                "limit": max(1, min(int(limit), 10_000)),
+            },
+        )
+        return list(response.get("incentive_programs") or [])
+
 
 # ---------------------------------------------------------------------------
 # Market metadata and order state
@@ -1177,6 +1246,9 @@ class MarketMetadata:
     ticker: str
     title: str
     status: str
+    series_ticker: str
+    event_ticker: str
+    close_time_ms: Optional[int]
     price_level_structure: str
     fractional_trading_enabled: bool
     price_grid: PriceGrid
@@ -1187,7 +1259,6 @@ class ManagedOrderState:
     side: str
     order_id: Optional[str] = None
     client_order_id: Optional[str] = None
-    action: str = "buy"
     price_units: Optional[int] = None
     remaining_count_units: int = 0
     current_order_filled_units: int = 0
@@ -1199,30 +1270,18 @@ class ManagedOrderState:
     same_side_reentry_cooldown_until_ms: int = 0
     queue_abandonment_cooldown_until_ms: int = 0
     last_positive_fill_timestamp_ms: int = 0
-    cancel_requested: bool = False
-    reset_quote_cycle_on_terminal: bool = False
-
-    @property
-    def has_exchange_resting_order(self) -> bool:
-        return bool(self.order_id) and self.status == "resting"
 
     @property
     def has_active_resting_order(self) -> bool:
-        return self.has_exchange_resting_order and not self.cancel_requested
+        return bool(self.order_id) and self.status == "resting"
 
     @property
     def current_order_total_fillable_units(self) -> int:
         return int(self.remaining_count_units) + int(self.current_order_filled_units)
 
-    def mark_cancel_requested(self, *, reset_quote_cycle: bool) -> None:
-        self.cancel_requested = True
-        if reset_quote_cycle:
-            self.reset_quote_cycle_on_terminal = True
-
     def clear_active_order(self, *, preserve_quote_cycle: bool) -> None:
         self.order_id = None
         self.client_order_id = None
-        self.action = "buy"
         self.price_units = None
         self.remaining_count_units = 0
         self.current_order_filled_units = 0
@@ -1230,19 +1289,995 @@ class ManagedOrderState:
         self.expiration_time_ms = None
         self.last_queue_position_units = None
         self.consecutive_queue_ahead_breaches = 0
-        self.cancel_requested = False
-        self.reset_quote_cycle_on_terminal = False
         if not preserve_quote_cycle:
             self.quote_cycle_filled_units = 0
 
 
-@dataclass(frozen=True)
-class DesiredOrderPlan:
-    side: str
-    action: str
+# ---------------------------------------------------------------------------
+# Strategy telemetry / models
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class TickerState:
+    market_ticker: str
+    ts_ms: int
     price_units: Optional[int]
-    remaining_count_units_override: Optional[int] = None
-    reset_quote_cycle_when_disabled: bool = True
+    yes_bid_units: Optional[int]
+    yes_ask_units: Optional[int]
+    volume_units: Optional[int]
+    open_interest_units: Optional[int]
+    yes_bid_size_units: Optional[int]
+    yes_ask_size_units: Optional[int]
+    last_trade_size_units: Optional[int]
+
+
+@dataclass
+class PublicTradeTick:
+    trade_id: str
+    market_ticker: str
+    ts_ms: int
+    yes_price_units: int
+    no_price_units: int
+    count_units: int
+    taker_side: str
+
+
+@dataclass
+class MarketContext:
+    ts_ms: int
+    best_yes_bid_units: int
+    best_no_bid_units: int
+    implied_yes_ask_units: int
+    implied_no_ask_units: int
+    best_yes_bid_size_units: int
+    best_no_bid_size_units: int
+    ticker_price_units: Optional[int]
+    ticker_yes_bid_units: Optional[int]
+    ticker_yes_ask_units: Optional[int]
+    ticker_yes_bid_size_units: Optional[int]
+    ticker_yes_ask_size_units: Optional[int]
+    last_trade_yes_units: Optional[int]
+    last_trade_size_units: int
+    trade_bias: float
+    trade_momentum_units: int
+    order_book_imbalance: float
+    inventory_units: int
+    queue_ahead_yes_units: Optional[int]
+    queue_ahead_no_units: Optional[int]
+    seconds_to_close: Optional[float]
+
+    @property
+    def mid_yes_units(self) -> int:
+        return int(round((self.best_yes_bid_units + self.implied_yes_ask_units) / 2.0))
+
+    @property
+    def mid_no_units(self) -> int:
+        return int(round((self.best_no_bid_units + self.implied_no_ask_units) / 2.0))
+
+    def spread_units_for_side(self, side: str) -> int:
+        if side == "yes":
+            return max(0, self.implied_yes_ask_units - self.best_yes_bid_units)
+        return max(0, self.implied_no_ask_units - self.best_no_bid_units)
+
+    def queue_ahead_units_for_side(self, side: str) -> Optional[int]:
+        return self.queue_ahead_yes_units if side == "yes" else self.queue_ahead_no_units
+
+
+@dataclass
+class FairValueEstimate:
+    fair_yes_units: int
+    fair_no_units: int
+    raw_fair_yes_units: int
+    mid_yes_units: int
+    ticker_anchor_yes_units: Optional[int]
+    trade_anchor_yes_units: Optional[int]
+    order_book_adjust_units: int
+    trade_bias_adjust_units: int
+
+    def fair_for_side(self, side: str) -> int:
+        return self.fair_yes_units if side == "yes" else self.fair_no_units
+
+
+@dataclass
+class SideQuoteDecision:
+    side: str
+    price_units: Optional[int]
+    target_size_units: int
+    mode: str
+    fair_yes_units: Optional[int] = None
+    fair_side_units: Optional[int] = None
+    reservation_units: Optional[int] = None
+    market_target_units: Optional[int] = None
+    projected_queue_ahead_units: Optional[int] = None
+    expected_edge_units: int = 0
+    estimated_fee_units: int = 0
+    estimated_toxicity_units: int = 0
+    estimated_incentive_units: int = 0
+    inventory_penalty_units: int = 0
+    queue_penalty_units: int = 0
+    reason: str = ""
+    candidate_debug: str = ""
+    estimated_fill_probability_30s: float = 0.0
+    estimated_markout_units: int = 0
+    score_per_hour_units: float = 0.0
+    bucket_key: str = ""
+
+
+@dataclass
+class ToxicityStat:
+    observations: int = 0
+    ewma_adverse_units: float = 0.0
+
+
+@dataclass
+class FillProbStat:
+    attempts: int = 0
+    fills_30s: int = 0
+
+
+@dataclass
+class PendingFillAttempt:
+    attempt_id: str
+    side: str
+    bucket_key: str
+    quote_price_units: int
+    started_ts_ms: int
+    expiry_ts_ms: int
+    filled_within_horizon: bool = False
+    settled: bool = False
+
+
+class TelemetryStore:
+    def __init__(self, database_path: str, *, enabled: bool) -> None:
+        self.enabled = bool(enabled)
+        self.database_path = database_path
+        self._connection: Optional[sqlite3.Connection] = None
+        self._lock = Lock()
+        if not self.enabled:
+            return
+
+        directory = os.path.dirname(os.path.abspath(database_path))
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        self._connection = sqlite3.connect(database_path, check_same_thread=False)
+        self._connection.row_factory = sqlite3.Row
+        self._connection.execute("PRAGMA journal_mode=WAL")
+        self._connection.execute("PRAGMA synchronous=NORMAL")
+        self._initialize_schema()
+
+    def _initialize_schema(self) -> None:
+        if not self._connection:
+            return
+        with self._lock:
+            self._connection.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS fills (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    fill_key TEXT NOT NULL UNIQUE,
+                    ts_ms INTEGER NOT NULL,
+                    ticker TEXT NOT NULL,
+                    side TEXT NOT NULL,
+                    trade_id TEXT,
+                    order_id TEXT,
+                    price_units INTEGER,
+                    size_units INTEGER,
+                    fee_units INTEGER,
+                    is_taker INTEGER,
+                    inventory_before_units INTEGER,
+                    inventory_after_units INTEGER,
+                    fair_yes_before_units INTEGER,
+                    best_yes_bid_units INTEGER,
+                    best_no_bid_units INTEGER,
+                    queue_ahead_units INTEGER
+                );
+                CREATE TABLE IF NOT EXISTS quotes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts_ms INTEGER NOT NULL,
+                    ticker TEXT NOT NULL,
+                    side TEXT NOT NULL,
+                    mode TEXT NOT NULL,
+                    fair_yes_units INTEGER,
+                    fair_side_units INTEGER,
+                    quote_units INTEGER,
+                    reservation_units INTEGER,
+                    market_target_units INTEGER,
+                    expected_edge_units INTEGER,
+                    fee_units INTEGER,
+                    toxicity_units INTEGER,
+                    incentive_units INTEGER,
+                    inventory_penalty_units INTEGER,
+                    queue_penalty_units INTEGER,
+                    target_size_units INTEGER,
+                    queue_ahead_units INTEGER,
+                    spread_units INTEGER,
+                    inventory_units INTEGER
+                );
+                CREATE TABLE IF NOT EXISTS markouts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    fill_key TEXT NOT NULL,
+                    ts_ms INTEGER NOT NULL,
+                    ticker TEXT NOT NULL,
+                    side TEXT NOT NULL,
+                    horizon_ms INTEGER NOT NULL,
+                    fill_price_units INTEGER NOT NULL,
+                    future_mid_yes_units INTEGER,
+                    future_fair_yes_units INTEGER,
+                    adverse_units INTEGER,
+                    bucket_key TEXT
+                );
+                CREATE TABLE IF NOT EXISTS market_state (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts_ms INTEGER NOT NULL,
+                    ticker TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    best_yes_bid_units INTEGER,
+                    best_no_bid_units INTEGER,
+                    implied_yes_ask_units INTEGER,
+                    implied_no_ask_units INTEGER,
+                    best_yes_bid_size_units INTEGER,
+                    best_no_bid_size_units INTEGER,
+                    ticker_price_units INTEGER,
+                    ticker_yes_bid_units INTEGER,
+                    ticker_yes_ask_units INTEGER,
+                    yes_bid_size_units INTEGER,
+                    yes_ask_size_units INTEGER,
+                    last_trade_yes_units INTEGER,
+                    last_trade_size_units INTEGER,
+                    trade_bias_bp INTEGER,
+                    inventory_units INTEGER
+                );
+                CREATE TABLE IF NOT EXISTS ticker_updates (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts_ms INTEGER NOT NULL,
+                    ticker TEXT NOT NULL,
+                    price_units INTEGER,
+                    yes_bid_units INTEGER,
+                    yes_ask_units INTEGER,
+                    volume_units INTEGER,
+                    open_interest_units INTEGER,
+                    yes_bid_size_units INTEGER,
+                    yes_ask_size_units INTEGER,
+                    last_trade_size_units INTEGER
+                );
+                CREATE TABLE IF NOT EXISTS public_trades (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts_ms INTEGER NOT NULL,
+                    ticker TEXT NOT NULL,
+                    trade_id TEXT,
+                    yes_price_units INTEGER,
+                    no_price_units INTEGER,
+                    count_units INTEGER,
+                    taker_side TEXT
+                );
+                CREATE TABLE IF NOT EXISTS fill_prob_attempts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    attempt_id TEXT NOT NULL UNIQUE,
+                    ts_ms INTEGER NOT NULL,
+                    ticker TEXT NOT NULL,
+                    side TEXT NOT NULL,
+                    bucket_key TEXT NOT NULL,
+                    quote_price_units INTEGER NOT NULL,
+                    filled_30s INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_fill_prob_attempts_bucket
+                    ON fill_prob_attempts(bucket_key, ts_ms);
+                CREATE INDEX IF NOT EXISTS idx_markouts_fill_key ON markouts(fill_key);
+                CREATE INDEX IF NOT EXISTS idx_markouts_bucket ON markouts(bucket_key, horizon_ms);
+                CREATE INDEX IF NOT EXISTS idx_fills_ticker_ts ON fills(ticker, ts_ms);
+                CREATE INDEX IF NOT EXISTS idx_quotes_ticker_ts ON quotes(ticker, ts_ms);
+                """
+            )
+            self._connection.commit()
+
+    def _execute(self, sql: str, params: Tuple[object, ...]) -> None:
+        if not self._connection:
+            return
+        with self._lock:
+            self._connection.execute(sql, params)
+            self._connection.commit()
+
+    def load_recent_markouts(self, *, limit: int = 5000) -> List[sqlite3.Row]:
+        if not self._connection:
+            return []
+        with self._lock:
+            cursor = self._connection.execute(
+                "SELECT side, horizon_ms, adverse_units, bucket_key FROM markouts ORDER BY id DESC LIMIT ?",
+                (int(limit),),
+            )
+            return list(cursor.fetchall())
+
+    def load_recent_fill_prob_attempts(self, *, limit: int = 10000) -> List[sqlite3.Row]:
+        if not self._connection:
+            return []
+        with self._lock:
+            cursor = self._connection.execute(
+                """
+                SELECT bucket_key, filled_30s
+                FROM fill_prob_attempts
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (int(limit),),
+            )
+            return list(cursor.fetchall())
+
+    def load_recent_fills(self, *, limit: int = 1000) -> List[sqlite3.Row]:
+        if not self._connection:
+            return []
+        with self._lock:
+            cursor = self._connection.execute(
+                "SELECT price_units, size_units, fee_units FROM fills WHERE fee_units IS NOT NULL ORDER BY id DESC LIMIT ?",
+                (int(limit),),
+            )
+            return list(cursor.fetchall())
+
+    def record_fill_prob_attempt(
+        self,
+        *,
+        attempt_id: str,
+        ts_ms: int,
+        ticker: str,
+        side: str,
+        bucket_key: str,
+        quote_price_units: int,
+        filled_30s: bool,
+    ) -> None:
+        self._execute(
+            """
+            INSERT OR IGNORE INTO fill_prob_attempts (
+                attempt_id, ts_ms, ticker, side, bucket_key, quote_price_units, filled_30s
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                attempt_id,
+                int(ts_ms),
+                ticker,
+                side,
+                bucket_key,
+                int(quote_price_units),
+                1 if filled_30s else 0,
+            ),
+        )
+
+    def record_fill(
+        self,
+        *,
+        fill_key: str,
+        ts_ms: int,
+        ticker: str,
+        side: str,
+        trade_id: str,
+        order_id: str,
+        price_units: Optional[int],
+        size_units: int,
+        fee_units: Optional[int],
+        is_taker: bool,
+        inventory_before_units: int,
+        inventory_after_units: int,
+        fair_yes_before_units: Optional[int],
+        best_yes_bid_units: Optional[int],
+        best_no_bid_units: Optional[int],
+        queue_ahead_units: Optional[int],
+    ) -> None:
+        self._execute(
+            """
+            INSERT OR IGNORE INTO fills (
+                fill_key, ts_ms, ticker, side, trade_id, order_id, price_units, size_units, fee_units,
+                is_taker, inventory_before_units, inventory_after_units, fair_yes_before_units,
+                best_yes_bid_units, best_no_bid_units, queue_ahead_units
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                fill_key,
+                int(ts_ms),
+                ticker,
+                side,
+                trade_id,
+                order_id,
+                price_units,
+                int(size_units),
+                fee_units,
+                1 if is_taker else 0,
+                int(inventory_before_units),
+                int(inventory_after_units),
+                fair_yes_before_units,
+                best_yes_bid_units,
+                best_no_bid_units,
+                queue_ahead_units,
+            ),
+        )
+
+    def record_quote_decision(self, *, ts_ms: int, ticker: str, decision: SideQuoteDecision, context: MarketContext) -> None:
+        self._execute(
+            """
+            INSERT INTO quotes (
+                ts_ms, ticker, side, mode, fair_yes_units, fair_side_units, quote_units, reservation_units,
+                market_target_units, expected_edge_units, fee_units, toxicity_units, incentive_units,
+                inventory_penalty_units, queue_penalty_units, target_size_units, queue_ahead_units,
+                spread_units, inventory_units
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(ts_ms),
+                ticker,
+                decision.side,
+                decision.mode,
+                decision.fair_yes_units,
+                decision.fair_side_units,
+                decision.price_units,
+                decision.reservation_units,
+                decision.market_target_units,
+                int(decision.expected_edge_units),
+                int(decision.estimated_fee_units),
+                int(decision.estimated_toxicity_units),
+                int(decision.estimated_incentive_units),
+                int(decision.inventory_penalty_units),
+                int(decision.queue_penalty_units),
+                int(decision.target_size_units),
+                (decision.projected_queue_ahead_units if decision.projected_queue_ahead_units is not None else context.queue_ahead_units_for_side(decision.side)),
+                context.spread_units_for_side(decision.side),
+                int(context.inventory_units),
+            ),
+        )
+
+    def record_markout(
+        self,
+        *,
+        fill_key: str,
+        ts_ms: int,
+        ticker: str,
+        side: str,
+        horizon_ms: int,
+        fill_price_units: int,
+        future_mid_yes_units: Optional[int],
+        future_fair_yes_units: Optional[int],
+        adverse_units: int,
+        bucket_key: str,
+    ) -> None:
+        self._execute(
+            """
+            INSERT INTO markouts (
+                fill_key, ts_ms, ticker, side, horizon_ms, fill_price_units, future_mid_yes_units,
+                future_fair_yes_units, adverse_units, bucket_key
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                fill_key,
+                int(ts_ms),
+                ticker,
+                side,
+                int(horizon_ms),
+                int(fill_price_units),
+                future_mid_yes_units,
+                future_fair_yes_units,
+                int(adverse_units),
+                bucket_key,
+            ),
+        )
+
+    def record_market_state(self, *, ts_ms: int, ticker: str, source: str, context: MarketContext) -> None:
+        self._execute(
+            """
+            INSERT INTO market_state (
+                ts_ms, ticker, source, best_yes_bid_units, best_no_bid_units, implied_yes_ask_units,
+                implied_no_ask_units, best_yes_bid_size_units, best_no_bid_size_units, ticker_price_units,
+                ticker_yes_bid_units, ticker_yes_ask_units, yes_bid_size_units, yes_ask_size_units,
+                last_trade_yes_units, last_trade_size_units, trade_bias_bp, inventory_units
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(ts_ms),
+                ticker,
+                source,
+                int(context.best_yes_bid_units),
+                int(context.best_no_bid_units),
+                int(context.implied_yes_ask_units),
+                int(context.implied_no_ask_units),
+                int(context.best_yes_bid_size_units),
+                int(context.best_no_bid_size_units),
+                context.ticker_price_units,
+                context.ticker_yes_bid_units,
+                context.ticker_yes_ask_units,
+                context.ticker_yes_bid_size_units,
+                context.ticker_yes_ask_size_units,
+                context.last_trade_yes_units,
+                int(context.last_trade_size_units),
+                int(round(context.trade_bias * 10_000)),
+                int(context.inventory_units),
+            ),
+        )
+
+    def record_ticker(self, *, ticker_state: TickerState) -> None:
+        self._execute(
+            """
+            INSERT INTO ticker_updates (
+                ts_ms, ticker, price_units, yes_bid_units, yes_ask_units, volume_units,
+                open_interest_units, yes_bid_size_units, yes_ask_size_units, last_trade_size_units
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(ticker_state.ts_ms),
+                ticker_state.market_ticker,
+                ticker_state.price_units,
+                ticker_state.yes_bid_units,
+                ticker_state.yes_ask_units,
+                ticker_state.volume_units,
+                ticker_state.open_interest_units,
+                ticker_state.yes_bid_size_units,
+                ticker_state.yes_ask_size_units,
+                ticker_state.last_trade_size_units,
+            ),
+        )
+
+    def record_public_trade(self, *, trade: PublicTradeTick) -> None:
+        self._execute(
+            """
+            INSERT INTO public_trades (
+                ts_ms, ticker, trade_id, yes_price_units, no_price_units, count_units, taker_side
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                int(trade.ts_ms),
+                trade.market_ticker,
+                trade.trade_id,
+                trade.yes_price_units,
+                trade.no_price_units,
+                int(trade.count_units),
+                trade.taker_side,
+            ),
+        )
+
+
+class FeeModel:
+    def __init__(self, api_client: KalshiApiClient, market: MarketMetadata, settings: BotSettings, telemetry_store: TelemetryStore) -> None:
+        self.api_client = api_client
+        self.market = market
+        self.settings = settings
+        self.telemetry_store = telemetry_store
+        self.fee_type = "quadratic"
+        self.fee_multiplier = 1.0
+        self.maker_fee_factor = float(settings.default_fee_factor_for_maker_quotes)
+        self.realized_fee_per_contract_units_ewma: Optional[float] = None
+        self.upcoming_fee_changes: List[dict] = []
+        self.last_refresh_ms = 0
+
+    def refresh_from_api(self) -> None:
+        try:
+            series_payload = self.api_client.get_series(self.market.series_ticker)
+            self.fee_type = str(series_payload.get("fee_type") or self.fee_type)
+            self.fee_multiplier = float(series_payload.get("fee_multiplier") or self.fee_multiplier or 1.0)
+        except Exception as exc:
+            log_event("FEE_MODEL_SERIES_REFRESH_ERROR", error=str(exc), series=self.market.series_ticker)
+        try:
+            self.upcoming_fee_changes = self.api_client.get_series_fee_changes(self.market.series_ticker, show_historical=False)
+        except Exception as exc:
+            log_event("FEE_MODEL_FEE_CHANGE_REFRESH_ERROR", error=str(exc), series=self.market.series_ticker)
+        self.bootstrap_from_telemetry(limit=250)
+        self.last_refresh_ms = now_ms()
+        log_event(
+            "FEE_MODEL_REFRESHED",
+            series=self.market.series_ticker,
+            fee_type=self.fee_type,
+            fee_multiplier=self.fee_multiplier,
+            maker_fee_factor=round(self.maker_fee_factor, 4),
+            upcoming_changes=len(self.upcoming_fee_changes),
+        )
+
+    def bootstrap_from_telemetry(self, *, limit: int = 250) -> None:
+        for row in self.telemetry_store.load_recent_fills(limit=limit):
+            price_units = row["price_units"]
+            size_units = row["size_units"]
+            fee_units = row["fee_units"]
+            if price_units is None or size_units is None or fee_units is None:
+                continue
+            self.record_fill_fee(price_units=int(price_units), count_units=int(size_units), fee_units=int(fee_units))
+
+    def baseline_fee_units(self, *, price_units: int, count_units: int) -> int:
+        if price_units <= 0 or count_units <= 0:
+            return 0
+        if self.fee_type.lower() != "quadratic":
+            return 0
+        contracts = Decimal(count_units) / Decimal(COUNT_SCALE)
+        price = Decimal(price_units) / Decimal(PRICE_SCALE)
+        fee_dollars = Decimal("0.07") * Decimal(str(self.fee_multiplier)) * contracts * price * (Decimal("1") - price)
+        return int((fee_dollars * PRICE_SCALE).to_integral_value(rounding=ROUND_HALF_UP))
+
+    def record_fill_fee(self, *, price_units: int, count_units: int, fee_units: int) -> None:
+        if fee_units < 0 or count_units <= 0:
+            return
+        contracts = max(0.01, count_units / COUNT_SCALE)
+        per_contract_units = fee_units / contracts
+        if self.realized_fee_per_contract_units_ewma is None:
+            self.realized_fee_per_contract_units_ewma = per_contract_units
+        else:
+            self.realized_fee_per_contract_units_ewma = (0.85 * self.realized_fee_per_contract_units_ewma) + (0.15 * per_contract_units)
+
+        baseline_units = self.baseline_fee_units(price_units=price_units, count_units=count_units)
+        if baseline_units > 0:
+            ratio = max(0.0, min(2.0, fee_units / baseline_units))
+            self.maker_fee_factor = (0.85 * self.maker_fee_factor) + (0.15 * ratio)
+
+    def estimate_fee_per_contract_units(self, *, price_units: int) -> int:
+        baseline_units = self.baseline_fee_units(price_units=price_units, count_units=COUNT_SCALE)
+        estimate = float(baseline_units) * float(self.maker_fee_factor)
+        if self.realized_fee_per_contract_units_ewma is not None:
+            estimate = (0.50 * estimate) + (0.50 * self.realized_fee_per_contract_units_ewma)
+        return max(0, int(round(estimate)))
+
+    def estimate_fee_units(self, *, price_units: int, count_units: int) -> int:
+        if count_units <= 0:
+            return 0
+        contracts = Decimal(count_units) / Decimal(COUNT_SCALE)
+        per_contract_units = Decimal(self.estimate_fee_per_contract_units(price_units=price_units))
+        return int((per_contract_units * contracts).to_integral_value(rounding=ROUND_HALF_UP))
+
+
+class IncentiveModel:
+    def __init__(self, api_client: KalshiApiClient, market: MarketMetadata) -> None:
+        self.api_client = api_client
+        self.market = market
+        self.programs: List[dict] = []
+        self.last_refresh_ms = 0
+
+    def refresh_from_api(self) -> None:
+        try:
+            programs = self.api_client.get_incentive_programs(status="active", incentive_type="all", limit=10_000)
+            self.programs = [
+                program
+                for program in programs
+                if str(program.get("market_ticker") or "") == self.market.ticker
+            ]
+            self.last_refresh_ms = now_ms()
+            log_event("INCENTIVE_MODEL_REFRESHED", ticker=self.market.ticker, active_programs=len(self.programs))
+        except Exception as exc:
+            log_event("INCENTIVE_MODEL_REFRESH_ERROR", ticker=self.market.ticker, error=str(exc))
+
+    def active_programs_for_market(self) -> List[dict]:
+        return list(self.programs)
+
+    def estimate_incentive_per_contract_units(
+        self,
+        *,
+        quote_price_units: int,
+        size_units: int,
+        tick_distance_from_best: int,
+    ) -> int:
+        if quote_price_units <= 0 or size_units <= 0 or not self.programs:
+            return 0
+
+        quality = 1.0 if tick_distance_from_best <= 0 else max(0.0, 1.0 - 0.5 * tick_distance_from_best)
+        total_bonus_units = 0.0
+        for program in self.programs:
+            discount_factor_bps = float(program.get("discount_factor_bps") or 0.0)
+            if discount_factor_bps <= 0:
+                continue
+            target_size_units = parse_count_units_from_fp(program.get("target_size_fp") or "0") if program.get("target_size_fp") else 0
+            size_scale = 1.0
+            if target_size_units > 0:
+                size_scale = min(1.0, size_units / target_size_units)
+
+            per_contract_bonus_units = float(quote_price_units) * (discount_factor_bps / 10_000.0)
+            incentive_type = str(program.get("incentive_type") or "")
+            if incentive_type == "liquidity":
+                per_contract_bonus_units *= quality * size_scale
+            else:
+                per_contract_bonus_units *= size_scale
+            total_bonus_units += per_contract_bonus_units
+
+        return max(0, int(round(total_bonus_units)))
+
+
+class FairValueEngine:
+    def __init__(self, market: MarketMetadata, settings: BotSettings) -> None:
+        self.market = market
+        self.settings = settings
+        self.last_fair_yes_units: Optional[int] = None
+
+    def estimate(self, context: MarketContext, *, update_state: bool = True) -> FairValueEstimate:
+        weights: List[Tuple[int, float]] = []
+        weights.append((context.mid_yes_units, float(self.settings.fair_value_mid_weight)))
+        if context.ticker_price_units is not None:
+            weights.append((context.ticker_price_units, float(self.settings.fair_value_ticker_weight)))
+        if context.last_trade_yes_units is not None:
+            weights.append((context.last_trade_yes_units, float(self.settings.fair_value_trade_weight)))
+
+        total_weight = sum(weight for _, weight in weights) or 1.0
+        raw_fair_yes_units = int(round(sum(price_units * weight for price_units, weight in weights) / total_weight))
+
+        order_book_adjust_units = int(round(
+            context.order_book_imbalance
+            * self.settings.fair_value_max_orderbook_imbalance_adjust_cents
+            * PRICE_UNITS_PER_CENT
+        ))
+        trade_bias_adjust_units = int(round(
+            context.trade_bias
+            * self.settings.fair_value_max_trade_bias_adjust_cents
+            * PRICE_UNITS_PER_CENT
+        ))
+
+        urgency_multiplier = 1.0
+        if context.seconds_to_close is not None:
+            if context.seconds_to_close <= 900:
+                urgency_multiplier = 1.25
+            elif context.seconds_to_close <= 3600:
+                urgency_multiplier = 1.0
+            elif context.seconds_to_close <= 6 * 3600:
+                urgency_multiplier = 0.80
+            else:
+                urgency_multiplier = 0.60
+
+        adjusted_fair_units = raw_fair_yes_units + int(round((order_book_adjust_units + trade_bias_adjust_units) * urgency_multiplier))
+        adjusted_fair_units = max(self.market.price_grid.minimum_valid_price_units, min(self.market.price_grid.maximum_valid_price_units, adjusted_fair_units))
+        adjusted_fair_units = self.market.price_grid.floor_to_valid(adjusted_fair_units) or adjusted_fair_units
+
+        if self.last_fair_yes_units is not None:
+            adjusted_fair_units = int(round((0.60 * self.last_fair_yes_units) + (0.40 * adjusted_fair_units)))
+            adjusted_fair_units = max(self.market.price_grid.minimum_valid_price_units, min(self.market.price_grid.maximum_valid_price_units, adjusted_fair_units))
+            adjusted_fair_units = self.market.price_grid.floor_to_valid(adjusted_fair_units) or adjusted_fair_units
+
+        if update_state:
+            self.last_fair_yes_units = adjusted_fair_units
+
+        return FairValueEstimate(
+            fair_yes_units=int(adjusted_fair_units),
+            fair_no_units=int(ONE_DOLLAR_PRICE_UNITS - adjusted_fair_units),
+            raw_fair_yes_units=int(raw_fair_yes_units),
+            mid_yes_units=int(context.mid_yes_units),
+            ticker_anchor_yes_units=context.ticker_price_units,
+            trade_anchor_yes_units=context.last_trade_yes_units,
+            order_book_adjust_units=int(order_book_adjust_units),
+            trade_bias_adjust_units=int(trade_bias_adjust_units),
+        )
+
+
+class ToxicityModel:
+    def __init__(self, settings: BotSettings, telemetry_store: TelemetryStore) -> None:
+        self.settings = settings
+        self.telemetry_store = telemetry_store
+        self.stats: Dict[Tuple[int, str], ToxicityStat] = {}
+
+    def bootstrap_from_telemetry(self, *, limit: int = 5000) -> None:
+        for row in self.telemetry_store.load_recent_markouts(limit=limit):
+            bucket_key = row["bucket_key"]
+            horizon_ms = row["horizon_ms"]
+            adverse_units = row["adverse_units"]
+            if not bucket_key or adverse_units is None or horizon_ms is None:
+                continue
+            self._update_bucket(horizon_ms=int(horizon_ms), bucket_key=str(bucket_key), adverse_units=int(adverse_units))
+
+    def _update_bucket(self, *, horizon_ms: int, bucket_key: str, adverse_units: int) -> None:
+        key = (int(horizon_ms), bucket_key)
+        stat = self.stats.get(key)
+        if stat is None:
+            stat = ToxicityStat(observations=1, ewma_adverse_units=float(adverse_units))
+            self.stats[key] = stat
+            return
+        stat.observations += 1
+        stat.ewma_adverse_units = (0.85 * stat.ewma_adverse_units) + (0.15 * float(adverse_units))
+
+    def time_to_close_bucket(self, seconds_to_close: Optional[float]) -> str:
+        if seconds_to_close is None:
+            return "na"
+        if seconds_to_close <= 900:
+            return "lt15m"
+        if seconds_to_close <= 3600:
+            return "15m_1h"
+        if seconds_to_close <= 14_400:
+            return "1h_4h"
+        return "gt4h"
+
+    def imbalance_bucket(self, imbalance: float) -> str:
+        if imbalance <= -0.33:
+            return "ask_heavy"
+        if imbalance >= 0.33:
+            return "bid_heavy"
+        return "balanced"
+
+    def trade_bias_bucket(self, trade_bias: float) -> str:
+        if trade_bias <= -0.33:
+            return "sell_pressure"
+        if trade_bias >= 0.33:
+            return "buy_pressure"
+        return "mixed_flow"
+
+    def queue_bucket(self, queue_ahead_units: Optional[int]) -> str:
+        if queue_ahead_units is None:
+            return "unknown"
+        contracts = queue_ahead_units / COUNT_SCALE
+        if contracts <= 0:
+            return "front"
+        if contracts <= 10:
+            return "lt10"
+        if contracts <= 100:
+            return "10_100"
+        return "gt100"
+
+    def spread_bucket(self, spread_units: int) -> str:
+        spread_cents = spread_units / PRICE_UNITS_PER_CENT
+        if spread_cents <= 2:
+            return "tight"
+        if spread_cents <= 5:
+            return "medium"
+        return "wide"
+
+    def inventory_regime_bucket(self, *, side: str, context: MarketContext) -> str:
+        reducing_inventory = (
+            (context.inventory_units > 0 and side == "no")
+            or (context.inventory_units < 0 and side == "yes")
+        )
+        return "reduce" if reducing_inventory else "normal"
+
+    def bucket_key(self, *, side: str, context: MarketContext) -> str:
+        parts = [
+            side,
+            self.time_to_close_bucket(context.seconds_to_close),
+            self.imbalance_bucket(context.order_book_imbalance),
+            self.trade_bias_bucket(context.trade_bias),
+            self.queue_bucket(context.queue_ahead_units_for_side(side)),
+            self.spread_bucket(context.spread_units_for_side(side)),
+            self.inventory_regime_bucket(side=side, context=context),
+        ]
+        return "|".join(parts)
+
+    def record_markout(self, *, side: str, context: MarketContext, horizon_ms: int, adverse_units: int) -> str:
+        bucket_key = self.bucket_key(side=side, context=context)
+        self._update_bucket(horizon_ms=horizon_ms, bucket_key=bucket_key, adverse_units=adverse_units)
+        return bucket_key
+
+    def estimate_markout_per_contract_units(self, *, side: str, context: MarketContext) -> int:
+        bucket_key = self.bucket_key(side=side, context=context)
+        weighted_total = 0.0
+        weight_sum = 0.0
+
+        for horizon_ms, weight in ((5_000, 0.70), (30_000, 0.30)):
+            stat = self.stats.get((horizon_ms, bucket_key))
+            if stat and stat.observations > 0:
+                weighted_total += stat.ewma_adverse_units * weight
+                weight_sum += weight
+
+        if weight_sum > 0:
+            estimated_units = weighted_total / weight_sum
+        else:
+            estimated_units = float(cents_to_price_units(self.settings.default_toxicity_cents))
+
+        adverse_trade_flow = max(0.0, -context.trade_bias) if side == "yes" else max(0.0, context.trade_bias)
+        adverse_imbalance = max(0.0, -context.order_book_imbalance) if side == "yes" else max(0.0, context.order_book_imbalance)
+
+        estimated_units += adverse_trade_flow * PRICE_UNITS_PER_CENT * 2.0
+        estimated_units += adverse_imbalance * PRICE_UNITS_PER_CENT * 1.0
+
+        return max(0, int(round(estimated_units)))
+
+    def estimate_per_contract_units(self, *, side: str, context: MarketContext) -> int:
+        return self.estimate_markout_per_contract_units(side=side, context=context)
+
+
+class FillProbabilityModel:
+    def __init__(self, settings: BotSettings, telemetry_store: TelemetryStore, toxicity_model: ToxicityModel) -> None:
+        self.settings = settings
+        self.telemetry_store = telemetry_store
+        self.toxicity_model = toxicity_model
+        self.stats: Dict[str, FillProbStat] = {}
+        self.pending_by_side: Dict[str, Optional[PendingFillAttempt]] = {
+            "yes": None,
+            "no": None,
+        }
+
+    def bootstrap_from_telemetry(self, *, limit: int = 10000) -> None:
+        self.stats.clear()
+        for row in self.telemetry_store.load_recent_fill_prob_attempts(limit=limit):
+            bucket_key = row["bucket_key"]
+            filled_30s = row["filled_30s"]
+            if not bucket_key:
+                continue
+            self._update_bucket(bucket_key=str(bucket_key), filled_30s=bool(filled_30s))
+
+    def _update_bucket(self, *, bucket_key: str, filled_30s: bool) -> None:
+        stat = self.stats.get(bucket_key)
+        if stat is None:
+            stat = FillProbStat()
+            self.stats[bucket_key] = stat
+        stat.attempts += 1
+        if filled_30s:
+            stat.fills_30s += 1
+
+    def estimate_fill_probability_30s(self, *, bucket_key: str) -> float:
+        stat = self.stats.get(bucket_key)
+        attempts = stat.attempts if stat is not None else 0
+        fills = stat.fills_30s if stat is not None else 0
+
+        alpha = float(self.settings.fill_probability_prior_fills)
+        beta = float(self.settings.fill_probability_prior_misses)
+        probability = (fills + alpha) / (attempts + alpha + beta)
+
+        return max(0.01, min(0.99, probability))
+
+    def settle_expired_attempts(self, *, ticker: str, current_ts_ms: int) -> None:
+        for side in ("yes", "no"):
+            attempt = self.pending_by_side.get(side)
+            if attempt is None or attempt.settled:
+                continue
+            if current_ts_ms < attempt.expiry_ts_ms:
+                continue
+
+            self._finalize_attempt(
+                ticker=ticker,
+                attempt=attempt,
+                filled_30s=attempt.filled_within_horizon,
+            )
+            self.pending_by_side[side] = None
+
+    def observe_quote_decision(
+        self,
+        *,
+        ticker: str,
+        side: str,
+        decision: SideQuoteDecision,
+        bucket_key: str,
+        ts_ms: int,
+    ) -> None:
+        self.settle_expired_attempts(ticker=ticker, current_ts_ms=ts_ms)
+
+        current_attempt = self.pending_by_side.get(side)
+
+        if decision.price_units is None or decision.target_size_units <= 0:
+            if current_attempt is not None and not current_attempt.settled:
+                self._finalize_attempt(
+                    ticker=ticker,
+                    attempt=current_attempt,
+                    filled_30s=current_attempt.filled_within_horizon,
+                )
+                self.pending_by_side[side] = None
+            return
+
+        if current_attempt is not None and not current_attempt.settled:
+            same_attempt = (
+                current_attempt.quote_price_units == decision.price_units
+                and current_attempt.bucket_key == bucket_key
+                and ts_ms < current_attempt.expiry_ts_ms
+            )
+            if same_attempt:
+                return
+
+            self._finalize_attempt(
+                ticker=ticker,
+                attempt=current_attempt,
+                filled_30s=current_attempt.filled_within_horizon,
+            )
+            self.pending_by_side[side] = None
+
+        horizon_ms = int(self.settings.fill_probability_horizon_seconds) * 1000
+        self.pending_by_side[side] = PendingFillAttempt(
+            attempt_id=f"{side}:{ts_ms}:{decision.price_units}",
+            side=side,
+            bucket_key=bucket_key,
+            quote_price_units=int(decision.price_units),
+            started_ts_ms=int(ts_ms),
+            expiry_ts_ms=int(ts_ms + horizon_ms),
+        )
+
+    def register_fill(self, *, side: str, ts_ms: int) -> None:
+        attempt = self.pending_by_side.get(side)
+        if attempt is None or attempt.settled:
+            return
+        if ts_ms <= attempt.expiry_ts_ms:
+            attempt.filled_within_horizon = True
+
+    def _finalize_attempt(self, *, ticker: str, attempt: PendingFillAttempt, filled_30s: bool) -> None:
+        if attempt.settled:
+            return
+        attempt.settled = True
+        self._update_bucket(bucket_key=attempt.bucket_key, filled_30s=filled_30s)
+        self.telemetry_store.record_fill_prob_attempt(
+            attempt_id=attempt.attempt_id,
+            ts_ms=attempt.started_ts_ms,
+            ticker=ticker,
+            side=attempt.side,
+            bucket_key=attempt.bucket_key,
+            quote_price_units=attempt.quote_price_units,
+            filled_30s=filled_30s,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1258,25 +2293,46 @@ class TopOfBookBot:
 
         self.book_yes: Dict[int, int] = {}
         self.book_no: Dict[int, int] = {}
+        self.ticker_state: Optional[TickerState] = None
+        self.recent_trades: Deque[PublicTradeTick] = deque(maxlen=2_000)
+        self.seen_fill_keys: set[str] = set()
+        self.last_quote_decisions: Dict[str, SideQuoteDecision] = {
+            "yes": SideQuoteDecision(side="yes", price_units=None, target_size_units=0, mode="startup"),
+            "no": SideQuoteDecision(side="no", price_units=None, target_size_units=0, mode="startup"),
+        }
+        self.known_strategy_order_sides: Dict[str, str] = {}
+        safe_ticker = self.settings.market_ticker.replace("/", "_").replace("\\", "_")
+        telemetry_path = self.settings.telemetry_sqlite_path or os.path.join(os.getcwd(), f"telemetry_{safe_ticker}.sqlite3")
+        self.telemetry_store = TelemetryStore(telemetry_path, enabled=self.settings.enable_sqlite_telemetry)
+        self.fee_model = FeeModel(self.api_client, self.market, self.settings, self.telemetry_store)
+        self.incentive_model = IncentiveModel(self.api_client, self.market)
+        self.fair_value_engine = FairValueEngine(self.market, self.settings)
+        self.toxicity_model = ToxicityModel(self.settings, self.telemetry_store)
+        self.fill_probability_model = FillProbabilityModel(
+            self.settings,
+            self.telemetry_store,
+            self.toxicity_model,
+        )
 
         self.book_ready = False
         self.last_orderbook_sequence: Optional[int] = None
         self.last_fill_timestamp_ms = 0
         self.last_requote_action_timestamp_ms = 0
         self.market_wide_queue_cooldown_until_ms = 0
-        self.market_probability_guard_active = False
-        self.market_probability_guard_clear_candidate_since_ms: Optional[int] = None
+        self.recent_liquidity_pull_events: Dict[str, Deque[Tuple[int, int]]] = {
+            "yes": deque(),
+            "no": deque(),
+        }
+        self.side_liquidity_pull_cooldown_until_ms: Dict[str, int] = {
+            "yes": 0,
+            "no": 0,
+        }
+        self.market_wide_toxicity_cooldown_until_ms = 0
+        self.last_market_probability_guard_state: Optional[bool] = None
         self.last_market_queue_cooldown_logged_state: Optional[bool] = None
-        self.directional_unwind_side: Optional[str] = None
-        self.toxicity_market_pause_until_ms = 0
-        self.toxicity_side_pause_until_ms = {"yes": 0, "no": 0}
-        self.recent_toxicity_liquidity_removals = collections.deque()
-        self.force_immediate_requote_once = False
+        self.last_market_state_log_ms = 0
 
         self.net_position_units = 0
-        self.exchange_confirmed_position_units = 0
-        self.last_exchange_position_update_ms = 0
-        self.accounted_fill_units_by_order_key: Dict[str, int] = {}
 
         self.orders: Dict[str, ManagedOrderState] = {
             "yes": ManagedOrderState(side="yes"),
@@ -1300,30 +2356,17 @@ class TopOfBookBot:
             return False
         return client_order_id.startswith(self.settings.legacy_client_order_prefixes)
 
-    def reconcile_net_position_from_exchange(self, exchange_position_units: int, *, source: str) -> None:
-        exchange_position_units = int(exchange_position_units)
-        if exchange_position_units != self.net_position_units:
-            log_event(
-                "POSITION_RECONCILED",
-                source=source,
-                previous_contracts=format_count_fp(self.net_position_units),
-                live_contracts=format_count_fp(exchange_position_units),
-            )
-        self.net_position_units = exchange_position_units
-        self.exchange_confirmed_position_units = exchange_position_units
-        self.last_exchange_position_update_ms = now_ms()
-
     def load_startup_position(self) -> None:
         response = self.api_client.get_positions(self.settings.market_ticker)
         market_positions = response.get("market_positions") or []
         if not market_positions:
-            self.reconcile_net_position_from_exchange(0, source="startup_rest")
+            self.net_position_units = 0
             log_event("STARTUP_POSITION", contracts="0.00")
             return
 
         position_payload = market_positions[0]
         position_units = parse_optional_count_units(position_payload, "position_fp", "position")
-        self.reconcile_net_position_from_exchange(int(position_units or 0), source="startup_rest")
+        self.net_position_units = int(position_units or 0)
         log_event("STARTUP_POSITION", contracts=format_count_fp(self.net_position_units))
 
     def cancel_owned_resting_quotes_on_startup(self) -> None:
@@ -1388,6 +2431,332 @@ class TopOfBookBot:
     def implied_no_ask(self, best_yes_bid_units: int) -> int:
         return ONE_DOLLAR_PRICE_UNITS - int(best_yes_bid_units)
 
+    def best_bid_size_units(self, side: str) -> int:
+        best_price_units = self.best_bid(side)
+        if best_price_units is None:
+            return 0
+        levels = self.book_yes if side == "yes" else self.book_no
+        return int(levels.get(best_price_units, 0) or 0)
+
+    def displayed_size_units_at_price(self, side: str, price_units: Optional[int]) -> int:
+        if price_units is None:
+            return 0
+        levels = self.book_yes if side == "yes" else self.book_no
+        return int(levels.get(price_units, 0) or 0)
+
+    def displayed_size_units_excluding_our_order(self, side: str, price_units: Optional[int]) -> int:
+        if price_units is None:
+            return 0
+        displayed_units = self.displayed_size_units_at_price(side, price_units)
+        state = self.orders[side]
+        if state.has_active_resting_order and state.price_units == price_units:
+            displayed_units -= state.remaining_count_units
+        return max(0, displayed_units)
+
+    def best_bid_and_size_excluding_our_order(self, side: str) -> Tuple[Optional[int], int]:
+        price_units = self.best_bid_excluding_our_order(side)
+        if price_units is None:
+            return None, 0
+        return price_units, self.displayed_size_units_excluding_our_order(side, price_units)
+
+    def order_book_imbalance_excluding_our_quotes(self) -> float:
+        _, yes_best_size_units = self.best_bid_and_size_excluding_our_order("yes")
+        if self.ticker_state is not None and self.ticker_state.yes_ask_size_units is not None:
+            yes_ask_size_units = int(self.ticker_state.yes_ask_size_units)
+        else:
+            yes_ask_size_units = self.best_bid_size_units("no")
+
+        denominator = yes_best_size_units + max(0, yes_ask_size_units)
+        if denominator <= 0:
+            return 0.0
+        return (yes_best_size_units - max(0, yes_ask_size_units)) / denominator
+
+    def projected_queue_ahead_units_for_price(self, side: str, price_units: Optional[int]) -> Optional[int]:
+        if price_units is None:
+            return None
+        state = self.orders[side]
+        if state.has_active_resting_order and state.price_units == price_units and state.last_queue_position_units is not None:
+            return int(state.last_queue_position_units)
+        return self.displayed_size_units_at_price(side, price_units)
+
+    def top_price_levels(self, side: str, level_count: Optional[int] = None) -> List[Tuple[int, int]]:
+        levels = self.book_yes if side == "yes" else self.book_no
+        if not levels:
+            return []
+        requested_level_count = int(level_count or self.settings.orderbook_pull_top_levels_to_track)
+        if requested_level_count <= 0:
+            return []
+        top_prices = sorted(levels.keys(), reverse=True)[:requested_level_count]
+        return [(price_units, int(levels.get(price_units, 0) or 0)) for price_units in top_prices]
+
+    def current_top_depth_units(self, side: str, *, level_count: Optional[int] = None) -> int:
+        return sum(size_units for _, size_units in self.top_price_levels(side, level_count=level_count))
+
+    def prune_recent_liquidity_pull_events(self) -> None:
+        if self.settings.orderbook_pull_window_ms <= 0:
+            for events in self.recent_liquidity_pull_events.values():
+                events.clear()
+            return
+        cutoff_ms = now_ms() - self.settings.orderbook_pull_window_ms
+        for events in self.recent_liquidity_pull_events.values():
+            while events and events[0][0] < cutoff_ms:
+                events.popleft()
+
+    def current_liquidity_pull_score(self, side: str) -> float:
+        if not self.settings.enable_orderbook_pull_toxicity_guard:
+            return 0.0
+        self.prune_recent_liquidity_pull_events()
+        aggregate_removed_units = float(sum(weighted_removed_units for _, weighted_removed_units in self.recent_liquidity_pull_events[side]))
+        top_depth_units = max(0, self.current_top_depth_units(side))
+        absolute_threshold_units = contracts_to_count_units(self.settings.orderbook_pull_absolute_threshold_contracts)
+        relative_threshold_units = int(round(top_depth_units * float(self.settings.orderbook_pull_relative_depth_threshold)))
+        threshold_units = max(absolute_threshold_units, relative_threshold_units, COUNT_SCALE)
+        return max(0.0, aggregate_removed_units / float(threshold_units))
+
+    def side_liquidity_pull_cooldown_active(self, side: str) -> bool:
+        return now_ms() < int(self.side_liquidity_pull_cooldown_until_ms.get(side, 0))
+
+    def market_toxicity_cooldown_active(self) -> bool:
+        return now_ms() < int(self.market_wide_toxicity_cooldown_until_ms)
+
+    def observe_orderbook_toxicity_from_delta(self, delta_message: dict) -> None:
+        if not self.settings.enable_orderbook_pull_toxicity_guard:
+            return
+
+        side = str(delta_message.get("side") or "")
+        if side not in {"yes", "no"}:
+            return
+
+        delta_units = parse_optional_count_units(delta_message, "delta_fp", "delta")
+        price_units = parse_optional_price_units(delta_message, "price_dollars", "price")
+        if delta_units is None or price_units is None or delta_units >= 0:
+            return
+
+        top_levels = self.top_price_levels(side, level_count=self.settings.orderbook_pull_top_levels_to_track)
+        if not top_levels:
+            return
+
+        level_distance = None
+        visible_top_depth_units = 0
+        for index, (level_price_units, size_units) in enumerate(top_levels):
+            visible_top_depth_units += size_units
+            if level_price_units == price_units:
+                level_distance = index
+
+        if level_distance is None:
+            return
+
+        weighted_removed_units = int(round(abs(delta_units) / float(1 + level_distance)))
+        event_timestamp_ms = normalize_exchange_timestamp_to_ms(delta_message.get("ts"))
+        self.recent_liquidity_pull_events[side].append((event_timestamp_ms, weighted_removed_units))
+        self.prune_recent_liquidity_pull_events()
+
+        absolute_threshold_units = contracts_to_count_units(self.settings.orderbook_pull_absolute_threshold_contracts)
+        relative_threshold_units = int(round(visible_top_depth_units * float(self.settings.orderbook_pull_relative_depth_threshold)))
+        threshold_units = max(absolute_threshold_units, relative_threshold_units, COUNT_SCALE)
+        aggregate_removed_units = int(sum(value for _, value in self.recent_liquidity_pull_events[side]))
+        if aggregate_removed_units < threshold_units:
+            return
+
+        side_cooldown_until_ms = event_timestamp_ms + int(self.settings.orderbook_pull_side_cooldown_ms)
+        if side_cooldown_until_ms > self.side_liquidity_pull_cooldown_until_ms[side]:
+            self.side_liquidity_pull_cooldown_until_ms[side] = side_cooldown_until_ms
+            log_event(
+                "ORDERBOOK_PULL_TOXICITY",
+                side=side,
+                removed_contracts=format_count_fp(aggregate_removed_units),
+                threshold_contracts=format_count_fp(threshold_units),
+                cooldown_ms=self.settings.orderbook_pull_side_cooldown_ms,
+                level_distance=level_distance,
+            )
+
+        opposite_side = "no" if side == "yes" else "yes"
+        if self.side_liquidity_pull_cooldown_active(opposite_side):
+            self.market_wide_toxicity_cooldown_until_ms = max(
+                self.market_wide_toxicity_cooldown_until_ms,
+                event_timestamp_ms + int(self.settings.orderbook_pull_market_cooldown_ms),
+            )
+
+    def side_reduces_inventory_risk(self, side: str) -> bool:
+        return (self.net_position_units > 0 and side == "no") or (self.net_position_units < 0 and side == "yes")
+
+    def prune_recent_trades(self) -> None:
+        cutoff_ms = now_ms() - (self.settings.trade_history_window_seconds * 1000)
+        while self.recent_trades and self.recent_trades[0].ts_ms < cutoff_ms:
+            self.recent_trades.popleft()
+
+    def latest_public_trade(self) -> Optional[PublicTradeTick]:
+        self.prune_recent_trades()
+        if not self.recent_trades:
+            return None
+        return self.recent_trades[-1]
+
+    def seconds_to_close(self) -> Optional[float]:
+        if self.market.close_time_ms is None:
+            return None
+        return max(0.0, (self.market.close_time_ms - now_ms()) / 1000.0)
+
+    def refresh_external_models(self) -> None:
+        self.fee_model.refresh_from_api()
+        self.incentive_model.refresh_from_api()
+        self.toxicity_model.bootstrap_from_telemetry(limit=5_000)
+        self.fill_probability_model.bootstrap_from_telemetry(limit=10_000)
+
+    def build_market_context(self) -> Optional[MarketContext]:
+        best_yes_bid_units = self.best_bid("yes")
+        best_no_bid_units = self.best_bid("no")
+        if best_yes_bid_units is None or best_no_bid_units is None:
+            return None
+
+        implied_yes_ask_units = self.implied_yes_ask(best_no_bid_units)
+        implied_no_ask_units = self.implied_no_ask(best_yes_bid_units)
+        self.prune_recent_trades()
+        recent_trades = list(self.recent_trades)
+
+        signed_trade_units = 0
+        trade_momentum_units = 0
+        last_trade_yes_units: Optional[int] = None
+        last_trade_size_units = 0
+        if recent_trades:
+            last_trade_yes_units = recent_trades[-1].yes_price_units
+            last_trade_size_units = recent_trades[-1].count_units
+            signed_trade_units = sum(
+                (trade.count_units if trade.taker_side == "yes" else -trade.count_units if trade.taker_side == "no" else 0)
+                for trade in recent_trades
+            )
+            trade_momentum_units = recent_trades[-1].yes_price_units - recent_trades[0].yes_price_units
+
+        total_trade_units = sum(trade.count_units for trade in recent_trades)
+        trade_bias = (signed_trade_units / total_trade_units) if total_trade_units > 0 else 0.0
+
+        best_yes_bid_size_units = self.best_bid_size_units("yes")
+        best_no_bid_size_units = self.best_bid_size_units("no")
+        ticker_yes_ask_size_units = None
+        if self.ticker_state is not None:
+            ticker_yes_ask_size_units = self.ticker_state.yes_ask_size_units
+        if ticker_yes_ask_size_units is None:
+            ticker_yes_ask_size_units = best_no_bid_size_units
+
+        denominator = best_yes_bid_size_units + max(0, int(ticker_yes_ask_size_units or 0))
+        order_book_imbalance = 0.0
+        if denominator > 0:
+            order_book_imbalance = (best_yes_bid_size_units - int(ticker_yes_ask_size_units or 0)) / denominator
+
+        return MarketContext(
+            ts_ms=now_ms(),
+            best_yes_bid_units=best_yes_bid_units,
+            best_no_bid_units=best_no_bid_units,
+            implied_yes_ask_units=implied_yes_ask_units,
+            implied_no_ask_units=implied_no_ask_units,
+            best_yes_bid_size_units=best_yes_bid_size_units,
+            best_no_bid_size_units=best_no_bid_size_units,
+            ticker_price_units=(self.ticker_state.price_units if self.ticker_state is not None else None),
+            ticker_yes_bid_units=(self.ticker_state.yes_bid_units if self.ticker_state is not None else None),
+            ticker_yes_ask_units=(self.ticker_state.yes_ask_units if self.ticker_state is not None else None),
+            ticker_yes_bid_size_units=(self.ticker_state.yes_bid_size_units if self.ticker_state is not None else None),
+            ticker_yes_ask_size_units=ticker_yes_ask_size_units,
+            last_trade_yes_units=last_trade_yes_units,
+            last_trade_size_units=last_trade_size_units,
+            trade_bias=float(max(-1.0, min(1.0, trade_bias))),
+            trade_momentum_units=int(trade_momentum_units),
+            order_book_imbalance=float(max(-1.0, min(1.0, order_book_imbalance))),
+            inventory_units=int(self.net_position_units),
+            queue_ahead_yes_units=self.orders["yes"].last_queue_position_units,
+            queue_ahead_no_units=self.orders["no"].last_queue_position_units,
+            seconds_to_close=self.seconds_to_close(),
+        )
+    def build_signal_market_context(self, live_context: MarketContext) -> MarketContext:
+        signal_yes_bid_units, signal_yes_bid_size_units = self.best_bid_and_size_excluding_our_order("yes")
+        signal_no_bid_units, signal_no_bid_size_units = self.best_bid_and_size_excluding_our_order("no")
+
+        if signal_yes_bid_units is None:
+            signal_yes_bid_units = live_context.best_yes_bid_units
+            signal_yes_bid_size_units = live_context.best_yes_bid_size_units
+
+        if signal_no_bid_units is None:
+            signal_no_bid_units = live_context.best_no_bid_units
+            signal_no_bid_size_units = live_context.best_no_bid_size_units
+
+        signal_implied_yes_ask_units = self.implied_yes_ask(signal_no_bid_units)
+        signal_implied_no_ask_units = self.implied_no_ask(signal_yes_bid_units)
+
+        signal_imbalance = 0.0
+        denominator = signal_yes_bid_size_units + max(0, signal_no_bid_size_units)
+        if denominator > 0:
+            signal_imbalance = (signal_yes_bid_size_units - signal_no_bid_size_units) / denominator
+
+        return MarketContext(
+            ts_ms=live_context.ts_ms,
+            best_yes_bid_units=signal_yes_bid_units,
+            best_no_bid_units=signal_no_bid_units,
+            implied_yes_ask_units=signal_implied_yes_ask_units,
+            implied_no_ask_units=signal_implied_no_ask_units,
+            best_yes_bid_size_units=signal_yes_bid_size_units,
+            best_no_bid_size_units=signal_no_bid_size_units,
+            ticker_price_units=live_context.ticker_price_units,
+            ticker_yes_bid_units=live_context.ticker_yes_bid_units,
+            ticker_yes_ask_units=live_context.ticker_yes_ask_units,
+            ticker_yes_bid_size_units=live_context.ticker_yes_bid_size_units,
+            ticker_yes_ask_size_units=signal_no_bid_size_units,
+            last_trade_yes_units=live_context.last_trade_yes_units,
+            last_trade_size_units=live_context.last_trade_size_units,
+            trade_bias=live_context.trade_bias,
+            trade_momentum_units=live_context.trade_momentum_units,
+            order_book_imbalance=max(-1.0, min(1.0, signal_imbalance)),
+            inventory_units=live_context.inventory_units,
+            queue_ahead_yes_units=live_context.queue_ahead_yes_units,
+            queue_ahead_no_units=live_context.queue_ahead_no_units,
+            seconds_to_close=live_context.seconds_to_close,
+        )
+    def maybe_record_market_state(self, *, source: str, context: Optional[MarketContext]) -> None:
+        if context is None:
+            return
+        if context.ts_ms - self.last_market_state_log_ms < 1_000 and source == "orderbook":
+            return
+        self.last_market_state_log_ms = context.ts_ms
+        self.telemetry_store.record_market_state(
+            ts_ms=context.ts_ms,
+            ticker=self.market.ticker,
+            source=source,
+            context=context,
+        )
+
+    def log_quote_decision_transition(self, side: str, decision: SideQuoteDecision, context: MarketContext) -> None:
+        live_best_units = self.best_bid(side)
+        live_best_size_units = self.best_bid_size_units(side)
+        exself_best_units, exself_best_size_units = self.best_bid_and_size_excluding_our_order(side)
+        state = self.orders[side]
+
+        log_event(
+            "QUOTE_DECISION",
+            side=side,
+            mode=decision.mode,
+            reason=(decision.reason or decision.mode),
+            quote_c=("none" if decision.price_units is None else f"{decision.price_units / PRICE_UNITS_PER_CENT:.2f}"),
+            fair_yes_c=("none" if decision.fair_yes_units is None else f"{decision.fair_yes_units / PRICE_UNITS_PER_CENT:.2f}"),
+            fair_side_c=("none" if decision.fair_side_units is None else f"{decision.fair_side_units / PRICE_UNITS_PER_CENT:.2f}"),
+            edge_c=f"{decision.expected_edge_units / PRICE_UNITS_PER_CENT:.2f}",
+            fee_c=f"{decision.estimated_fee_units / PRICE_UNITS_PER_CENT:.2f}",
+            tox_c=f"{decision.estimated_toxicity_units / PRICE_UNITS_PER_CENT:.2f}",
+            pfill30=f"{decision.estimated_fill_probability_30s:.3f}",
+            markout_c=f"{decision.estimated_markout_units / PRICE_UNITS_PER_CENT:.2f}",
+            score_hr_c=f"{decision.score_per_hour_units / PRICE_UNITS_PER_CENT:.2f}",
+            bucket=(decision.bucket_key or "na"),
+            qpen_c=f"{decision.queue_penalty_units / PRICE_UNITS_PER_CENT:.2f}",
+            live_best_c=("none" if live_best_units is None else f"{live_best_units / PRICE_UNITS_PER_CENT:.2f}"),
+            live_best_sz=format_count_fp(live_best_size_units),
+            exself_best_c=("none" if exself_best_units is None else f"{exself_best_units / PRICE_UNITS_PER_CENT:.2f}"),
+            exself_best_sz=format_count_fp(exself_best_size_units),
+            live_imbalance=f"{context.order_book_imbalance:.3f}",
+            exself_imbalance=f"{self.order_book_imbalance_excluding_our_quotes():.3f}",
+            active_order_c=("none" if state.price_units is None else f"{state.price_units / PRICE_UNITS_PER_CENT:.2f}"),
+            active_remaining=format_count_fp(state.remaining_count_units),
+            queue_ahead=format_count_fp(state.last_queue_position_units or 0),
+        )
+
+        if decision.candidate_debug:
+            log_event("QUOTE_CANDIDATES", side=side, detail=decision.candidate_debug)
+
     def inventory_blocked_side(self) -> Optional[str]:
         if not self.settings.enable_one_way_inventory_guard:
             return None
@@ -1423,75 +2792,49 @@ class TopOfBookBot:
     def market_queue_cooldown_active(self) -> bool:
         return now_ms() < self.market_wide_queue_cooldown_until_ms
 
-    def market_toxicity_pause_active(self) -> bool:
-        return now_ms() < self.toxicity_market_pause_until_ms
-
-    def side_toxicity_pause_active(self, side: str) -> bool:
-        return now_ms() < self.toxicity_side_pause_until_ms.get(side, 0)
-
-    def toxicity_pause_active_for_side(self, side: str) -> bool:
-        return self.market_toxicity_pause_active() or self.side_toxicity_pause_active(side)
-
-    def maybe_trigger_toxicity_guard_from_delta(
+    def quote_gate_status(
         self,
         *,
         side: str,
-        price_units: int,
-        delta_units: int,
-        best_yes_bid_units_before: Optional[int],
-        best_no_bid_units_before: Optional[int],
-    ) -> bool:
-        if not self.settings.enable_toxicity_guard:
-            return False
-        if delta_units >= 0:
-            return False
+        best_bid_units: int,
+        implied_ask_units: int,
+        market_guard_active: bool = False,
+    ) -> Tuple[bool, str]:
+        reducing_inventory = self.side_reduces_inventory_risk(side)
+        minimum_bid_units = cents_to_price_units(self.settings.minimum_best_bid_cents_required_to_quote)
+        minimum_ask_units = cents_to_price_units(self.settings.minimum_implied_ask_cents_required_to_quote)
+        blocked_side = self.inventory_blocked_side()
 
-        best_bid_units_before = best_yes_bid_units_before if side == "yes" else best_no_bid_units_before
-        if best_bid_units_before is None or price_units > best_bid_units_before:
-            return False
+        if blocked_side == side:
+            return False, "inventory_block"
 
-        tick_distance_from_best = self.market.price_grid.tick_distance(best_bid_units_before, price_units)
-        if tick_distance_from_best >= self.settings.toxicity_top_levels_to_watch:
-            return False
+        if self.settings.suppress_same_side_quotes_during_reentry_cooldown and self.side_same_side_reentry_cooldown_active(side):
+            return False, "same_side_reentry_cooldown"
 
-        current_timestamp_ms = now_ms()
-        removed_units = abs(int(delta_units))
-        self.recent_toxicity_liquidity_removals.append((current_timestamp_ms, side, removed_units))
+        if self.side_queue_abandonment_cooldown_active(side):
+            return False, "queue_abandonment_cooldown"
 
-        cutoff_timestamp_ms = current_timestamp_ms - self.settings.toxicity_detection_window_milliseconds
-        while self.recent_toxicity_liquidity_removals and self.recent_toxicity_liquidity_removals[0][0] < cutoff_timestamp_ms:
-            self.recent_toxicity_liquidity_removals.popleft()
+        if self.side_liquidity_pull_cooldown_active(side) and not reducing_inventory:
+            return False, "side_pull_cooldown"
 
-        removed_units_for_side = sum(
-            entry_removed_units
-            for _, entry_side, entry_removed_units in self.recent_toxicity_liquidity_removals
-            if entry_side == side
-        )
-        threshold_units = contracts_to_count_units(self.settings.toxicity_removed_contracts_threshold)
-        if removed_units_for_side < threshold_units:
-            return False
+        if self.market_queue_cooldown_active() and not reducing_inventory:
+            return False, "market_queue_cooldown"
 
-        pause_until_ms = current_timestamp_ms + self.settings.toxicity_pause_milliseconds
-        already_active = self.market_toxicity_pause_active() if self.settings.toxicity_pause_market_wide else self.side_toxicity_pause_active(side)
+        if self.market_toxicity_cooldown_active() and not reducing_inventory:
+            return False, "market_toxicity_cooldown"
 
-        if self.settings.toxicity_pause_market_wide:
-            self.toxicity_market_pause_until_ms = max(self.toxicity_market_pause_until_ms, pause_until_ms)
+        if not reducing_inventory:
+            if best_bid_units < minimum_bid_units:
+                return False, "best_bid_floor"
+            if implied_ask_units < minimum_ask_units:
+                return False, "implied_ask_floor"
+            if market_guard_active:
+                return False, "market_probability_guard"
         else:
-            self.toxicity_side_pause_until_ms[side] = max(self.toxicity_side_pause_until_ms.get(side, 0), pause_until_ms)
+            if implied_ask_units <= self.market.price_grid.minimum_valid_price_units:
+                return False, "no_exit_liquidity"
 
-        if already_active:
-            return False
-
-        log_event(
-            "TOXICITY_GUARD_TRIGGER",
-            side=side,
-            removed_contracts=format_count_fp(removed_units_for_side),
-            threshold_contracts=self.settings.toxicity_removed_contracts_threshold,
-            pause_ms=self.settings.toxicity_pause_milliseconds,
-            market_wide=self.settings.toxicity_pause_market_wide,
-        )
-        self.force_immediate_requote_once = True
-        return True
+        return True, "ok"
 
     def quote_allowed_for_side(
         self,
@@ -1499,31 +2842,14 @@ class TopOfBookBot:
         side: str,
         best_bid_units: int,
         implied_ask_units: int,
+        market_guard_active: bool = False,
     ) -> bool:
-        minimum_bid_units = cents_to_price_units(self.settings.minimum_best_bid_cents_required_to_quote)
-        minimum_ask_units = cents_to_price_units(self.settings.minimum_implied_ask_cents_required_to_quote)
-        blocked_side = self.inventory_blocked_side()
-
-        allowed = (
-            best_bid_units >= minimum_bid_units
-            and implied_ask_units >= minimum_ask_units
-            and blocked_side != side
+        allowed, _ = self.quote_gate_status(
+            side=side,
+            best_bid_units=best_bid_units,
+            implied_ask_units=implied_ask_units,
+            market_guard_active=market_guard_active,
         )
-
-        if self.net_position_units > 0 and side == "no" and blocked_side != "no":
-            allowed = True
-        elif self.net_position_units < 0 and side == "yes" and blocked_side != "yes":
-            allowed = True
-
-        if self.settings.suppress_same_side_quotes_during_reentry_cooldown and self.side_same_side_reentry_cooldown_active(side):
-            allowed = False
-        if self.side_queue_abandonment_cooldown_active(side):
-            allowed = False
-        if self.market_queue_cooldown_active():
-            allowed = False
-        if self.toxicity_pause_active_for_side(side):
-            allowed = False
-
         return allowed
 
     def cap_bid_below_implied_ask(self, implied_ask_units: int) -> Optional[int]:
@@ -1660,133 +2986,24 @@ class TopOfBookBot:
         return self.market.price_grid.move_price_by_ticks(base_price_units, +skew_ticks)
 
     def maybe_market_probability_guard_triggered(self, *, best_yes_bid_units: int, best_no_bid_units: int) -> bool:
-        disable_cents = self.settings.minimum_market_best_bid_cents_required_to_disable_quotes
-        reenable_cents = self.settings.minimum_market_best_bid_cents_required_to_reenable_quotes
-        minimum_bid_units = min(best_yes_bid_units, best_no_bid_units)
-        minimum_bid_cents = minimum_bid_units // PRICE_UNITS_PER_CENT
-        now_timestamp_ms = now_ms()
-
-        if not self.market_probability_guard_active:
-            if disable_cents > 0 and minimum_bid_cents < disable_cents:
-                self.market_probability_guard_active = True
-                self.market_probability_guard_clear_candidate_since_ms = None
+        threshold_cents = self.settings.minimum_market_best_bid_cents_required_to_quote_any_side
+        if threshold_cents <= 0:
+            guard_active = False
         else:
-            if minimum_bid_cents >= reenable_cents:
-                if self.market_probability_guard_clear_candidate_since_ms is None:
-                    self.market_probability_guard_clear_candidate_since_ms = now_timestamp_ms
-                elif now_timestamp_ms - self.market_probability_guard_clear_candidate_since_ms >= int(self.settings.market_probability_reenable_dwell_seconds * 1000):
-                    self.market_probability_guard_active = False
-                    self.market_probability_guard_clear_candidate_since_ms = None
-            else:
-                self.market_probability_guard_clear_candidate_since_ms = None
+            threshold_units = cents_to_price_units(threshold_cents)
+            guard_active = best_yes_bid_units < threshold_units or best_no_bid_units < threshold_units
 
-        log_active = getattr(self, "_last_logged_market_probability_guard_active", None)
-        if self.market_probability_guard_active != log_active:
+        if guard_active != self.last_market_probability_guard_state:
             log_event(
                 "MARKET_PROBABILITY_GUARD",
-                active=self.market_probability_guard_active,
+                active=guard_active,
                 best_yes_bid_cents=best_yes_bid_units // PRICE_UNITS_PER_CENT,
                 best_no_bid_cents=best_no_bid_units // PRICE_UNITS_PER_CENT,
-                disable_threshold_cents=disable_cents,
-                reenable_threshold_cents=reenable_cents,
-                reenable_dwell_seconds=self.settings.market_probability_reenable_dwell_seconds,
+                threshold_cents=threshold_cents,
             )
-            self._last_logged_market_probability_guard_active = self.market_probability_guard_active
+            self.last_market_probability_guard_state = guard_active
 
-        return self.market_probability_guard_active
-
-    def price_change_is_large_enough_to_reprice(
-        self,
-        *,
-        side: str,
-        current_price_units: int,
-        target_price_units: int,
-    ) -> bool:
-        if current_price_units == target_price_units:
-            return False
-        minimum_ticks = self.settings.minimum_price_change_ticks_required_to_reprice
-        if minimum_ticks <= 0:
-            return True
-
-        state = self.orders[side]
-        queue_force_threshold_units = max(
-            contracts_to_count_units(self.settings.queue_position_contracts_ahead_to_force_small_reprice),
-            int(math.ceil(state.remaining_count_units * self.settings.queue_position_multiple_of_our_remaining_size_to_force_small_reprice)),
-        )
-        if state.last_queue_position_units is not None and state.last_queue_position_units >= queue_force_threshold_units:
-            return True
-
-        tick_distance = self.market.price_grid.tick_distance(current_price_units, target_price_units)
-        return tick_distance >= minimum_ticks
-
-    def current_directional_unwind_side(self) -> Optional[str]:
-        if not self.settings.enable_directional_inventory_unwind:
-            self.directional_unwind_side = None
-            return None
-
-        trigger_units = contracts_to_count_units(self.settings.maximum_unpaired_contracts_per_market)
-        resume_units = contracts_to_count_units(self.settings.directional_inventory_unwind_resume_contracts)
-        current_unwind_side = self.directional_unwind_side
-
-        if current_unwind_side == "yes":
-            if self.net_position_units <= resume_units:
-                current_unwind_side = None
-        elif current_unwind_side == "no":
-            if self.net_position_units >= -resume_units:
-                current_unwind_side = None
-
-        if current_unwind_side is None:
-            if self.net_position_units >= trigger_units:
-                current_unwind_side = "yes"
-            elif self.net_position_units <= -trigger_units:
-                current_unwind_side = "no"
-
-        if current_unwind_side != self.directional_unwind_side:
-            log_event(
-                "DIRECTIONAL_UNWIND_MODE",
-                active=bool(current_unwind_side),
-                side=(current_unwind_side or "none"),
-                net_position_contracts=format_count_fp(self.net_position_units),
-                trigger_contracts=self.settings.maximum_unpaired_contracts_per_market,
-                resume_contracts=self.settings.directional_inventory_unwind_resume_contracts,
-            )
-            self.directional_unwind_side = current_unwind_side
-
-        return self.directional_unwind_side
-
-    def directional_unwind_remaining_units(self, side: str) -> int:
-        resume_units = contracts_to_count_units(self.settings.directional_inventory_unwind_resume_contracts)
-        if side == "yes" and self.net_position_units > resume_units:
-            return self.net_position_units - resume_units
-        if side == "no" and self.net_position_units < -resume_units:
-            return abs(self.net_position_units) - resume_units
-        return 0
-
-    def directional_unwind_price_units(self, side: str) -> Optional[int]:
-        best_side_bid_units = self.best_bid(side)
-        opposite_best_bid_units = self.best_bid("no" if side == "yes" else "yes")
-        if best_side_bid_units is None or opposite_best_bid_units is None:
-            return None
-
-        implied_side_ask_units = (
-            self.implied_yes_ask(opposite_best_bid_units)
-            if side == "yes"
-            else self.implied_no_ask(opposite_best_bid_units)
-        )
-        if implied_side_ask_units <= best_side_bid_units:
-            return None
-
-        midpoint_units = (best_side_bid_units + implied_side_ask_units) // 2
-        target_units = self.market.price_grid.ceil_to_valid(midpoint_units)
-        if target_units is None or target_units <= best_side_bid_units:
-            target_units = self.market.price_grid.next_price(best_side_bid_units)
-        if target_units is None:
-            return None
-        if target_units > implied_side_ask_units:
-            target_units = self.market.price_grid.floor_to_valid(implied_side_ask_units)
-        if target_units is None or target_units <= best_side_bid_units:
-            return None
-        return target_units
+        return guard_active
 
     def maybe_log_market_queue_cooldown(self) -> None:
         active = self.market_queue_cooldown_active()
@@ -1798,11 +3015,22 @@ class TopOfBookBot:
             )
             self.last_market_queue_cooldown_logged_state = active
 
-    def final_quote_meets_side_floor(self, desired_price_units: Optional[int]) -> bool:
+    def final_quote_meets_side_floor(self, side: str, desired_price_units: Optional[int]) -> bool:
         if desired_price_units is None:
             return False
+        if self.side_reduces_inventory_risk(side):
+            return desired_price_units >= self.market.price_grid.minimum_valid_price_units
         minimum_bid_units = cents_to_price_units(self.settings.minimum_best_bid_cents_required_to_quote)
         return desired_price_units >= minimum_bid_units
+
+    def should_skip_small_upward_reprice(self, current_price_units: int, target_price_units: int) -> bool:
+        if target_price_units <= current_price_units:
+            return False
+        minimum_ticks = self.settings.minimum_upward_reprice_ticks_required
+        if minimum_ticks <= 0:
+            return False
+        tick_distance = self.market.price_grid.tick_distance(current_price_units, target_price_units)
+        return tick_distance < minimum_ticks
 
     def compute_side_desired_quote_price(
         self,
@@ -1843,70 +3071,417 @@ class TopOfBookBot:
         if current_price_units > maximum_bid_units:
             return maximum_bid_units
 
-        if not self.price_change_is_large_enough_to_reprice(
-            side=side,
-            current_price_units=current_price_units,
-            target_price_units=target_units,
-        ):
+        if target_units < current_price_units:
+            return target_units
+        if target_units > current_price_units and self.should_skip_small_upward_reprice(current_price_units, target_units):
             return current_price_units
         return target_units
 
-    def desired_quote_prices(self) -> Tuple[Optional[int], Optional[int]]:
-        best_yes_bid_units = self.best_bid("yes")
-        best_no_bid_units = self.best_bid("no")
-        if best_yes_bid_units is None or best_no_bid_units is None:
-            return None, None
-
-        market_probability_guard_active = self.maybe_market_probability_guard_triggered(
-            best_yes_bid_units=best_yes_bid_units,
-            best_no_bid_units=best_no_bid_units,
+    def estimate_inventory_penalty_units(self, *, side: str, context: MarketContext) -> int:
+        if self.side_reduces_inventory_risk(side):
+            return 0
+        inventory_contracts = abs(context.inventory_units) / COUNT_SCALE
+        if inventory_contracts <= 0:
+            return 0
+        penalty_ticks = min(
+            float(self.settings.maximum_inventory_skew_ticks),
+            inventory_contracts / max(1.0, float(self.settings.inventory_skew_contracts_per_tick)),
         )
-        if market_probability_guard_active and (
-            self.net_position_units == 0
-            or not self.settings.allow_inventory_exit_side_while_market_probability_guard_is_active
-        ):
-            return None, None
+        return int(round(penalty_ticks * self.market.price_grid.minimum_step_units))
 
+    def estimate_queue_penalty_units(
+        self,
+        *,
+        side: str,
+        context: MarketContext,
+        queue_ahead_units: Optional[int] = None,
+    ) -> int:
+        queue_units = context.queue_ahead_units_for_side(side) if queue_ahead_units is None else queue_ahead_units
+        if queue_units is None or queue_units <= 0:
+            return 0
+        queue_contracts = queue_units / COUNT_SCALE
+        queue_penalty_cents = min(6.0, queue_contracts / 30.0)
+        return int(round(queue_penalty_cents * PRICE_UNITS_PER_CENT))
+
+    def queue_abandonment_threshold_for_size_units(self, target_size_units: int) -> int:
+        candidate_thresholds: List[int] = []
+        absolute_limit_units = contracts_to_count_units(self.settings.maximum_queue_ahead_contracts_before_abandonment)
+        if absolute_limit_units > 0:
+            candidate_thresholds.append(int(absolute_limit_units))
+        if target_size_units > 0 and self.settings.maximum_queue_ahead_multiple_of_our_remaining_size > 0:
+            relative_limit_units = int(math.ceil(target_size_units * self.settings.maximum_queue_ahead_multiple_of_our_remaining_size))
+            if relative_limit_units > 0:
+                candidate_thresholds.append(relative_limit_units)
+        if not candidate_thresholds:
+            return 0
+        return min(candidate_thresholds)
+
+    def should_block_projected_queue_entry(
+        self,
+        *,
+        projected_queue_ahead_units: Optional[int],
+        target_size_units: int,
+        reducing_inventory: bool,
+    ) -> bool:
+        if reducing_inventory:
+            return False
+        if projected_queue_ahead_units is None or projected_queue_ahead_units <= 0:
+            return False
+        threshold_units = self.queue_abandonment_threshold_for_size_units(target_size_units)
+        if threshold_units <= 0:
+            return False
+        return projected_queue_ahead_units > threshold_units
+
+    def ev_adjusted_order_size_units(
+        self,
+        *,
+        side: str,
+        price_units: int,
+        expected_edge_units: int,
+        queue_penalty_units: int,
+        reducing_inventory: bool,
+    ) -> int:
+        if price_units <= 0:
+            return 0
+
+        base_budget_cents = self.target_budget_cents_for_side(side)
+        if base_budget_cents <= 0:
+            return 0
+
+        minimum_fraction = self.settings.quote_size_min_fraction_of_budget
+        maximum_fraction = self.settings.quote_size_max_fraction_of_budget
+        edge_cents = expected_edge_units / PRICE_UNITS_PER_CENT
+
+        if reducing_inventory and edge_cents < 0:
+            negative_tolerance = max(1.0, float(self.settings.inventory_reduction_max_negative_edge_cents))
+            fraction = minimum_fraction + (1.0 - minimum_fraction) * max(0.0, 1.0 - min(1.0, abs(edge_cents) / negative_tolerance))
+        else:
+            strength = max(0.0, min(1.0, edge_cents / max(1.0, float(self.settings.strong_edge_threshold_cents))))
+            fraction = minimum_fraction + (maximum_fraction - minimum_fraction) * strength
+            if expected_edge_units <= 0 and not reducing_inventory:
+                fraction = 0.0
+
+        if queue_penalty_units > 0:
+            queue_penalty_scale = max(0.35, 1.0 - (queue_penalty_units / max(PRICE_UNITS_PER_CENT, cents_to_price_units(5))))
+            fraction *= queue_penalty_scale
+
+        dynamic_budget_cents = int(round(base_budget_cents * fraction))
+        if dynamic_budget_cents <= 0:
+            return 0
+
+        budget_money_units = dynamic_budget_cents * PRICE_UNITS_PER_CENT
+        quantity_units = (budget_money_units * COUNT_SCALE) // price_units
+        maximum_count_units = contracts_to_count_units(self.settings.maximum_contracts_per_order)
+        quantity_units = min(quantity_units, maximum_count_units)
+        if quantity_units <= 0:
+            return 0
+
+        if self.market.fractional_trading_enabled and self.settings.allow_fractional_order_entry_when_supported:
+            return int(quantity_units)
+        return int((quantity_units // COUNT_SCALE) * COUNT_SCALE)
+
+    def build_side_quote_decision(
+        self,
+        *,
+        side: str,
+        context: MarketContext,
+        fair_value: FairValueEstimate,
+        market_target_units: Optional[int],
+        maximum_bid_units: int,
+        side_quote_allowed: bool,
+        gate_reason: str = "ok",
+    ) -> SideQuoteDecision:
+        fair_side_units = fair_value.fair_for_side(side)
+        reducing_inventory = self.side_reduces_inventory_risk(side)
+        inventory_penalty_units = self.estimate_inventory_penalty_units(side=side, context=context)
+        pull_toxicity_penalty_units = int(round(
+            self.current_liquidity_pull_score(side) * cents_to_price_units(self.settings.orderbook_pull_penalty_cents)
+        ))
+        expected_markout_units = (
+            self.toxicity_model.estimate_markout_per_contract_units(side=side, context=context)
+            + pull_toxicity_penalty_units
+        )
+        current_queue_units = context.queue_ahead_units_for_side(side)
+        current_queue_penalty_units = self.estimate_queue_penalty_units(
+            side=side,
+            context=context,
+            queue_ahead_units=current_queue_units,
+        )
+        minimum_edge_units = cents_to_price_units(self.settings.minimum_expected_edge_cents_to_quote)
+        minimum_inventory_edge_units = -cents_to_price_units(self.settings.inventory_reduction_max_negative_edge_cents)
+        candidate_debug: List[str] = []
+
+        if not side_quote_allowed or market_target_units is None:
+            mode = ("inventory_hold" if reducing_inventory else "disabled")
+            return SideQuoteDecision(
+                side=side,
+                price_units=None,
+                target_size_units=0,
+                mode=mode,
+                fair_yes_units=fair_value.fair_yes_units,
+                fair_side_units=fair_side_units,
+                projected_queue_ahead_units=current_queue_units,
+                estimated_toxicity_units=expected_markout_units,
+                estimated_markout_units=expected_markout_units,
+                inventory_penalty_units=inventory_penalty_units,
+                queue_penalty_units=current_queue_penalty_units,
+                reason=(gate_reason or mode),
+                candidate_debug="",
+                bucket_key=self.toxicity_model.bucket_key(side=side, context=context),
+            )
+
+        provisional_size_units = max(
+            COUNT_SCALE,
+            self.budget_based_order_size_units(side, max(PRICE_UNITS_PER_CENT, market_target_units)),
+        )
+        live_best_bid_units = self.best_bid(side) or market_target_units
+
+        initial_tick_distance_from_best = (
+            max(0, self.market.price_grid.tick_distance(market_target_units, live_best_bid_units))
+            if market_target_units < live_best_bid_units
+            else 0
+        )
+        rough_incentive_units = self.incentive_model.estimate_incentive_per_contract_units(
+            quote_price_units=market_target_units,
+            size_units=provisional_size_units,
+            tick_distance_from_best=initial_tick_distance_from_best,
+        )
+        rough_fee_units = self.fee_model.estimate_fee_per_contract_units(price_units=market_target_units)
+        reservation_units = (
+            fair_side_units
+            - rough_fee_units
+            - expected_markout_units
+            - inventory_penalty_units
+            - current_queue_penalty_units
+            + rough_incentive_units
+            - minimum_edge_units
+        )
+        reservation_units = min(maximum_bid_units, reservation_units)
+        reservation_units = max(self.market.price_grid.minimum_valid_price_units, reservation_units)
+        reservation_units = self.market.price_grid.floor_to_valid(reservation_units) or reservation_units
+
+        best_candidate: Optional[dict] = None
+        candidate_price_units = market_target_units
+        skipped_for_queue = False
+
+        for _ in range(max(1, int(self.settings.candidate_price_levels_to_scan))):
+            if candidate_price_units is None or candidate_price_units > maximum_bid_units:
+                break
+
+            projected_queue_units = self.projected_queue_ahead_units_for_price(side, candidate_price_units)
+            tick_distance_from_best = (
+                max(0, self.market.price_grid.tick_distance(candidate_price_units, live_best_bid_units))
+                if candidate_price_units < live_best_bid_units
+                else 0
+            )
+            incentive_units = self.incentive_model.estimate_incentive_per_contract_units(
+                quote_price_units=candidate_price_units,
+                size_units=provisional_size_units,
+                tick_distance_from_best=tick_distance_from_best,
+            )
+            fee_units = self.fee_model.estimate_fee_per_contract_units(price_units=candidate_price_units)
+            queue_penalty_units = self.estimate_queue_penalty_units(
+                side=side,
+                context=context,
+                queue_ahead_units=projected_queue_units,
+            )
+
+            bucket_key = self.toxicity_model.bucket_key(side=side, context=context)
+            fill_probability_30s = self.fill_probability_model.estimate_fill_probability_30s(
+                bucket_key=bucket_key
+            )
+
+            expected_edge_units = (
+                fair_side_units
+                - candidate_price_units
+                - fee_units
+                - expected_markout_units
+                - inventory_penalty_units
+                - queue_penalty_units
+                + incentive_units
+            )
+
+            score_per_hour_units = (
+                float(fill_probability_30s)
+                * float(expected_edge_units)
+                * (3600.0 / max(1, int(self.settings.fill_probability_horizon_seconds)))
+            )
+
+            current_state = self.orders[side]
+            keep_edge_units = cents_to_price_units(self.settings.minimum_expected_edge_cents_to_keep_quote)
+
+            is_keep_candidate = (
+                current_state.has_active_resting_order
+                and current_state.price_units == candidate_price_units
+            )
+
+            required_edge_units = (
+                minimum_inventory_edge_units
+                if reducing_inventory
+                else (keep_edge_units if is_keep_candidate else minimum_edge_units)
+            )
+
+            edge_allowed = expected_edge_units >= required_edge_units
+
+            candidate_target_size_units = 0
+            candidate_status = "edge_fail"
+
+            if edge_allowed:
+                candidate_target_size_units = self.ev_adjusted_order_size_units(
+                    side=side,
+                    price_units=candidate_price_units,
+                    expected_edge_units=expected_edge_units,
+                    queue_penalty_units=queue_penalty_units,
+                    reducing_inventory=reducing_inventory,
+                )
+                if candidate_target_size_units <= 0:
+                    candidate_status = "size_zero"
+                elif self.should_block_projected_queue_entry(
+                    projected_queue_ahead_units=projected_queue_units,
+                    target_size_units=candidate_target_size_units,
+                    reducing_inventory=reducing_inventory,
+                ):
+                    skipped_for_queue = True
+                    candidate_status = "queue_block"
+                else:
+                    candidate_status = "ok"
+
+            candidate_debug.append(
+                "p={:.2f}|edge={:.2f}|pfill30={:.3f}|mkout={:.2f}|fee={:.2f}|qpen={:.2f}|score_hr={:.2f}|queue={:.2f}|size={:.2f}|status={}".format(
+                    candidate_price_units / PRICE_UNITS_PER_CENT,
+                    expected_edge_units / PRICE_UNITS_PER_CENT,
+                    fill_probability_30s,
+                    expected_markout_units / PRICE_UNITS_PER_CENT,
+                    fee_units / PRICE_UNITS_PER_CENT,
+                    queue_penalty_units / PRICE_UNITS_PER_CENT,
+                    score_per_hour_units / PRICE_UNITS_PER_CENT,
+                    0.0 if projected_queue_units is None else projected_queue_units / COUNT_SCALE,
+                    candidate_target_size_units / COUNT_SCALE,
+                    candidate_status,
+                )
+            )
+
+            if not edge_allowed:
+                candidate_price_units = self.market.price_grid.next_price(candidate_price_units)
+                continue
+
+            if candidate_target_size_units <= 0:
+                candidate_price_units = self.market.price_grid.next_price(candidate_price_units)
+                continue
+
+            if candidate_status == "queue_block":
+                candidate_price_units = self.market.price_grid.next_price(candidate_price_units)
+                continue
+
+            candidate = {
+                "price_units": candidate_price_units,
+                "target_size_units": candidate_target_size_units,
+                "projected_queue_units": projected_queue_units,
+                "fee_units": fee_units,
+                "queue_penalty_units": queue_penalty_units,
+                "incentive_units": incentive_units,
+                "expected_edge_units": expected_edge_units,
+                "expected_markout_units": expected_markout_units,
+                "fill_probability_30s": fill_probability_30s,
+                "score_per_hour_units": score_per_hour_units,
+                "bucket_key": bucket_key,
+            }
+            if best_candidate is None or candidate["score_per_hour_units"] > best_candidate["score_per_hour_units"]:
+                best_candidate = candidate
+
+            candidate_price_units = self.market.price_grid.next_price(candidate_price_units)
+
+        if best_candidate is None:
+            mode = "queue_too_deep" if skipped_for_queue and not reducing_inventory else ("inventory_wait" if reducing_inventory else "negative_ev")
+            return SideQuoteDecision(
+                side=side,
+                price_units=None,
+                target_size_units=0,
+                mode=mode,
+                fair_yes_units=fair_value.fair_yes_units,
+                fair_side_units=fair_side_units,
+                reservation_units=reservation_units,
+                market_target_units=market_target_units,
+                projected_queue_ahead_units=current_queue_units,
+                estimated_fee_units=rough_fee_units,
+                estimated_toxicity_units=expected_markout_units,
+                estimated_incentive_units=rough_incentive_units,
+                estimated_markout_units=expected_markout_units,
+                inventory_penalty_units=inventory_penalty_units,
+                queue_penalty_units=current_queue_penalty_units,
+                reason=mode,
+                candidate_debug="; ".join(candidate_debug),
+                bucket_key=self.toxicity_model.bucket_key(side=side, context=context),
+            )
+
+        mode = "inventory_reduction" if reducing_inventory and best_candidate["expected_edge_units"] < minimum_edge_units else "ev_quote"
+        return SideQuoteDecision(
+            side=side,
+            price_units=best_candidate["price_units"],
+            target_size_units=best_candidate["target_size_units"],
+            mode=mode,
+            fair_yes_units=fair_value.fair_yes_units,
+            fair_side_units=fair_side_units,
+            reservation_units=reservation_units,
+            market_target_units=market_target_units,
+            projected_queue_ahead_units=best_candidate["projected_queue_units"],
+            expected_edge_units=best_candidate["expected_edge_units"],
+            estimated_fee_units=best_candidate["fee_units"],
+            estimated_toxicity_units=expected_markout_units,
+            estimated_incentive_units=best_candidate["incentive_units"],
+            estimated_fill_probability_30s=best_candidate["fill_probability_30s"],
+            estimated_markout_units=best_candidate["expected_markout_units"],
+            score_per_hour_units=best_candidate["score_per_hour_units"],
+            bucket_key=best_candidate["bucket_key"],
+            inventory_penalty_units=inventory_penalty_units,
+            queue_penalty_units=best_candidate["queue_penalty_units"],
+            reason=mode,
+            candidate_debug="; ".join(candidate_debug),
+        )
+
+    def compute_quote_decisions(self) -> Dict[str, SideQuoteDecision]:
+        context = self.build_market_context()
+        if context is None:
+            return {
+                "yes": SideQuoteDecision(side="yes", price_units=None, target_size_units=0, mode="no_book"),
+                "no": SideQuoteDecision(side="no", price_units=None, target_size_units=0, mode="no_book"),
+            }
+
+        self.maybe_record_market_state(source="orderbook", context=context)
+        market_guard_active = self.maybe_market_probability_guard_triggered(
+            best_yes_bid_units=context.best_yes_bid_units,
+            best_no_bid_units=context.best_no_bid_units,
+        )
         self.maybe_log_market_queue_cooldown()
-        if self.market_queue_cooldown_active():
-            return None, None
 
-        implied_yes_ask_units = self.implied_yes_ask(best_no_bid_units)
-        implied_no_ask_units = self.implied_no_ask(best_yes_bid_units)
-
-        maximum_yes_bid_units = self.cap_bid_below_implied_ask(implied_yes_ask_units)
-        maximum_no_bid_units = self.cap_bid_below_implied_ask(implied_no_ask_units)
+        maximum_yes_bid_units = self.cap_bid_below_implied_ask(context.implied_yes_ask_units)
+        maximum_no_bid_units = self.cap_bid_below_implied_ask(context.implied_no_ask_units)
         if maximum_yes_bid_units is None or maximum_no_bid_units is None:
-            return None, None
+            return {
+                "yes": SideQuoteDecision(side="yes", price_units=None, target_size_units=0, mode="no_valid_cap"),
+                "no": SideQuoteDecision(side="no", price_units=None, target_size_units=0, mode="no_valid_cap"),
+            }
 
-        yes_quote_allowed = self.quote_allowed_for_side(
+        yes_quote_allowed, yes_gate_reason = self.quote_gate_status(
             side="yes",
-            best_bid_units=best_yes_bid_units,
-            implied_ask_units=implied_yes_ask_units,
+            best_bid_units=context.best_yes_bid_units,
+            implied_ask_units=context.implied_yes_ask_units,
+            market_guard_active=market_guard_active,
         )
-        no_quote_allowed = self.quote_allowed_for_side(
+        no_quote_allowed, no_gate_reason = self.quote_gate_status(
             side="no",
-            best_bid_units=best_no_bid_units,
-            implied_ask_units=implied_no_ask_units,
+            best_bid_units=context.best_no_bid_units,
+            implied_ask_units=context.implied_no_ask_units,
+            market_guard_active=market_guard_active,
         )
-
-        if market_probability_guard_active and self.settings.allow_inventory_exit_side_while_market_probability_guard_is_active:
-            if self.net_position_units > 0:
-                yes_quote_allowed = False
-            elif self.net_position_units < 0:
-                no_quote_allowed = False
-            else:
-                yes_quote_allowed = False
-                no_quote_allowed = False
 
         allow_aggressive_improvement = (
             self.settings.aggressive_improvement_ticks_when_spread_is_wide > 0
             and not self.post_fill_improvement_cooldown_active()
         )
-
         if allow_aggressive_improvement:
             tick_counter = 0
-            candidate_price_units = best_yes_bid_units
+            candidate_price_units = context.best_yes_bid_units
             while True:
                 candidate_price_units = self.market.price_grid.next_price(candidate_price_units) if candidate_price_units is not None else None
                 if candidate_price_units is None or candidate_price_units > maximum_yes_bid_units:
@@ -1916,72 +3491,89 @@ class TopOfBookBot:
                     break
             allow_aggressive_improvement = tick_counter >= self.settings.minimum_spread_ticks_required_for_aggressive_improvement
 
-        yes_other_best_units = self.best_bid_excluding_our_order("yes")
-        no_other_best_units = self.best_bid_excluding_our_order("no")
-
-        desired_yes_units = self.compute_side_desired_quote_price(
+        signal_context = self.build_signal_market_context(context)
+        fair_value = self.fair_value_engine.estimate(signal_context)
+        yes_market_target_units = self.compute_side_desired_quote_price(
             side="yes",
             side_quote_allowed=yes_quote_allowed,
             maximum_bid_units=maximum_yes_bid_units,
-            other_best_units=yes_other_best_units,
+            other_best_units=self.best_bid_excluding_our_order("yes"),
             allow_aggressive_improvement=allow_aggressive_improvement,
         )
-        desired_no_units = self.compute_side_desired_quote_price(
+        no_market_target_units = self.compute_side_desired_quote_price(
             side="no",
             side_quote_allowed=no_quote_allowed,
             maximum_bid_units=maximum_no_bid_units,
-            other_best_units=no_other_best_units,
+            other_best_units=self.best_bid_excluding_our_order("no"),
             allow_aggressive_improvement=allow_aggressive_improvement,
         )
 
-        if desired_yes_units is not None:
-            desired_yes_units = self.market.price_grid.floor_to_valid(desired_yes_units)
-        if desired_no_units is not None:
-            desired_no_units = self.market.price_grid.floor_to_valid(desired_no_units)
-
-        inventory_skew_ticks = self.current_inventory_skew_ticks()
-        if desired_yes_units is not None:
-            desired_yes_units = self.shift_for_inventory_skew("yes", desired_yes_units, inventory_skew_ticks)
-            desired_yes_units = min(desired_yes_units, maximum_yes_bid_units)
-        if desired_no_units is not None:
-            desired_no_units = self.shift_for_inventory_skew("no", desired_no_units, inventory_skew_ticks)
-            desired_no_units = min(desired_no_units, maximum_no_bid_units)
-
-        if desired_yes_units is not None and desired_no_units is not None:
-            desired_yes_units, desired_no_units = self.clamp_pair_to_avoid_self_cross(desired_yes_units, desired_no_units)
-            desired_yes_units, desired_no_units = self.apply_pair_guard(desired_yes_units, desired_no_units)
-
-        if not self.final_quote_meets_side_floor(desired_yes_units):
-            desired_yes_units = None
-        if not self.final_quote_meets_side_floor(desired_no_units):
-            desired_no_units = None
-
-        return desired_yes_units, desired_no_units
-
-    def desired_order_plans(self) -> Dict[str, DesiredOrderPlan]:
-        unwind_side = self.current_directional_unwind_side()
-        if unwind_side is not None:
-            unwind_price_units = self.directional_unwind_price_units(unwind_side)
-            unwind_remaining_units = self.directional_unwind_remaining_units(unwind_side)
-            plans = {
-                "yes": DesiredOrderPlan(side="yes", action="buy", price_units=None, reset_quote_cycle_when_disabled=True),
-                "no": DesiredOrderPlan(side="no", action="buy", price_units=None, reset_quote_cycle_when_disabled=True),
-            }
-            if unwind_price_units is not None and unwind_remaining_units > 0:
-                plans[unwind_side] = DesiredOrderPlan(
-                    side=unwind_side,
-                    action="sell",
-                    price_units=unwind_price_units,
-                    remaining_count_units_override=unwind_remaining_units,
-                    reset_quote_cycle_when_disabled=True,
-                )
-            return plans
-
-        desired_yes_units, desired_no_units = self.desired_quote_prices()
-        return {
-            "yes": DesiredOrderPlan(side="yes", action="buy", price_units=desired_yes_units, reset_quote_cycle_when_disabled=True),
-            "no": DesiredOrderPlan(side="no", action="buy", price_units=desired_no_units, reset_quote_cycle_when_disabled=True),
+        decisions = {
+            "yes": self.build_side_quote_decision(
+                side="yes",
+                context=context,
+                fair_value=fair_value,
+                market_target_units=yes_market_target_units,
+                maximum_bid_units=maximum_yes_bid_units,
+                side_quote_allowed=yes_quote_allowed,
+                gate_reason=yes_gate_reason,
+            ),
+            "no": self.build_side_quote_decision(
+                side="no",
+                context=context,
+                fair_value=fair_value,
+                market_target_units=no_market_target_units,
+                maximum_bid_units=maximum_no_bid_units,
+                side_quote_allowed=no_quote_allowed,
+                gate_reason=no_gate_reason,
+            ),
         }
+
+        desired_yes_units = decisions["yes"].price_units
+        desired_no_units = decisions["no"].price_units
+        if desired_yes_units is not None and desired_no_units is not None:
+            clamped_yes_units, clamped_no_units = self.clamp_pair_to_avoid_self_cross(desired_yes_units, desired_no_units)
+            clamped_yes_units, clamped_no_units = self.apply_pair_guard(clamped_yes_units, clamped_no_units)
+            decisions["yes"].price_units = clamped_yes_units
+            decisions["no"].price_units = clamped_no_units
+
+        for side in ("yes", "no"):
+            decision = decisions[side]
+            original_price_units = decision.price_units
+
+            if original_price_units is not None and not self.final_quote_meets_side_floor(side, original_price_units):
+                decision.price_units = None
+                decision.target_size_units = 0
+                decision.mode = "below_floor"
+                decision.reason = "below_floor"
+            elif not decision.reason:
+                decision.reason = decision.mode
+
+            self.telemetry_store.record_quote_decision(
+                ts_ms=context.ts_ms,
+                ticker=self.market.ticker,
+                decision=decision,
+                context=context,
+            )
+            self.log_quote_decision_transition(side, decision, context)
+
+        for side in ("yes", "no"):
+            decision = decisions[side]
+            bucket_key = self.toxicity_model.bucket_key(side=side, context=context)
+            self.fill_probability_model.observe_quote_decision(
+                ticker=self.market.ticker,
+                side=side,
+                decision=decision,
+                bucket_key=bucket_key,
+                ts_ms=context.ts_ms,
+            )
+
+        self.last_quote_decisions = decisions
+        return decisions
+
+    def desired_quote_prices(self) -> Tuple[Optional[int], Optional[int]]:
+        decisions = self.compute_quote_decisions()
+        return decisions["yes"].price_units, decisions["no"].price_units
 
     # -------------------------
     # Sizing
@@ -1991,8 +3583,8 @@ class TopOfBookBot:
         return self.settings.yes_order_budget_cents if side == "yes" else self.settings.no_order_budget_cents
 
     def budget_based_order_size_units(self, side: str, price_units: int) -> int:
-        budget_cents = max(0, self.target_budget_cents_for_side(side) - self.settings.budget_fee_buffer_cents)
-        if budget_cents <= 0:
+        budget_cents = max(0, self.target_budget_cents_for_side(side))
+        if budget_cents <= 0 or price_units <= 0:
             return 0
 
         budget_money_units = budget_cents * PRICE_UNITS_PER_CENT
@@ -2009,14 +3601,18 @@ class TopOfBookBot:
         return int(quantity_units)
 
     def desired_cycle_total_fillable_units(self, side: str, price_units: int, quote_cycle_filled_units: int) -> int:
-        budget_size_units = self.budget_based_order_size_units(side, price_units)
-        if budget_size_units <= 0:
+        decision = self.last_quote_decisions.get(side)
+        if decision is not None and decision.price_units == price_units:
+            target_size_units = int(decision.target_size_units)
+        else:
+            target_size_units = self.budget_based_order_size_units(side, price_units)
+        if target_size_units <= 0:
             return 0
 
         if self.settings.refill_resting_size_after_partial_fill:
-            return quote_cycle_filled_units + budget_size_units
+            return quote_cycle_filled_units + target_size_units
 
-        return max(quote_cycle_filled_units, budget_size_units)
+        return max(quote_cycle_filled_units, target_size_units)
 
     def desired_remaining_units(self, side: str, price_units: int, quote_cycle_filled_units: int) -> int:
         desired_cycle_total_units = self.desired_cycle_total_fillable_units(side, price_units, quote_cycle_filled_units)
@@ -2045,7 +3641,7 @@ class TopOfBookBot:
 
     async def cancel_side_quote(self, side: str, *, reason: str, reset_quote_cycle: bool) -> None:
         state = self.orders[side]
-        if not state.has_exchange_resting_order:
+        if not state.has_active_resting_order:
             if reset_quote_cycle:
                 state.quote_cycle_filled_units = 0
             return
@@ -2055,69 +3651,59 @@ class TopOfBookBot:
             state.clear_active_order(preserve_quote_cycle=not reset_quote_cycle)
             return
 
-        if state.cancel_requested:
-            if reset_quote_cycle:
-                state.reset_quote_cycle_on_terminal = True
-            return
+        last_decision = self.last_quote_decisions.get(side)
+        log_event(
+            "CANCEL_DIAG",
+            side=side,
+            reason=reason,
+            order_id=order_id,
+            active_price_c=("none" if state.price_units is None else f"{state.price_units / PRICE_UNITS_PER_CENT:.2f}"),
+            active_remaining=format_count_fp(state.remaining_count_units),
+            last_mode=(last_decision.mode if last_decision else "none"),
+            last_reason=(last_decision.reason if last_decision else "none"),
+            last_edge_c=("none" if last_decision is None else f"{last_decision.expected_edge_units / PRICE_UNITS_PER_CENT:.2f}"),
+            last_fair_side_c=("none" if last_decision is None or last_decision.fair_side_units is None else f"{last_decision.fair_side_units / PRICE_UNITS_PER_CENT:.2f}"),
+        )
 
         try:
             await asyncio.to_thread(self.api_client.cancel_order, order_id=order_id)
-            log_event("CANCEL_REQUESTED", side=side, action=state.action, reason=reason, order_id=order_id)
-            state.mark_cancel_requested(reset_quote_cycle=reset_quote_cycle)
+            log_event("CANCEL_REQUESTED", side=side, reason=reason, order_id=order_id)
         except Exception as exc:
             if is_order_not_found_error(exc):
                 log_event("CANCEL_SKIPPED_ORDER_MISSING", side=side, reason=reason, order_id=order_id)
-                state.clear_active_order(preserve_quote_cycle=not reset_quote_cycle)
             elif is_rate_limit_error(exc):
                 log_event("CANCEL_RATE_LIMITED", side=side, reason=reason, order_id=order_id, error=str(exc))
                 raise
             else:
                 raise
 
-    async def ensure_side_quote(self, side: str, desired_plan: DesiredOrderPlan) -> None:
+        state.clear_active_order(preserve_quote_cycle=not reset_quote_cycle)
+
+    async def ensure_side_quote(self, side: str, desired_price_units: Optional[int]) -> None:
         state = self.orders[side]
 
-        if desired_plan.price_units is None:
-            await self.cancel_side_quote(
-                side,
-                reason="quote_disabled",
-                reset_quote_cycle=desired_plan.reset_quote_cycle_when_disabled,
-            )
+        if desired_price_units is None:
+            last_decision = self.last_quote_decisions.get(side)
+            cancel_reason = "quote_disabled"
+            if last_decision is not None:
+                cancel_reason = last_decision.reason or last_decision.mode or cancel_reason
+
+            await self.cancel_side_quote(side, reason=cancel_reason, reset_quote_cycle=True)
             return
 
-        desired_action = desired_plan.action
-        desired_price_units = desired_plan.price_units
-
-        if state.has_exchange_resting_order and state.action != desired_action:
-            await self.cancel_side_quote(side, reason=f"switch_action_to_{desired_action}", reset_quote_cycle=True)
-            return
-
-        if state.cancel_requested:
-            return
-
-        if desired_plan.remaining_count_units_override is not None:
-            desired_remaining_units = int(desired_plan.remaining_count_units_override)
-        else:
-            desired_remaining_units = self.desired_remaining_units(side, desired_price_units, state.quote_cycle_filled_units)
+        desired_remaining_units = self.desired_remaining_units(side, desired_price_units, state.quote_cycle_filled_units)
         if desired_remaining_units <= 0:
             await self.cancel_side_quote(side, reason="target_size_zero", reset_quote_cycle=True)
             return
 
         if state.has_active_resting_order and self.order_needs_expiration_refresh(state):
             await self.cancel_side_quote(side, reason="refresh_expiring_quote", reset_quote_cycle=False)
-            return
 
         attempt_price_units = desired_price_units
 
         for attempt_index in range(self.settings.maximum_post_only_reprice_attempts):
             state = self.orders[side]
-            if state.cancel_requested:
-                return
-
-            if desired_plan.remaining_count_units_override is not None:
-                desired_remaining_units = int(desired_plan.remaining_count_units_override)
-            else:
-                desired_remaining_units = self.desired_remaining_units(side, attempt_price_units, state.quote_cycle_filled_units)
+            desired_remaining_units = self.desired_remaining_units(side, attempt_price_units, state.quote_cycle_filled_units)
             if desired_remaining_units <= 0:
                 await self.cancel_side_quote(side, reason="target_size_zero", reset_quote_cycle=True)
                 return
@@ -2128,19 +3714,24 @@ class TopOfBookBot:
             if state.has_active_resting_order:
                 price_unchanged = state.price_units == attempt_price_units
                 size_unchanged = current_order_total_fillable_units == desired_current_order_total_fillable_units
-                action_unchanged = state.action == desired_action
-                if price_unchanged and size_unchanged and action_unchanged and not self.order_needs_expiration_refresh(state):
+                size_delta_units = abs(current_order_total_fillable_units - desired_current_order_total_fillable_units)
+                if price_unchanged and size_unchanged and not self.order_needs_expiration_refresh(state):
+                    return
+                if (
+                    price_unchanged
+                    and size_delta_units <= COUNT_SCALE
+                    and not self.order_needs_expiration_refresh(state)
+                ):
                     return
 
             try:
                 if not state.has_active_resting_order:
-                    new_client_order_id = f"{self.settings.primary_client_order_prefix}:{desired_action}:{side}:{uuid.uuid4().hex[:16]}"
+                    new_client_order_id = f"{self.settings.primary_client_order_prefix}:{side}:{uuid.uuid4().hex[:16]}"
                     expiration_ts = self.expiration_timestamp_for_side(side)
                     response = await asyncio.to_thread(
                         self.api_client.create_order,
                         market_ticker=self.settings.market_ticker,
                         side=side,
-                        action=desired_action,
                         price_units=attempt_price_units,
                         count_units=desired_remaining_units,
                         client_order_id=new_client_order_id,
@@ -2148,19 +3739,18 @@ class TopOfBookBot:
                     )
                     order_payload = (response or {}).get("order") or {}
                     state.order_id = order_payload.get("order_id") or (response or {}).get("order_id")
+                    if state.order_id:
+                        self.known_strategy_order_sides[str(state.order_id)] = side
                     state.client_order_id = order_payload.get("client_order_id") or new_client_order_id
-                    state.action = desired_action
                     state.price_units = attempt_price_units
                     state.remaining_count_units = desired_remaining_units
                     state.current_order_filled_units = 0
                     state.status = "resting"
-                    state.cancel_requested = False
-                    state.reset_quote_cycle_on_terminal = False
+                    state.last_queue_position_units = self.displayed_size_units_at_price(side, attempt_price_units)
                     state.expiration_time_ms = parse_iso_utc_timestamp_to_ms(order_payload.get("expiration_time"))
                     log_event(
                         "CREATE_OK",
                         side=side,
-                        action=desired_action,
                         price_dollars=format_price_dollars(attempt_price_units),
                         remaining_contracts=format_count_fp(desired_remaining_units),
                         order_id=state.order_id,
@@ -2171,28 +3761,32 @@ class TopOfBookBot:
                     state.clear_active_order(preserve_quote_cycle=False)
                     continue
 
-                updated_client_order_id = f"{self.settings.primary_client_order_prefix}:{desired_action}:{side}:{uuid.uuid4().hex[:16]}"
+                updated_client_order_id = f"{self.settings.primary_client_order_prefix}:{side}:{uuid.uuid4().hex[:16]}"
                 response = await asyncio.to_thread(
                     self.api_client.amend_order,
                     order_id=state.order_id,
                     market_ticker=self.settings.market_ticker,
                     side=side,
-                    action=desired_action,
                     new_price_units=attempt_price_units,
                     new_total_fillable_count_units=desired_current_order_total_fillable_units,
                     previous_client_order_id=state.client_order_id,
                     updated_client_order_id=updated_client_order_id,
                 )
                 amended_order_payload = (response or {}).get("order") or {}
+                returned_order_id = amended_order_payload.get("order_id") or state.order_id
+                if returned_order_id:
+                    state.order_id = returned_order_id
+                    self.known_strategy_order_sides[str(returned_order_id)] = side
                 state.client_order_id = amended_order_payload.get("client_order_id") or updated_client_order_id
-                state.action = desired_action
+                price_changed = state.price_units != attempt_price_units
                 state.price_units = attempt_price_units
                 state.remaining_count_units = desired_remaining_units
+                if price_changed or state.last_queue_position_units is None:
+                    state.last_queue_position_units = self.displayed_size_units_at_price(side, attempt_price_units)
                 state.expiration_time_ms = parse_iso_utc_timestamp_to_ms(amended_order_payload.get("expiration_time"))
                 log_event(
                     "AMEND_OK",
                     side=side,
-                    action=desired_action,
                     price_dollars=format_price_dollars(attempt_price_units),
                     total_fillable_contracts=format_count_fp(desired_current_order_total_fillable_units),
                     order_id=state.order_id,
@@ -2201,28 +3795,24 @@ class TopOfBookBot:
 
             except Exception as exc:
                 if is_missing_or_non_resting_amend_target(exc):
-                    log_event("STALE_ORDER_RECOVER", side=side, action=state.action, order_id=state.order_id)
+                    log_event("STALE_ORDER_RECOVER", side=side, order_id=state.order_id)
                     state.clear_active_order(preserve_quote_cycle=False)
                     continue
 
                 if is_post_only_cross_error(exc):
-                    if desired_action == "buy":
-                        next_price_units = self.market.price_grid.previous_price(attempt_price_units)
-                    else:
-                        next_price_units = self.market.price_grid.next_price(attempt_price_units)
+                    next_lower_price_units = self.market.price_grid.previous_price(attempt_price_units)
                     log_event(
                         "POST_ONLY_RETRY",
                         side=side,
-                        action=desired_action,
                         attempt=attempt_index + 1,
                         old_price_dollars=format_price_dollars(attempt_price_units),
-                        next_price_dollars=(format_price_dollars(next_price_units) if next_price_units is not None else "none"),
+                        next_price_dollars=(format_price_dollars(next_lower_price_units) if next_lower_price_units is not None else "none"),
                     )
-                    if next_price_units is None:
+                    if next_lower_price_units is None:
                         return
-                    attempt_price_units = next_price_units
+                    attempt_price_units = next_lower_price_units
                     if attempt_index + 1 >= self.settings.maximum_post_only_reprice_attempts:
-                        log_event("POST_ONLY_COOLDOWN", side=side, action=desired_action, seconds=self.settings.post_only_reprice_cooldown_seconds)
+                        log_event("POST_ONLY_COOLDOWN", side=side, seconds=self.settings.post_only_reprice_cooldown_seconds)
                         await asyncio.sleep(self.settings.post_only_reprice_cooldown_seconds)
                     continue
 
@@ -2234,17 +3824,11 @@ class TopOfBookBot:
 
     def queue_abandonment_threshold_units(self, side: str) -> int:
         state = self.orders[side]
-        absolute_limit_units = contracts_to_count_units(self.settings.maximum_queue_ahead_contracts_before_abandonment)
-        relative_limit_units = int(math.ceil(state.remaining_count_units * self.settings.maximum_queue_ahead_multiple_of_our_remaining_size))
-        return max(absolute_limit_units, relative_limit_units)
+        return self.queue_abandonment_threshold_for_size_units(state.remaining_count_units)
 
     async def process_queue_position_update(self, side: str, queue_position_units: Optional[int]) -> None:
         state = self.orders[side]
         if queue_position_units is None or not state.has_active_resting_order:
-            state.consecutive_queue_ahead_breaches = 0
-            return
-
-        if state.action != "buy":
             state.consecutive_queue_ahead_breaches = 0
             return
 
@@ -2342,15 +3926,7 @@ class TopOfBookBot:
         if price_units is None or delta_units is None:
             return
 
-        best_yes_bid_units_before = self.best_bid("yes")
-        best_no_bid_units_before = self.best_bid("no")
-        self.maybe_trigger_toxicity_guard_from_delta(
-            side=side,
-            price_units=price_units,
-            delta_units=delta_units,
-            best_yes_bid_units_before=best_yes_bid_units_before,
-            best_no_bid_units_before=best_no_bid_units_before,
-        )
+        self.observe_orderbook_toxicity_from_delta(delta_message)
 
         levels = self.book_yes if side == "yes" else self.book_no
         levels[price_units] = levels.get(price_units, 0) + delta_units
@@ -2366,53 +3942,222 @@ class TopOfBookBot:
         if position_units is None:
             return
 
-        self.reconcile_net_position_from_exchange(int(position_units), source="market_position_ws")
+        self.net_position_units = int(position_units)
 
-    def apply_fill_delta_to_net_position(self, *, side: str, action: str, fill_delta_units: int) -> None:
-        if action == "buy":
-            if side == "yes":
-                self.net_position_units += fill_delta_units
-            else:
-                self.net_position_units -= fill_delta_units
-        else:
-            if side == "yes":
-                self.net_position_units -= fill_delta_units
-            else:
-                self.net_position_units += fill_delta_units
+    def handle_ticker_update(self, ticker_message: dict) -> None:
+        market_ticker = str(ticker_message.get("market_ticker") or ticker_message.get("ticker") or "")
+        if market_ticker != self.settings.market_ticker:
+            return
 
-    def order_fill_tracking_key(self, *, order_id: Optional[str], client_order_id: str, side: str, action: str) -> Optional[str]:
-        if order_id:
-            return str(order_id)
-        if client_order_id:
-            return f"{action}:{side}:{client_order_id}"
-        return None
+        price_units = parse_optional_price_units(ticker_message, "price_dollars", "price")
+        yes_bid_units = parse_optional_price_units(ticker_message, "yes_bid_dollars", "yes_bid")
+        yes_ask_units = parse_optional_price_units(ticker_message, "yes_ask_dollars", "yes_ask")
+        volume_units = parse_optional_count_units(ticker_message, "volume_fp", "volume")
+        open_interest_units = parse_optional_count_units(ticker_message, "open_interest_fp", "open_interest")
+        yes_bid_size_units = parse_optional_count_units(ticker_message, "yes_bid_size_fp", "yes_bid_size")
+        yes_ask_size_units = parse_optional_count_units(ticker_message, "yes_ask_size_fp", "yes_ask_size")
+        last_trade_size_units = parse_optional_count_units(ticker_message, "last_trade_size_fp", "last_trade_size")
+        ts_ms = normalize_exchange_timestamp_to_ms(ticker_message.get("ts") or ticker_message.get("time"))
 
-    def infer_order_action_from_message(
+        self.ticker_state = TickerState(
+            market_ticker=market_ticker,
+            ts_ms=ts_ms,
+            price_units=price_units,
+            yes_bid_units=yes_bid_units,
+            yes_ask_units=yes_ask_units,
+            volume_units=volume_units,
+            open_interest_units=open_interest_units,
+            yes_bid_size_units=yes_bid_size_units,
+            yes_ask_size_units=yes_ask_size_units,
+            last_trade_size_units=last_trade_size_units,
+        )
+        self.telemetry_store.record_ticker(ticker_state=self.ticker_state)
+        context = self.build_market_context()
+        self.maybe_record_market_state(source="ticker", context=context)
+        self.requote_event.set()
+
+    def handle_trade_update(self, trade_message: dict) -> None:
+        market_ticker = str(trade_message.get("market_ticker") or trade_message.get("ticker") or "")
+        if market_ticker != self.settings.market_ticker:
+            return
+
+        yes_price_units = parse_optional_price_units(trade_message, "yes_price_dollars", "yes_price")
+        no_price_units = parse_optional_price_units(trade_message, "no_price_dollars", "no_price")
+        count_units = parse_optional_count_units(trade_message, "count_fp", "count")
+        if yes_price_units is None and no_price_units is not None:
+            yes_price_units = ONE_DOLLAR_PRICE_UNITS - int(no_price_units)
+        if no_price_units is None and yes_price_units is not None:
+            no_price_units = ONE_DOLLAR_PRICE_UNITS - int(yes_price_units)
+        if yes_price_units is None or no_price_units is None or count_units is None:
+            return
+
+        trade = PublicTradeTick(
+            trade_id=str(trade_message.get("trade_id") or ""),
+            market_ticker=market_ticker,
+            ts_ms=normalize_exchange_timestamp_to_ms(trade_message.get("ts")),
+            yes_price_units=int(yes_price_units),
+            no_price_units=int(no_price_units),
+            count_units=int(count_units),
+            taker_side=str(trade_message.get("taker_side") or ""),
+        )
+        self.recent_trades.append(trade)
+        self.prune_recent_trades()
+        self.telemetry_store.record_public_trade(trade=trade)
+        context = self.build_market_context()
+        self.maybe_record_market_state(source="trade", context=context)
+        self.requote_event.set()
+
+    def schedule_fill_markouts(
         self,
         *,
-        order_message: dict,
-        state: ManagedOrderState,
-        client_order_id: str,
-        incoming_order_id: Optional[str],
-    ) -> str:
-        raw_action = str(order_message.get("action") or "").strip().lower()
-        if raw_action in {"buy", "sell"}:
-            return raw_action
+        fill_key: str,
+        side: str,
+        fill_price_units: int,
+        fill_timestamp_ms: int,
+        fill_context: MarketContext,
+    ) -> None:
+        asyncio.create_task(
+            self.capture_fill_markouts(
+                fill_key=fill_key,
+                side=side,
+                fill_price_units=fill_price_units,
+                fill_timestamp_ms=fill_timestamp_ms,
+                fill_context=fill_context,
+            )
+        )
 
-        client_order_parts = client_order_id.split(":") if client_order_id else []
-        if len(client_order_parts) >= 4 and client_order_parts[1] in {"buy", "sell"}:
-            return client_order_parts[1]
+    async def capture_fill_markouts(
+        self,
+        *,
+        fill_key: str,
+        side: str,
+        fill_price_units: int,
+        fill_timestamp_ms: int,
+        fill_context: MarketContext,
+    ) -> None:
+        for horizon_seconds in self.settings.markout_horizons_seconds:
+            target_timestamp_ms = fill_timestamp_ms + int(horizon_seconds) * 1000
+            sleep_seconds = max(0.0, (target_timestamp_ms - now_ms()) / 1000.0)
+            if sleep_seconds > 0:
+                await asyncio.sleep(sleep_seconds)
 
-        if incoming_order_id and state.order_id and str(incoming_order_id) == str(state.order_id) and state.action in {"buy", "sell"}:
-            return state.action
+            future_context = self.build_market_context()
+            if future_context is None:
+                continue
+            future_fair = self.fair_value_engine.estimate(future_context, update_state=False)
+            if side == "yes":
+                adverse_units = max(0, fill_price_units - future_fair.fair_yes_units)
+            else:
+                adverse_units = max(0, fill_price_units - future_fair.fair_no_units)
+            bucket_key = self.toxicity_model.record_markout(
+                side=side,
+                context=fill_context,
+                horizon_ms=int(horizon_seconds) * 1000,
+                adverse_units=adverse_units,
+            )
+            self.telemetry_store.record_markout(
+                fill_key=fill_key,
+                ts_ms=now_ms(),
+                ticker=self.market.ticker,
+                side=side,
+                horizon_ms=int(horizon_seconds) * 1000,
+                fill_price_units=fill_price_units,
+                future_mid_yes_units=future_context.mid_yes_units,
+                future_fair_yes_units=future_fair.fair_yes_units,
+                adverse_units=adverse_units,
+                bucket_key=bucket_key,
+            )
 
-        if client_order_id and state.client_order_id and client_order_id == state.client_order_id and state.action in {"buy", "sell"}:
-            return state.action
+    def handle_fill_update(self, fill_message: dict) -> None:
+        market_ticker = str(fill_message.get("market_ticker") or fill_message.get("ticker") or "")
+        if market_ticker != self.settings.market_ticker:
+            return
 
-        return "buy"
+        order_id = str(fill_message.get("order_id") or "")
+        if not order_id:
+            return
+        side = self.known_strategy_order_sides.get(order_id)
+        if side not in {"yes", "no"}:
+            return
+
+        trade_id = str(fill_message.get("trade_id") or "")
+        fill_timestamp_ms = normalize_exchange_timestamp_to_ms(fill_message.get("ts"))
+        self.fill_probability_model.register_fill(side=side, ts_ms=fill_timestamp_ms)
+        fill_key = f"{trade_id}:{order_id}:{fill_timestamp_ms}"
+        if fill_key in self.seen_fill_keys:
+            return
+        self.seen_fill_keys.add(fill_key)
+        if len(self.seen_fill_keys) > 20_000:
+            self.seen_fill_keys = set(list(self.seen_fill_keys)[-10_000:])
+
+        count_units = parse_optional_count_units(fill_message, "count_fp", "count")
+        if count_units is None or count_units <= 0:
+            return
+        count_units = int(count_units)
+
+        price_units = (
+            parse_optional_price_units(fill_message, "yes_price_dollars", "yes_price")
+            if side == "yes"
+            else parse_optional_price_units(fill_message, "no_price_dollars", "no_price")
+        )
+        fee_units = parse_optional_price_units(fill_message, "fee_cost", "fee")
+        inventory_before_units = int(self.net_position_units)
+        context_before = self.build_market_context()
+        position_units = parse_optional_count_units(fill_message, "post_position_fp", "post_position")
+        if position_units is not None:
+            self.net_position_units = int(position_units)
+        else:
+            self.net_position_units = int(self.net_position_units + count_units if side == "yes" else self.net_position_units - count_units)
+        inventory_after_units = int(self.net_position_units)
+
+        state = self.orders[side]
+        state.last_positive_fill_timestamp_ms = fill_timestamp_ms
+        state.same_side_reentry_cooldown_until_ms = max(
+            state.same_side_reentry_cooldown_until_ms,
+            fill_timestamp_ms + self.settings.same_side_reentry_cooldown_ms,
+        )
+        self.last_fill_timestamp_ms = fill_timestamp_ms
+
+        if fee_units is not None and price_units is not None:
+            self.fee_model.record_fill_fee(price_units=price_units, count_units=count_units, fee_units=fee_units)
+        self.telemetry_store.record_fill(
+            fill_key=fill_key,
+            ts_ms=fill_timestamp_ms,
+            ticker=self.market.ticker,
+            side=side,
+            trade_id=trade_id,
+            order_id=order_id,
+            price_units=price_units,
+            size_units=count_units,
+            fee_units=fee_units,
+            is_taker=bool(fill_message.get("is_taker")),
+            inventory_before_units=inventory_before_units,
+            inventory_after_units=inventory_after_units,
+            fair_yes_before_units=(self.last_quote_decisions.get(side).fair_yes_units if self.last_quote_decisions.get(side) else None),
+            best_yes_bid_units=(context_before.best_yes_bid_units if context_before is not None else None),
+            best_no_bid_units=(context_before.best_no_bid_units if context_before is not None else None),
+            queue_ahead_units=(context_before.queue_ahead_units_for_side(side) if context_before is not None else None),
+        )
+        log_event(
+            "FILL_TELEMETRY",
+            side=side,
+            fill_contracts=format_count_fp(count_units),
+            fee_dollars=(format_price_dollars(fee_units) if fee_units is not None else "unknown"),
+            net_position_contracts=format_count_fp(self.net_position_units),
+        )
+        if price_units is not None and context_before is not None:
+            self.schedule_fill_markouts(
+                fill_key=fill_key,
+                side=side,
+                fill_price_units=price_units,
+                fill_timestamp_ms=fill_timestamp_ms,
+                fill_context=context_before,
+            )
+        self.requote_event.set()
 
     def handle_user_order_update(self, order_message: dict) -> None:
-        if order_message.get("ticker") != self.settings.market_ticker:
+        market_ticker = order_message.get("ticker") or order_message.get("market_ticker")
+        if market_ticker != self.settings.market_ticker:
             return
 
         side = str(order_message.get("side") or "")
@@ -2429,70 +4174,39 @@ class TopOfBookBot:
         state = self.orders[side]
         incoming_order_id = order_message.get("order_id")
         incoming_status = order_message.get("status")
-        incoming_action = self.infer_order_action_from_message(
-            order_message=order_message,
-            state=state,
-            client_order_id=client_order_id,
-            incoming_order_id=(str(incoming_order_id) if incoming_order_id else None),
-        )
 
-        tracking_key = self.order_fill_tracking_key(
-            order_id=(str(incoming_order_id) if incoming_order_id else None),
-            client_order_id=client_order_id,
-            side=side,
-            action=incoming_action,
-        )
+        if incoming_order_id and state.order_id and incoming_order_id != state.order_id:
+            state.order_id = incoming_order_id
+            state.current_order_filled_units = 0
+            state.remaining_count_units = 0
 
-        message_matches_current_state = False
-        if incoming_order_id and state.order_id and str(incoming_order_id) == str(state.order_id):
-            message_matches_current_state = True
-        elif client_order_id and state.client_order_id and client_order_id == state.client_order_id:
-            message_matches_current_state = True
-        elif state.order_id is None and state.client_order_id is None:
-            message_matches_current_state = True
+        if incoming_order_id:
+            state.order_id = incoming_order_id
+            self.known_strategy_order_sides[str(incoming_order_id)] = side
+        state.client_order_id = client_order_id
+        state.status = incoming_status
 
         fill_units = parse_optional_count_units(order_message, "fill_count_fp", "fill_count")
         if fill_units is not None:
             fill_units = int(fill_units)
-            last_accounted_fill_units = self.accounted_fill_units_by_order_key.get(tracking_key or "", 0)
-            fill_delta_units = fill_units - last_accounted_fill_units
+            fill_delta_units = fill_units - state.current_order_filled_units
             if fill_delta_units > 0:
                 event_timestamp_ms = now_ms()
-                self.accounted_fill_units_by_order_key[tracking_key or ""] = fill_units
-                if incoming_action == "buy" and message_matches_current_state:
-                    state.quote_cycle_filled_units += fill_delta_units
-                    state.same_side_reentry_cooldown_until_ms = max(
-                        state.same_side_reentry_cooldown_until_ms,
-                        event_timestamp_ms + self.settings.same_side_reentry_cooldown_ms,
-                    )
-                    self.last_fill_timestamp_ms = event_timestamp_ms
-                if message_matches_current_state:
-                    state.last_positive_fill_timestamp_ms = event_timestamp_ms
-                self.apply_fill_delta_to_net_position(side=side, action=incoming_action, fill_delta_units=fill_delta_units)
+                state.quote_cycle_filled_units += fill_delta_units
+                state.last_positive_fill_timestamp_ms = event_timestamp_ms
+                state.same_side_reentry_cooldown_until_ms = max(
+                    state.same_side_reentry_cooldown_until_ms,
+                    event_timestamp_ms + self.settings.same_side_reentry_cooldown_ms,
+                )
+                self.last_fill_timestamp_ms = event_timestamp_ms
                 log_event(
                     "FILL_DETECTED",
                     side=side,
-                    action=incoming_action,
                     fill_contracts=format_count_fp(fill_delta_units),
-                    cooldown_ms=(self.settings.same_side_reentry_cooldown_ms if incoming_action == "buy" and message_matches_current_state else 0),
+                    cooldown_ms=self.settings.same_side_reentry_cooldown_ms,
                     net_position_contracts=format_count_fp(self.net_position_units),
                 )
-            else:
-                self.accounted_fill_units_by_order_key[tracking_key or ""] = max(last_accounted_fill_units, fill_units)
-
-        if not message_matches_current_state:
-            self.requote_event.set()
-            return
-
-        if incoming_order_id:
-            state.order_id = str(incoming_order_id)
-        state.client_order_id = client_order_id
-        state.action = incoming_action
-        state.status = incoming_status
-        state.cancel_requested = False if incoming_status == "resting" else state.cancel_requested
-
-        if fill_units is not None:
-            state.current_order_filled_units = int(fill_units)
+            state.current_order_filled_units = fill_units
 
         remaining_units = parse_optional_count_units(order_message, "remaining_count_fp", "remaining_count")
         if remaining_units is not None:
@@ -2511,11 +4225,8 @@ class TopOfBookBot:
             state.expiration_time_ms = expiration_time_ms
 
         if state.status != "resting":
-            preserve_cycle = (
-                state.status == "canceled"
-                and not state.reset_quote_cycle_on_terminal
-            )
-            log_event("ORDER_NOT_RESTING", side=side, action=state.action, status=state.status, order_id=state.order_id)
+            preserve_cycle = state.status == "canceled"
+            log_event("ORDER_NOT_RESTING", side=side, status=state.status, order_id=state.order_id)
             state.clear_active_order(preserve_quote_cycle=preserve_cycle)
 
         self.requote_event.set()
@@ -2532,20 +4243,17 @@ class TopOfBookBot:
             if not self.book_ready:
                 continue
 
-            if self.force_immediate_requote_once:
-                self.force_immediate_requote_once = False
-            else:
-                milliseconds_since_last_requote = now_ms() - self.last_requote_action_timestamp_ms
-                if milliseconds_since_last_requote < self.settings.minimum_milliseconds_between_requotes:
-                    await asyncio.sleep(
-                        (self.settings.minimum_milliseconds_between_requotes - milliseconds_since_last_requote) / 1000.0
-                    )
+            milliseconds_since_last_requote = now_ms() - self.last_requote_action_timestamp_ms
+            if milliseconds_since_last_requote < self.settings.minimum_milliseconds_between_requotes:
+                await asyncio.sleep(
+                    (self.settings.minimum_milliseconds_between_requotes - milliseconds_since_last_requote) / 1000.0
+                )
 
             async with self.requote_lock:
-                desired_plans = self.desired_order_plans()
+                desired_yes_units, desired_no_units = self.desired_quote_prices()
                 try:
-                    await self.ensure_side_quote("yes", desired_plans["yes"])
-                    await self.ensure_side_quote("no", desired_plans["no"])
+                    await self.ensure_side_quote("yes", desired_yes_units)
+                    await self.ensure_side_quote("no", desired_no_units)
                     self.last_requote_action_timestamp_ms = now_ms()
                 except Exception as exc:
                     if is_post_only_cross_error(exc):
@@ -2586,21 +4294,14 @@ class TopOfBookBot:
                 except Exception as exc:
                     log_event("QUEUE_POSITION_ERROR", side=side, order_id=state.order_id, error=str(exc))
 
-    async def position_reconciliation_worker(self) -> None:
-        if not self.settings.enable_periodic_rest_position_reconciliation:
-            return
-
+    async def model_refresh_worker(self) -> None:
+        refresh_interval_seconds = max(60, int(self.settings.model_refresh_interval_seconds))
         while True:
-            await asyncio.sleep(self.settings.position_reconciliation_interval_seconds)
             try:
-                response = await asyncio.to_thread(self.api_client.get_positions, self.settings.market_ticker)
-                market_positions = response.get("market_positions") or []
-                position_payload = market_positions[0] if market_positions else {}
-                position_units = parse_optional_count_units(position_payload, "position_fp", "position")
-                self.reconcile_net_position_from_exchange(int(position_units or 0), source="periodic_rest")
-                self.requote_event.set()
+                await asyncio.to_thread(self.refresh_external_models)
             except Exception as exc:
-                log_event("POSITION_RECONCILE_ERROR", error=str(exc))
+                log_event("MODEL_REFRESH_ERROR", error=str(exc))
+            await asyncio.sleep(refresh_interval_seconds)
 
     async def websocket_main(self) -> None:
         backoff_seconds = 1
@@ -2634,7 +4335,7 @@ class TopOfBookBot:
                             "cmd": "subscribe",
                             "params": {
                                 "channels": ["orderbook_delta"],
-                                "market_ticker": self.settings.market_ticker,
+                                "market_tickers": [self.settings.market_ticker],
                             },
                         },
                         {
@@ -2645,12 +4346,28 @@ class TopOfBookBot:
                                 "market_tickers": [self.settings.market_ticker],
                             },
                         },
+                        {
+                            "id": 3,
+                            "cmd": "subscribe",
+                            "params": {
+                                "channels": ["fill"],
+                                "market_tickers": [self.settings.market_ticker],
+                            },
+                        },
+                        {
+                            "id": 4,
+                            "cmd": "subscribe",
+                            "params": {
+                                "channels": ["trade", "ticker"],
+                                "market_tickers": [self.settings.market_ticker],
+                            },
+                        },
                     ]
 
                     if self.settings.subscribe_to_market_positions_channel:
                         subscriptions.append(
                             {
-                                "id": 3,
+                                "id": 5,
                                 "cmd": "subscribe",
                                 "params": {
                                     "channels": ["market_positions"],
@@ -2691,6 +4408,12 @@ class TopOfBookBot:
                             self.requote_event.set()
                         elif message_type == "user_order":
                             self.handle_user_order_update(data.get("msg", {}))
+                        elif message_type == "fill":
+                            self.handle_fill_update(data.get("msg", {}))
+                        elif message_type == "trade":
+                            self.handle_trade_update(data.get("msg", {}))
+                        elif message_type == "ticker":
+                            self.handle_ticker_update(data.get("msg", {}))
                         elif message_type == "market_position":
                             self.handle_market_position_update(data.get("msg", {}))
                             self.requote_event.set()
@@ -2717,15 +4440,15 @@ class TopOfBookBot:
             expiration_seconds=self.settings.resting_order_expiration_seconds,
             same_side_reentry_cooldown_ms=self.settings.same_side_reentry_cooldown_ms,
             queue_guard=self.settings.enable_queue_abandonment_guard,
-            directional_cap_contracts=self.settings.maximum_unpaired_contracts_per_market,
         )
 
         self.load_startup_position()
         self.cancel_owned_resting_quotes_on_startup()
+        await asyncio.to_thread(self.refresh_external_models)
 
         asyncio.create_task(self.requote_worker())
         asyncio.create_task(self.queue_position_worker())
-        asyncio.create_task(self.position_reconciliation_worker())
+        asyncio.create_task(self.model_refresh_worker())
 
         await self.websocket_main()
 
@@ -2739,8 +4462,29 @@ def load_market_metadata(api_client: KalshiApiClient, market_ticker: str) -> Mar
     market_payload = api_client.get_market(market_ticker)
     price_grid = PriceGrid.from_market_response(market_payload)
 
+    series_ticker = str(
+        market_payload.get("series_ticker")
+        or market_payload.get("series")
+        or market_payload.get("series_name")
+        or market_ticker
+    )
+    event_ticker = str(
+        market_payload.get("event_ticker")
+        or market_payload.get("event")
+        or market_payload.get("event_name")
+        or market_ticker
+    )
+    close_time_ms = None
+    for key in ("close_time", "close_date", "expiration_time", "expiration_date", "settlement_time"):
+        close_time_ms = parse_iso_utc_timestamp_to_ms(market_payload.get(key))
+        if close_time_ms is not None:
+            break
+
     return MarketMetadata(
         ticker=str(market_payload.get("ticker") or market_ticker),
+        series_ticker=series_ticker,
+        event_ticker=event_ticker,
+        close_time_ms=close_time_ms,
         title=str(market_payload.get("title") or ""),
         status=str(market_payload.get("status") or ""),
         price_level_structure=str(market_payload.get("price_level_structure") or ""),
