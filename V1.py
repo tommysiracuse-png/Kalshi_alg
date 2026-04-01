@@ -342,15 +342,15 @@ class BotSettings:
     # reprices still happen immediately.
     minimum_upward_reprice_ticks_required: int = 4
 
-    minimum_best_bid_cents_required_to_quote: int = 15
-    minimum_implied_ask_cents_required_to_quote: int = 15
-    minimum_market_best_bid_cents_required_to_quote_any_side: int = 15
+    minimum_best_bid_cents_required_to_quote: int = 5
+    minimum_implied_ask_cents_required_to_quote: int = 5
+    minimum_market_best_bid_cents_required_to_quote_any_side: int = 5
     enforce_one_tick_safety_below_implied_ask: bool = True
 
     # --- Inventory controls ---
     enable_one_way_inventory_guard: bool = True
     one_way_inventory_guard_contracts: int = 30
-    inventory_skew_contracts_per_tick: int = 15
+    inventory_skew_contracts_per_tick: int = 10
     maximum_inventory_skew_ticks: int = 5
 
     # --- Pair / spread protection ---
@@ -463,7 +463,7 @@ class BotSettings:
         if self.minimum_best_bid_cents_required_to_quote < 0 or self.minimum_implied_ask_cents_required_to_quote < 0:
             raise ValueError("Quote-threshold cents must be >= 0")
         if self.minimum_market_best_bid_cents_required_to_quote_any_side < 0:
-            raise ValueError("minimum_market_best_bid_cents_required_to_quote_any_side must be >= 0")
+            raise ValueError("minimum_market_best_bid_cents_required_to_quote_any_side must be >= 0") 
         if self.one_way_inventory_guard_contracts < 0:
             raise ValueError("one_way_inventory_guard_contracts must be >= 0")
         if self.inventory_skew_contracts_per_tick <= 0:

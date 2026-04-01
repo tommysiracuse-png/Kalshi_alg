@@ -151,7 +151,7 @@ def request_json(
         try:
             response = session.request(method, url, params=params, timeout=timeout)
             if response.status_code in (429, 500, 502, 503, 504):
-                time.sleep(backoff * (2 ** attempt))
+                time.sleep(backoff * (2 * attempt))
                 continue
             response.raise_for_status()
             return response.json()

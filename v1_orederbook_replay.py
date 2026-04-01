@@ -311,7 +311,7 @@ class BotSettings:
     yes_order_budget_cents: int = 100
     no_order_budget_cents: int = 100
     maximum_contracts_per_order: int = 2_000
-    budget_fee_buffer_cents: int = 2
+    budget_fee_buffer_cents: int = 0
     allow_fractional_order_entry_when_supported: bool = False
     refill_resting_size_after_partial_fill: bool = False
 
@@ -327,8 +327,8 @@ class BotSettings:
     expiration_jitter_seconds: int = 20
     stagger_yes_no_expiration_offsets_seconds: int = 10
 
-    aggressive_improvement_ticks_when_spread_is_wide: int = 0
-    minimum_spread_ticks_required_for_aggressive_improvement: int = 2
+    aggressive_improvement_ticks_when_spread_is_wide: int = 1
+    minimum_spread_ticks_required_for_aggressive_improvement: int = 5
     passive_offset_ticks_when_not_improving: int = 1
     join_current_best_bid_when_starting_new_quote_cycle: bool = True
 
@@ -342,8 +342,8 @@ class BotSettings:
     # reprices still happen immediately.
     minimum_upward_reprice_ticks_required: int = 4
 
-    minimum_best_bid_cents_required_to_quote: int = 15
-    minimum_implied_ask_cents_required_to_quote: int = 15
+    minimum_best_bid_cents_required_to_quote: int = 10
+    minimum_implied_ask_cents_required_to_quote: int = 10
     minimum_market_best_bid_cents_required_to_quote_any_side: int = 15
     enforce_one_tick_safety_below_implied_ask: bool = True
 
@@ -351,7 +351,7 @@ class BotSettings:
     enable_one_way_inventory_guard: bool = True
     one_way_inventory_guard_contracts: int = 30
     inventory_skew_contracts_per_tick: int = 15
-    maximum_inventory_skew_ticks: int = 5
+    maximum_inventory_skew_ticks: int = 10
 
     # --- Pair / spread protection ---
     enable_pair_guard: bool = True
@@ -382,10 +382,10 @@ class BotSettings:
     inventory_reduction_max_negative_edge_cents: int = 7
     strong_edge_threshold_cents: int = 6
     default_toxicity_cents: int = 3
-    default_fee_factor_for_maker_quotes: float = 0.25
-    fair_value_mid_weight: float = 0.55
-    fair_value_ticker_weight: float = 0.25
-    fair_value_trade_weight: float = 0.20
+    default_fee_factor_for_maker_quotes: float = 0.15
+    fair_value_mid_weight: float = 0.7
+    fair_value_ticker_weight: float = 0.20
+    fair_value_trade_weight: float = 0.10
     fair_value_max_orderbook_imbalance_adjust_cents: int = 4
     fair_value_max_trade_bias_adjust_cents: int = 6
     quote_size_min_fraction_of_budget: float = 0.20
@@ -3819,11 +3819,20 @@ class TopOfBookBot:
             return
         count_units = int(count_units)
 
+
         price_units = (
             parse_optional_price_units(fill_message, "yes_price_dollars", "yes_price")
             if side == "yes"
             else parse_optional_price_units(fill_message, "no_price_dollars", "no_price")
         )
+        if price_units is None:
+            yes_fill_price_units = parse_optional_price_units(fill_message, "yes_price_dollars", "yes_price")
+            no_fill_price_units = parse_optional_price_units(fill_message, "no_price_dollars", "no_price")
+            if side == "yes" and no_fill_price_units is not None:
+                price_units = ONE_DOLLAR_PRICE_UNITS - int(no_fill_price_units)
+            elif side == "no" and yes_fill_price_units is not None:
+                price_units = ONE_DOLLAR_PRICE_UNITS - int(yes_fill_price_units)
+
         fee_units = parse_optional_price_units(fill_message, "fee_cost", "fee")
         inventory_before_units = int(self.net_position_units)
         context_before = self.build_market_context()

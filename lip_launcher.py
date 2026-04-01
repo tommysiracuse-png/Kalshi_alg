@@ -700,9 +700,10 @@ def lookup_inventory_tickers(
     private_key_path: Optional[str],
     use_demo: bool,
     subaccount: Optional[int],
-) -> List[str]:
+    previous_position_units_by_ticker: Optional[Dict[str, int]] = None,
+) -> tuple[List[str], Dict[str, int], List[str]]:
     if not tickers or not api_key_id or not private_key_path:
-        return []
+        return [], {}, []
 
     client = KalshiPositionClient(
         api_key_id=api_key_id,
@@ -711,17 +712,59 @@ def lookup_inventory_tickers(
         subaccount=(0 if subaccount is None else int(subaccount)),
     )
 
-    inventory_tickers: List[str] = []
-    for ticker in tickers:
-        try:
-            position_units = client.get_position_count_units(ticker)
-        except Exception as exc:
-            print(f"[WARN] failed to check position for {ticker}: {exc}")
-            continue
-        if position_units != 0:
-            inventory_tickers.append(ticker)
-    return inventory_tickers
+    previous_position_units_by_ticker = previous_position_units_by_ticker or {}
 
+    inventory_tickers: List[str] = []
+    position_units_by_ticker: Dict[str, int] = {}
+    unknown_position_tickers: List[str] = []
+
+    for ticker in tickers:
+        last_exc: Optional[Exception] = None
+        position_units: Optional[int] = None
+
+        for attempt in range(4):
+            try:
+                position_units = client.get_position_count_units(ticker)
+                break
+            except Exception as exc:
+                last_exc = exc
+                message = str(exc).lower()
+
+                retryable = (
+                    "failed 429" in message
+                    or "too_many_requests" in message
+                    or "failed 500" in message
+                    or "failed 502" in message
+                    or "failed 503" in message
+                    or "failed 504" in message
+                )
+
+                if retryable and attempt < 3:
+                    sleep_seconds = min(8.0, 0.75 * (2 ** attempt))
+                    print(f"[WARN] position lookup retry for {ticker} in {sleep_seconds:.2f}s | attempt={attempt + 1} | error={exc}")
+                    time.sleep(sleep_seconds)
+                    continue
+
+                break
+
+        if position_units is None:
+            # Fail-safe: do NOT let a failed lookup cause us to drop / recycle the line.
+            unknown_position_tickers.append(ticker)
+
+            if ticker not in inventory_tickers:
+                inventory_tickers.append(ticker)
+
+            if ticker in previous_position_units_by_ticker:
+                position_units_by_ticker[ticker] = int(previous_position_units_by_ticker[ticker])
+
+            print(f"[WARN] position unknown for {ticker}; treating as carryover | error={last_exc}")
+            continue
+
+        position_units_by_ticker[ticker] = int(position_units)
+        if int(position_units) != 0:
+            inventory_tickers.append(ticker)
+
+    return inventory_tickers, position_units_by_ticker, unknown_position_tickers
 
 # ---------------------------------------------------------------------------
 # Main monitoring / refresh loop
@@ -757,6 +800,7 @@ def monitor_and_refresh(
 
     print("\nBots running. Press Ctrl+C to stop them all.")
     next_refresh_at = (time.time() + refresh_interval_seconds) if refresh_interval_seconds > 0 else None
+    last_known_position_units_by_ticker: Dict[str, int] = {}
 
     try:
         while True:
@@ -772,19 +816,23 @@ def monitor_and_refresh(
             if next_refresh_at is not None and time.time() >= next_refresh_at:
                 previous_pick_by_ticker = {child.ticker: child.pick for child in children}
                 current_tickers = list(previous_pick_by_ticker.keys())
-                inventory_tickers = lookup_inventory_tickers(
+                inventory_tickers, position_units_by_ticker, unknown_position_tickers = lookup_inventory_tickers(
                     tickers=current_tickers,
                     api_key_id=api_key_id,
                     private_key_path=private_key_path,
                     use_demo=use_demo,
                     subaccount=subaccount,
+                    previous_position_units_by_ticker=last_known_position_units_by_ticker,
                 )
+                last_known_position_units_by_ticker.update(position_units_by_ticker)
 
                 if inventory_tickers:
                     print("\nInventory carryover tickers: " + ", ".join(sorted(inventory_tickers)))
                 else:
                     print("\nInventory carryover tickers: none")
 
+                if unknown_position_tickers:
+                    print("[WARN] inventory status unknown; kept alive as carryover: " + ", ".join(sorted(unknown_position_tickers)))
                 stop_children(children)
                 children.clear()
 
