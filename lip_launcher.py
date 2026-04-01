@@ -70,6 +70,12 @@ def parse_args() -> argparse.Namespace:
         help="CSV file exported from your screener notebook.",
     )
     parser.add_argument(
+        "--minimum-carryover-value-cents",
+        type=float,
+        default=100.0,
+        help="Only keep a ticker alive across refresh if marked inventory value is at least this many cents.",
+    )
+    parser.add_argument(
         "--bot-script",
         required=True,
         help="Path to the single-market bot script, for example V1.py.",
@@ -375,6 +381,31 @@ class KalshiPositionClient:
         if position_payload.get("position") not in (None, ""):
             return int(position_payload["position"]) * 100
         return 0
+
+    def get_market_bid_cents(self, market_ticker: str) -> tuple[Optional[int], Optional[int]]:
+        path = f"{self.api_prefix}/markets/{market_ticker}"
+        response = self.session.get(
+            self.host + path,
+            headers=self._headers("GET", path),
+            timeout=15,
+        )
+        if response.status_code >= 400:
+            raise RuntimeError(f"GET market failed {response.status_code}: {response.text[:500]}")
+        payload = response.json() if response.text.strip() else {}
+        market = payload.get("market") or {}
+
+        def pick_cents(dollars_field: str, cents_field: str) -> Optional[int]:
+            value = market.get(dollars_field)
+            if value not in (None, ""):
+                return int(round(float(value) * 100))
+            value = market.get(cents_field)
+            if value not in (None, ""):
+                return int(value)
+            return None
+
+        yes_bid_cents = pick_cents("yes_bid_dollars", "yes_bid")
+        no_bid_cents = pick_cents("no_bid_dollars", "no_bid")
+        return yes_bid_cents, no_bid_cents
 
 
 # ---------------------------------------------------------------------------
@@ -701,6 +732,7 @@ def lookup_inventory_tickers(
     use_demo: bool,
     subaccount: Optional[int],
     previous_position_units_by_ticker: Optional[Dict[str, int]] = None,
+    minimum_carryover_value_cents: float = 100.0,
 ) -> tuple[List[str], Dict[str, int], List[str]]:
     if not tickers or not api_key_id or not private_key_path:
         return [], {}, []
@@ -713,7 +745,6 @@ def lookup_inventory_tickers(
     )
 
     previous_position_units_by_ticker = previous_position_units_by_ticker or {}
-
     inventory_tickers: List[str] = []
     position_units_by_ticker: Dict[str, int] = {}
     unknown_position_tickers: List[str] = []
@@ -761,7 +792,28 @@ def lookup_inventory_tickers(
             continue
 
         position_units_by_ticker[ticker] = int(position_units)
-        if int(position_units) != 0:
+        if int(position_units) == 0:
+            continue
+
+        try:
+            yes_bid_cents, no_bid_cents = client.get_market_bid_cents(ticker)
+        except Exception as exc:
+            unknown_position_tickers.append(ticker)
+            if ticker not in inventory_tickers:
+                inventory_tickers.append(ticker)
+            print(f"[WARN] market value unknown for {ticker}; treating as carryover | error={exc}")
+            continue
+
+        side_bid_cents = yes_bid_cents if int(position_units) > 0 else no_bid_cents
+        if side_bid_cents is None:
+            unknown_position_tickers.append(ticker)
+            if ticker not in inventory_tickers:
+                inventory_tickers.append(ticker)
+            print(f"[WARN] side bid missing for {ticker}; treating as carryover")
+            continue
+
+        marked_value_cents = abs(int(position_units)) * float(side_bid_cents) / 100.0
+        if marked_value_cents >= float(minimum_carryover_value_cents):
             inventory_tickers.append(ticker)
 
     return inventory_tickers, position_units_by_ticker, unknown_position_tickers
@@ -776,6 +828,7 @@ def monitor_and_refresh(
     screen_file_path: Path,
     screener_script_path: Optional[Path],
     screener_output_path: Path,
+    minimum_carryover_value_cents: float,
     bot_script_path: Path,
     logs_directory: Path,
     api_key_id: Optional[str],
@@ -817,6 +870,7 @@ def monitor_and_refresh(
                 previous_pick_by_ticker = {child.ticker: child.pick for child in children}
                 current_tickers = list(previous_pick_by_ticker.keys())
                 inventory_tickers, position_units_by_ticker, unknown_position_tickers = lookup_inventory_tickers(
+                    minimum_carryover_value_cents=minimum_carryover_value_cents,
                     tickers=current_tickers,
                     api_key_id=api_key_id,
                     private_key_path=private_key_path,
@@ -1019,6 +1073,7 @@ def main() -> int:
         max_bots=max_bots,
         refresh_interval_seconds=arguments.refresh_interval_seconds,
         poll_seconds=arguments.poll_seconds,
+        minimum_carryover_value_cents=arguments.minimum_carryover_value_cents,
     )
 
 

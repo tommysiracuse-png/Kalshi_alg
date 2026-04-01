@@ -19,6 +19,7 @@ SUBACCOUNT=""
 LAUNCH_DELAY_SECONDS=2
 REFRESH_INTERVAL_SECONDS=1200
 POLL_SECONDS=50
+MINIMUM_CARRYOVER_VALUE_CENTS=100
 # ------------------------------------
 
 if [[ ! -f "$BOT_SCRIPT" ]]; then
@@ -59,6 +60,7 @@ ARGS=(
   --run-screener-on-start
   --refresh-interval-seconds "$REFRESH_INTERVAL_SECONDS"
   --poll-seconds "$POLL_SECONDS"
+  --minimum-carryover-value-cents "$MINIMUM_CARRYOVER_VALUE_CENTS"
 )
 
 if [[ "$USE_DEMO" == "1" ]]; then
