@@ -1,6 +1,14 @@
+# Logs
 logs/
+telemetry/
+
+# Python venv
 __pycache__/
 telemetry_*
 privkey.txt
 watchdog_state/
 watchdog_disable_list.json
+bin/
+lib64
+lib/
+include/
