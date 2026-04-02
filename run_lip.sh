@@ -4,7 +4,8 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ---- EDIT THESE VALUES IF NEEDED ----
-export KALSHI_API_KEY_ID=24d8c39b-59bd-41a4-b522-3a044f7af7bb"
+# ---- EDIT THESE VALUES IF NEEDED ----
+export KALSHI_API_KEY_ID="24d8c39b-59bd-41a4-b522-3a044f7af7bb"
 export KALSHI_PRIVATE_KEY_PATH="$ROOT/privkey.txt"
 BOT_SCRIPT="$ROOT/V1.py"
 SCREENER_SCRIPT="$ROOT/kalshi_screener.py"
