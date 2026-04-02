@@ -31,6 +31,7 @@ import json
 import logging
 import math
 import os
+import pathlib
 import random
 import sqlite3
 import tempfile
@@ -185,6 +186,84 @@ def log_event(event_name: str, **fields: object) -> None:
     else:
         LOGGER.info("%s", event_name)
 
+
+# ---------------------------------------------------------------------------
+# P&L tracker — appends one JSON line per fill to logs/pnl_tracker.jsonl
+# ---------------------------------------------------------------------------
+
+_CATEGORY_PREFIXES: List[Tuple[str, str]] = [
+    # Weather
+    ("KXLOWT", "weather"), ("KXHIGHT", "weather"), ("KXHIGHDEN", "weather"),
+    # Commodities
+    ("KXWTI", "commodities"), ("KXBRENTD", "commodities"), ("KXBRENTW", "commodities"),
+    ("KXGOLDD", "commodities"), ("KXGOLDW", "commodities"),
+    ("KXSILVERD", "commodities"), ("KXSILVERW", "commodities"),
+    ("KXAAAGASD", "commodities"),
+    # Crypto
+    ("KXBTCD", "crypto"), ("KXBTCW", "crypto"),
+    ("KXETHD", "crypto"), ("KXETHW", "crypto"), ("KXETH-", "crypto"),
+    ("KXXRPD", "crypto"), ("KXSOLD", "crypto"), ("KXSOLE", "crypto"),
+    # Baseball
+    ("KXMLB", "baseball"),
+    # Basketball
+    ("KXNBA", "basketball"), ("KXCBAGAME", "basketball"),
+    ("KXEUROCUP", "basketball"), ("KXNCAAWB", "basketball"),
+    # Esports
+    ("KXCS2", "esports"), ("KXVALORANT", "esports"),
+    # Golf
+    ("KXPGA", "golf"),
+    # Hockey
+    ("KXDEL", "hockey"), ("KXNHL", "hockey"),
+    # Tennis
+    ("KXATP", "tennis"), ("KXWTA", "tennis"),
+    # Politics / econ
+    ("KXPOLITICS", "politics"), ("KXMAMDANI", "politics"),
+    ("KXBONDI", "politics"), ("KXAPRPOTUS", "politics"),
+    ("KXUSNFP", "economics"),
+    # Entertainment
+    ("KXALBUMSALES", "entertainment"),
+]
+
+
+def categorize_ticker(ticker: str) -> str:
+    upper = ticker.upper()
+    for prefix, category in _CATEGORY_PREFIXES:
+        if upper.startswith(prefix):
+            return category
+    return "other"
+
+
+_PNL_TRACKER_LOCK = Lock()
+
+
+def append_pnl_fill(
+    ticker: str,
+    side: str,
+    price_cents: Optional[float],
+    quantity: float,
+    fee_cents: Optional[float],
+    net_position_after: float,
+    fair_value_cents: Optional[float],
+) -> None:
+    """Append a single fill record to the shared pnl_tracker.jsonl."""
+    record = {
+        "ts": datetime.utcnow().isoformat(timespec="milliseconds") + "Z",
+        "ticker": ticker,
+        "category": categorize_ticker(ticker),
+        "side": side,
+        "price_c": price_cents,
+        "qty": quantity,
+        "fee_c": fee_cents,
+        "net_pos": net_position_after,
+        "fair_c": fair_value_cents,
+    }
+    line = json.dumps(record, separators=(",", ":")) + "\n"
+    logs_dir = pathlib.Path(__file__).resolve().parent / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    pnl_path = logs_dir / "pnl_tracker.jsonl"
+    with _PNL_TRACKER_LOCK:
+        with open(pnl_path, "a") as f:
+            f.write(line)
 
 
 def is_post_only_cross_error(exception: Exception) -> bool:
@@ -4222,6 +4301,19 @@ class TopOfBookBot:
             fill_contracts=format_count_fp(count_units),
             fee_dollars=(format_price_dollars(fee_units) if fee_units is not None else "unknown"),
             net_position_contracts=format_count_fp(self.net_position_units),
+        )
+        append_pnl_fill(
+            ticker=self.market.ticker,
+            side=side,
+            price_cents=round(price_units / PRICE_UNITS_PER_CENT, 2) if price_units is not None else None,
+            quantity=round(count_units / COUNT_SCALE, 2),
+            fee_cents=round(fee_units / PRICE_UNITS_PER_CENT, 2) if fee_units is not None else None,
+            net_position_after=round(self.net_position_units / COUNT_SCALE, 2),
+            fair_value_cents=(
+                round(self.last_quote_decisions[side].fair_yes_units / PRICE_UNITS_PER_CENT, 2)
+                if self.last_quote_decisions.get(side) and self.last_quote_decisions[side].fair_yes_units is not None
+                else None
+            ),
         )
         if price_units is not None and context_before is not None:
             self.schedule_fill_markouts(
