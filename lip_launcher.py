@@ -951,7 +951,7 @@ def stop_children(children: List[ChildProcess]) -> None:
         except Exception:
             pass
 
-    time.sleep(1.0)
+    time.sleep(5.0)
 
     for child in children:
         try:

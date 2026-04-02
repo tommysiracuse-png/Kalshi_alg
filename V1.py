@@ -337,7 +337,7 @@ class BotSettings:
     # --- Order sizing ---
     yes_order_budget_cents: int = 100
     no_order_budget_cents: int = 100
-    maximum_contracts_per_order: int = 2_000
+    maximum_contracts_per_order: int = 15
     budget_fee_buffer_cents: int = 2
     allow_fractional_order_entry_when_supported: bool = False
     refill_resting_size_after_partial_fill: bool = False
@@ -421,7 +421,7 @@ class BotSettings:
     fair_value_max_orderbook_imbalance_adjust_cents: int = 2
     fair_value_max_trade_bias_adjust_cents: int = 4
     quote_size_min_fraction_of_budget: float = 0.20
-    quote_size_max_fraction_of_budget: float = 1.50
+    quote_size_max_fraction_of_budget: float = 1.00
     candidate_price_levels_to_scan: int = 22
 
     # Order-book pull toxicity guard.
@@ -4815,7 +4815,19 @@ def main() -> None:
         api_client=api_client,
         market=market,
     )
-    asyncio.run(bot.run())
+    try:
+        asyncio.run(bot.run())
+    except KeyboardInterrupt:
+        log_event(
+            "GRACEFUL_SHUTDOWN",
+            ticker=settings.market_ticker,
+            net_position_contracts=format_count_fp(bot.net_position_units),
+            reason="SIGINT",
+        )
+        try:
+            bot.cancel_owned_resting_quotes_on_startup()
+        except Exception as exc:
+            log_event("SHUTDOWN_CANCEL_ERROR", error=str(exc))
 
 
 if __name__ == "__main__":
