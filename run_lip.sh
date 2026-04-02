@@ -4,21 +4,33 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ---- EDIT THESE VALUES IF NEEDED ----
-export KALSHI_API_KEY_ID="2622245b-4c4d-46f4-8a89-2e69069e7c70"
-export KALSHI_PRIVATE_KEY_PATH="$ROOT/tizzler2003.txt"
+export KALSHI_API_KEY_ID=24d8c39b-59bd-41a4-b522-3a044f7af7bb"
+export KALSHI_PRIVATE_KEY_PATH="$ROOT/privkey.txt"
 BOT_SCRIPT="$ROOT/V1.py"
 SCREENER_SCRIPT="$ROOT/kalshi_screener.py"
 SCREEN_FILE="$ROOT/screener_export.csv"
 LAUNCHER_SCRIPT="$ROOT/lip_launcher.py"
-MAX_BOTS=5
-YES_BUDGET_CENTS=800
-NO_BUDGET_CENTS=800
+WATCHDOG_RUNNER_SCRIPT="$ROOT/market_watchdog_runner.py"
+WATCHDOG_PROFILER_SCRIPT="$ROOT/market_risk_profile.py"
+WATCHDOG_STATE_DIR="$ROOT/watchdog_state"
+WATCHDOG_DISABLE_FILE="$ROOT/watchdog_disable_list.json"
+WATCHDOG_INTERVAL_SECONDS=180
+WATCHDOG_STATE_REFRESH_SECONDS=3
+WATCHDOG_EXTREME_STALE_SECONDS=30
+WATCHDOG_SAMPLE_SECONDS=4
+WATCHDOG_POLL_INTERVAL_SECONDS=0.35
+WATCHDOG_CONFIDENCE_REDUCTION_THRESHOLD=0.70
+WATCHDOG_CONFIDENCE_FLATTEN_THRESHOLD=0.55
+MAX_BOTS=25
+YES_BUDGET_CENTS=500
+NO_BUDGET_CENTS=500
 USE_DEMO=0
 DRY_RUN=0
 SUBACCOUNT=""
-LAUNCH_DELAY_SECONDS=8
-REFRESH_INTERVAL_SECONDS=800
-POLL_SECONDS=2
+LAUNCH_DELAY_SECONDS=2
+REFRESH_INTERVAL_SECONDS=1200
+POLL_SECONDS=50
+MINIMUM_CARRYOVER_VALUE_CENTS=200
 # ------------------------------------
 
 if [[ ! -f "$BOT_SCRIPT" ]]; then
@@ -33,6 +45,16 @@ fi
 
 if [[ ! -f "$LAUNCHER_SCRIPT" ]]; then
   echo "ERROR: launcher script not found: $LAUNCHER_SCRIPT"
+  exit 2
+fi
+
+if [[ ! -f "$WATCHDOG_RUNNER_SCRIPT" ]]; then
+  echo "ERROR: watchdog runner script not found: $WATCHDOG_RUNNER_SCRIPT"
+  exit 2
+fi
+
+if [[ ! -f "$WATCHDOG_PROFILER_SCRIPT" ]]; then
+  echo "ERROR: watchdog profiler script not found: $WATCHDOG_PROFILER_SCRIPT"
   exit 2
 fi
 
@@ -59,6 +81,18 @@ ARGS=(
   --run-screener-on-start
   --refresh-interval-seconds "$REFRESH_INTERVAL_SECONDS"
   --poll-seconds "$POLL_SECONDS"
+  --minimum-carryover-value-cents "$MINIMUM_CARRYOVER_VALUE_CENTS"
+  --watchdog-runner-script "$WATCHDOG_RUNNER_SCRIPT"
+  --watchdog-profiler-script "$WATCHDOG_PROFILER_SCRIPT"
+  --watchdog-state-dir "$WATCHDOG_STATE_DIR"
+  --watchdog-disable-file "$WATCHDOG_DISABLE_FILE"
+  --watchdog-interval-seconds "$WATCHDOG_INTERVAL_SECONDS"
+  --watchdog-state-refresh-seconds "$WATCHDOG_STATE_REFRESH_SECONDS"
+  --watchdog-extreme-stale-seconds "$WATCHDOG_EXTREME_STALE_SECONDS"
+  --watchdog-sample-seconds "$WATCHDOG_SAMPLE_SECONDS"
+  --watchdog-poll-interval-seconds "$WATCHDOG_POLL_INTERVAL_SECONDS"
+  --watchdog-confidence-reduction-threshold "$WATCHDOG_CONFIDENCE_REDUCTION_THRESHOLD"
+  --watchdog-confidence-flatten-threshold "$WATCHDOG_CONFIDENCE_FLATTEN_THRESHOLD"
 )
 
 if [[ "$USE_DEMO" == "1" ]]; then
