@@ -375,6 +375,7 @@ class BotSettings:
     trade_history_window_seconds: int = 60
     model_refresh_interval_seconds: int = 600
     markout_horizons_seconds: Tuple[int, ...] = (1, 5, 30, 120)
+    telemetry_log_path: str = "telemetry"
 
     # --- EV-based quoting model ---
     minimum_expected_edge_cents_to_keep_quote: int = 1
@@ -2076,7 +2077,7 @@ class TopOfBookBot:
         }
         self.known_strategy_order_sides: Dict[str, str] = {}
         safe_ticker = self.settings.market_ticker.replace("/", "_").replace("\\", "_")
-        telemetry_path = self.settings.telemetry_sqlite_path or os.path.join(os.getcwd(), f"telemetry_{safe_ticker}.sqlite3")
+        telemetry_path = self.settings.telemetry_sqlite_path or os.path.join(os.getcwd(), self.settings.telemetry_log_path, f"telemetry_{safe_ticker}.sqlite3")
         self.telemetry_store = TelemetryStore(telemetry_path, enabled=self.settings.enable_sqlite_telemetry)
         self.fee_model = FeeModel(self.api_client, self.market, self.settings, self.telemetry_store)
         self.incentive_model = IncentiveModel(self.api_client, self.market)
