@@ -11,21 +11,21 @@ API_PREFIX = "/trade-api/v2"
 # Market scan settings
 STATUS = "open"                 # open / unopened / paused / closed / settled
 MVE_FILTER = "exclude"          # excludes multivariate combo markets
-MAX_MARKETS_TO_SCAN = 50000
-TOP_N = 100
+MAX_MARKETS_TO_SCAN = 500000
+TOP_N = 50
 
 # Liquidity / time filters
 MIN_SPREAD_CENTS = 3
-MAX_SPREAD_CENTS = 60
-MIN_YES_BID_CENTS = 1
-MIN_NO_BID_CENTS = 1
-MIN_VOL24H = 5000
-MIN_OI = 1000
-MIN_TIME_TO_CLOSE_HRS = 3
-MAX_TIME_TO_CLOSE_HRS = 1000
+MAX_SPREAD_CENTS = 30
+MIN_YES_BID_CENTS = 5
+MIN_NO_BID_CENTS = 5
+MIN_VOL24H = 2000
+MIN_OI = 500
+MIN_TIME_TO_CLOSE_HRS = 2
+MAX_TIME_TO_CLOSE_HRS = 50
 
 # Quote-planning logic used only for the screener CSV output
-TARGET_EDGE_CENTS = 0
+TARGET_EDGE_CENTS = 4
 FEE_BUFFER_CENTS = 0
 DEFAULT_TICK_CENTS = 1
 QUOTE_SIZE = 50
