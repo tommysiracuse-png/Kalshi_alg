@@ -355,30 +355,30 @@ class BotSettings:
     stagger_yes_no_expiration_offsets_seconds: int = 10
 
     aggressive_improvement_ticks_when_spread_is_wide: int = 2
-    minimum_spread_ticks_required_for_aggressive_improvement: int = 10
+    minimum_spread_ticks_required_for_aggressive_improvement: int = 8
     passive_offset_ticks_when_not_improving: int = 0
     join_current_best_bid_when_starting_new_quote_cycle: bool = True
 
     # After any fill, suppress same-side quoting for a while to reduce the
     # "got filled, stepped right back in, got filled again" pattern.
     post_fill_no_improve_cooldown_ms: int = 2_000
-    same_side_reentry_cooldown_ms: int = 4_000
+    same_side_reentry_cooldown_ms: int = 5_000
     suppress_same_side_quotes_during_reentry_cooldown: bool = True
 
     # Only chase upward when the market moved materially. Downward / de-risking
     # reprices still happen immediately.
     minimum_upward_reprice_ticks_required: int = 4
 
-    minimum_best_bid_cents_required_to_quote: int = 17
-    minimum_implied_ask_cents_required_to_quote: int = 17
-    minimum_market_best_bid_cents_required_to_quote_any_side: int = 17
+    minimum_best_bid_cents_required_to_quote: int = 8
+    minimum_implied_ask_cents_required_to_quote: int = 8
+    minimum_market_best_bid_cents_required_to_quote_any_side: int = 8
     enforce_one_tick_safety_below_implied_ask: bool = True
 
     # --- Inventory controls ---
     enable_one_way_inventory_guard: bool = True
-    one_way_inventory_guard_contracts: int = 12
-    inventory_skew_contracts_per_tick: int = 3
-    maximum_inventory_skew_ticks: int = 4
+    one_way_inventory_guard_contracts: int = 8
+    inventory_skew_contracts_per_tick: int = 2
+    maximum_inventory_skew_ticks: int = 6
 
     # --- Pair / spread protection ---
     enable_pair_guard: bool = True
@@ -409,12 +409,12 @@ class BotSettings:
     fill_probability_prior_misses: float = 3.0
 
     # --- EV-based quoting model ---
-    minimum_expected_edge_cents_to_keep_quote: int = 2
-    minimum_expected_edge_cents_to_quote: int = 3
-    inventory_reduction_max_negative_edge_cents: int = 16
-    strong_edge_threshold_cents: int = 10
-    default_toxicity_cents: int = 3
-    default_fee_factor_for_maker_quotes: float = 0.25
+    minimum_expected_edge_cents_to_keep_quote: int = 1
+    minimum_expected_edge_cents_to_quote: int = 2
+    inventory_reduction_max_negative_edge_cents: int = 6
+    strong_edge_threshold_cents: int = 8
+    default_toxicity_cents: int = 1
+    default_fee_factor_for_maker_quotes: float = 0.45
     fair_value_mid_weight: float = 0.55
     fair_value_ticker_weight: float = 0.25
     fair_value_trade_weight: float = 0.20
@@ -437,7 +437,7 @@ class BotSettings:
     # Queue-abandonment logic.
     enable_queue_abandonment_guard: bool = True
     maximum_queue_ahead_contracts_before_abandonment: int = 200
-    maximum_queue_ahead_multiple_of_our_remaining_size: float = 13.0
+    maximum_queue_ahead_multiple_of_our_remaining_size: float = 25.0
     queue_abandonment_consecutive_polls_required: int = 3
     queue_abandonment_side_cooldown_seconds: int = 15
     queue_abandonment_market_cooldown_seconds: int = 15
@@ -2081,7 +2081,7 @@ class FairValueEngine:
         adjusted_fair_units = self.market.price_grid.floor_to_valid(adjusted_fair_units) or adjusted_fair_units
 
         if self.last_fair_yes_units is not None:
-            adjusted_fair_units = int(round((0.60 * self.last_fair_yes_units) + (0.40 * adjusted_fair_units)))
+            adjusted_fair_units = int(round((0.40 * self.last_fair_yes_units) + (0.60 * adjusted_fair_units)))
             adjusted_fair_units = max(self.market.price_grid.minimum_valid_price_units, min(self.market.price_grid.maximum_valid_price_units, adjusted_fair_units))
             adjusted_fair_units = self.market.price_grid.floor_to_valid(adjusted_fair_units) or adjusted_fair_units
 
@@ -2213,8 +2213,8 @@ class ToxicityModel:
         adverse_trade_flow = max(0.0, -context.trade_bias) if side == "yes" else max(0.0, context.trade_bias)
         adverse_imbalance = max(0.0, -context.order_book_imbalance) if side == "yes" else max(0.0, context.order_book_imbalance)
 
-        estimated_units += adverse_trade_flow * PRICE_UNITS_PER_CENT * 2.0
-        estimated_units += adverse_imbalance * PRICE_UNITS_PER_CENT * 1.0
+        estimated_units += adverse_trade_flow * PRICE_UNITS_PER_CENT * 0.5
+        estimated_units += adverse_imbalance * PRICE_UNITS_PER_CENT * 0.3
 
         return max(0, int(round(estimated_units)))
 
@@ -3178,7 +3178,7 @@ class TopOfBookBot:
         if queue_units is None or queue_units <= 0:
             return 0
         queue_contracts = queue_units / COUNT_SCALE
-        queue_penalty_cents = min(6.0, queue_contracts / 30.0)
+        queue_penalty_cents = min(3.0, queue_contracts / 50.0)
         return int(round(queue_penalty_cents * PRICE_UNITS_PER_CENT))
 
     def queue_abandonment_threshold_for_size_units(self, target_size_units: int) -> int:

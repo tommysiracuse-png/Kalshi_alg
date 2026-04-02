@@ -128,7 +128,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run the heuristic market watchdog for one ticker.")
     parser.add_argument("--ticker", required=True)
     parser.add_argument("--state-file", required=True)
-    parser.add_argument("--profiler-script", default=str(Path(__file__).with_name("market_risk_rofile.py")))
+    parser.add_argument("--profiler-script", default=str(Path(__file__).with_name("market_risk_profiler.py")))
     parser.add_argument("--interval-seconds", type=float, default=180.0)
     parser.add_argument("--sample-seconds", type=float, default=4.0)
     parser.add_argument("--poll-interval-seconds", type=float, default=0.35)

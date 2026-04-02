@@ -704,9 +704,9 @@ class MarketRiskProfiler:
                 suggested_action = "flatten_only"
                 notes.append("Market is already in the terminal risk window.")
             else:
-                soft_stop_time_ms = effective_close_ms - 10 * 60 * 1000
-                hard_stop_time_ms = effective_close_ms - 3 * 60 * 1000
-                flatten_only_time_ms = effective_close_ms - 90 * 1000
+                soft_stop_time_ms = effective_close_ms - 15 * 60 * 1000
+                hard_stop_time_ms = effective_close_ms - 5 * 60 * 1000
+                flatten_only_time_ms = effective_close_ms - 2 * 60 * 1000
 
         confidence = 0.40
         if inferred_start_source == "ticker_datetime_token":
@@ -720,6 +720,8 @@ class MarketRiskProfiler:
         if len(samples) >= 6:
             confidence += 0.05
         if family in {"mlb", "nba", "nhl", "soccer", "esports", "speech_event"}:
+            confidence += 0.05
+        if family in {"continuous_price"} and official_close_ms is not None:
             confidence += 0.05
         confidence = clamp(confidence, 0.05, 0.99)
 
