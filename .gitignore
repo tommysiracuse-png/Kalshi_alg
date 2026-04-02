@@ -15,3 +15,7 @@ include/
 
 # Screener Output
 screener_export.csv
+
+# Keys and Params
+id_rsa
+.env
