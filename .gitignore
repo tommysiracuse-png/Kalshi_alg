@@ -1,3 +1,6 @@
 logs/
 __pycache__/
 telemetry_*
+privkey.txt
+watchdog_state/
+watchdog_disable_list.json
