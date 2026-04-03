@@ -1,0 +1,11 @@
+# Example Lip Launcher Settings
+
+BOT_SCRIPT="$ROOT/v1_orederbook_replay.py"
+SCREEN_FILE="$ROOT/screener_export.csv"
+MAX_BOTS=60
+YES_BUDGET_CENTS=1600
+NO_BUDGET_CENTS=1600
+USE_DEMO=0
+DRY_RUN=0
+SUBACCOUNT=""
+LAUNCH_DELAY_SECONDS=8

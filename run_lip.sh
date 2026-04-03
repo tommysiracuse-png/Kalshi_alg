@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+export ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # ---- EDIT THESE VALUES IF NEEDED ----
 export KALSHI_API_KEY_ID="2622245b-4c4d-46f4-8a89-2e69069e7c70"
