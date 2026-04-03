@@ -684,6 +684,13 @@ def screen_markets(pub: KalshiPublicClient, settings: Dict[str, Any]) -> pd.Data
         if not market_passes_safety_filters(market, book, settings):
             continue
 
+        excluded = settings.get("excluded_series") or []
+        if excluded:
+            event_ticker = str(market.get("event_ticker") or ticker)
+            series_prefix = event_ticker.split("-")[0].upper() if "-" in event_ticker else event_ticker.upper()
+            if series_prefix in {s.upper() for s in excluded}:
+                continue
+
         row = build_market_row(market, book, settings)
         if row is None:
             continue
@@ -724,6 +731,7 @@ def build_settings_from_args(args: argparse.Namespace) -> Dict[str, Any]:
         "max_time_to_close_hrs": args.max_time_to_close_hrs,
         "default_tick_cents": args.default_tick_cents,
         "quote_size": args.quote_size,
+        "excluded_series": args.excluded_series,
         # EV-specific settings
         "minimum_expected_edge_cents_to_quote": args.minimum_expected_edge_cents_to_quote,
         "default_toxicity_cents": args.default_toxicity_cents,
@@ -774,6 +782,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-time-to-close-hrs", type=float, default=config.MAX_TIME_TO_CLOSE_HRS)
     parser.add_argument("--default-tick-cents", type=int, default=config.DEFAULT_TICK_CENTS)
     parser.add_argument("--quote-size", type=int, default=config.QUOTE_SIZE)
+    parser.add_argument(
+        "--excluded-series",
+        nargs="*",
+        default=list(getattr(config, "EXCLUDED_SERIES", [])),
+        help="Series prefixes to exclude (e.g. KXWTI KXXRPD). Overrides config.EXCLUDED_SERIES.",
+    )
 
     # EV defaults are self-contained so config does not need to change
     parser.add_argument(

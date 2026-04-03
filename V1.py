@@ -416,7 +416,7 @@ class BotSettings:
     # --- Order sizing ---
     yes_order_budget_cents: int = 100
     no_order_budget_cents: int = 100
-    maximum_contracts_per_order: int = 15
+    maximum_contracts_per_order: int = 25
     budget_fee_buffer_cents: int = 2
     allow_fractional_order_entry_when_supported: bool = False
     refill_resting_size_after_partial_fill: bool = False
@@ -458,6 +458,15 @@ class BotSettings:
     one_way_inventory_guard_contracts: int = 8
     inventory_skew_contracts_per_tick: int = 2
     maximum_inventory_skew_ticks: int = 6
+
+    # --- Book depth / phantom-spread protection ---
+    # Require at least this many contracts sitting at the best bid on a side
+    # before quoting that side. Blocks thin "decoy" top-of-book orders.
+    minimum_top_level_depth_contracts: int = 15
+    # If the second-best bid level is more than this many cents below the best
+    # bid (or there is no second level at all), do not quote that side.
+    # Prevents entering a market where the apparent spread vanishes instantly.
+    maximum_top_level_gap_cents: int = 20
 
     # --- Pair / spread protection ---
     enable_pair_guard: bool = True
@@ -576,6 +585,10 @@ class BotSettings:
             raise ValueError("Quote-threshold cents must be >= 0")
         if self.minimum_market_best_bid_cents_required_to_quote_any_side < 0:
             raise ValueError("minimum_market_best_bid_cents_required_to_quote_any_side must be >= 0") 
+        if self.minimum_top_level_depth_contracts < 0:
+            raise ValueError("minimum_top_level_depth_contracts must be >= 0")
+        if self.maximum_top_level_gap_cents < 0:
+            raise ValueError("maximum_top_level_gap_cents must be >= 0")
         if self.one_way_inventory_guard_contracts < 0:
             raise ValueError("one_way_inventory_guard_contracts must be >= 0")
         if self.inventory_skew_contracts_per_tick <= 0:
@@ -2160,7 +2173,17 @@ class FairValueEngine:
         adjusted_fair_units = self.market.price_grid.floor_to_valid(adjusted_fair_units) or adjusted_fair_units
 
         if self.last_fair_yes_units is not None:
-            adjusted_fair_units = int(round((0.40 * self.last_fair_yes_units) + (0.60 * adjusted_fair_units)))
+            # Use a faster EMA (more weight on new data) when the market is
+            # approaching expiry.  Long-dated markets benefit from smoothing to
+            # suppress noise; short-dated markets move fast and smoothing
+            # introduces toxic lag (fills at stale prices by informed takers).
+            if context.seconds_to_close is not None and context.seconds_to_close <= 1800:
+                ema_alpha = 0.90   # <30 min: nearly no smoothing
+            elif context.seconds_to_close is not None and context.seconds_to_close <= 3600:
+                ema_alpha = 0.80   # 30–60 min: light smoothing
+            else:
+                ema_alpha = 0.60   # >60 min: original smoothing
+            adjusted_fair_units = int(round(((1.0 - ema_alpha) * self.last_fair_yes_units) + (ema_alpha * adjusted_fair_units)))
             adjusted_fair_units = max(self.market.price_grid.minimum_valid_price_units, min(self.market.price_grid.maximum_valid_price_units, adjusted_fair_units))
             adjusted_fair_units = self.market.price_grid.floor_to_valid(adjusted_fair_units) or adjusted_fair_units
 
@@ -2595,6 +2618,12 @@ class TopOfBookBot:
         levels = self.book_yes if side == "yes" else self.book_no
         return int(levels.get(best_price_units, 0) or 0)
 
+    def second_best_bid(self, side: str) -> Optional[int]:
+        """Return the second-best bid price level, or None if fewer than 2 levels exist."""
+        levels = self.book_yes if side == "yes" else self.book_no
+        sorted_prices = sorted(levels.keys(), reverse=True)
+        return sorted_prices[1] if len(sorted_prices) >= 2 else None
+
     def displayed_size_units_at_price(self, side: str, price_units: Optional[int]) -> int:
         if price_units is None:
             return 0
@@ -2965,7 +2994,7 @@ class TopOfBookBot:
         if blocked_side == side:
             return False, "inventory_block"
 
-        if self.settings.suppress_same_side_quotes_during_reentry_cooldown and self.side_same_side_reentry_cooldown_active(side):
+        if self.settings.suppress_same_side_quotes_during_reentry_cooldown and self.side_same_side_reentry_cooldown_active(side) and not reducing_inventory:
             return False, "same_side_reentry_cooldown"
 
         if self.side_queue_abandonment_cooldown_active(side):
@@ -2985,6 +3014,13 @@ class TopOfBookBot:
                 return False, "best_bid_floor"
             if implied_ask_units < minimum_ask_units:
                 return False, "implied_ask_floor"
+            if self.settings.minimum_top_level_depth_contracts > 0:
+                if self.best_bid_size_units(side) < contracts_to_count_units(self.settings.minimum_top_level_depth_contracts):
+                    return False, "thin_top_level"
+            if self.settings.maximum_top_level_gap_cents > 0:
+                second = self.second_best_bid(side)
+                if second is None or (best_bid_units - second) > cents_to_price_units(self.settings.maximum_top_level_gap_cents):
+                    return False, "wide_book_gap"
             if market_guard_active:
                 return False, "market_probability_guard"
         else:

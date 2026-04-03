@@ -622,12 +622,12 @@ class MarketRiskProfiler:
             remaining_ms = max(0, effective_close_ms - current_ms)
 
             if observed_vol_bp >= 300 or observed_range_bp >= 250 or bid_flip_rate_per_minute >= 20:
-                compressed_ms = min(remaining_ms, 20 * 60 * 1000)
+                compressed_ms = min(remaining_ms, 45 * 60 * 1000)
                 effective_close_ms = current_ms + compressed_ms
                 notes.append("Live market with high instability; compressed effective close to <=20 minutes remaining.")
             elif family in {"mlb", "nba", "nhl", "soccer", "esports"}:
                 # Even in calmer live sports, do not let the bot assume a huge remaining window.
-                compressed_ms = min(remaining_ms, 60 * 60 * 1000)
+                compressed_ms = min(remaining_ms, 120 * 60 * 1000)
                 effective_close_ms = current_ms + compressed_ms
                 notes.append("Live sports/esports market; capped effective remaining window to 60 minutes.")
 
@@ -635,10 +635,10 @@ class MarketRiskProfiler:
         if effective_close_ms is not None:
             remaining_ms = max(0, effective_close_ms - current_ms)
             if observed_vol_bp >= 500 or observed_range_bp >= 400:
-                effective_close_ms = current_ms + min(remaining_ms, 10 * 60 * 1000)
+                effective_close_ms = current_ms + min(remaining_ms, 20 * 60 * 1000)
                 notes.append("Extreme startup instability; effective close capped to 10 minutes remaining.")
             elif observed_vol_bp >= 250 or observed_range_bp >= 200:
-                effective_close_ms = current_ms + min(remaining_ms, 30 * 60 * 1000)
+                effective_close_ms = current_ms + min(remaining_ms, 60 * 60 * 1000)
                 notes.append("Elevated startup instability; effective close capped to 30 minutes remaining.")
 
         if official_close_ms is not None and effective_close_ms is not None:
@@ -704,9 +704,9 @@ class MarketRiskProfiler:
                 suggested_action = "flatten_only"
                 notes.append("Market is already in the terminal risk window.")
             else:
-                soft_stop_time_ms = effective_close_ms - 15 * 60 * 1000
-                hard_stop_time_ms = effective_close_ms - 5 * 60 * 1000
-                flatten_only_time_ms = effective_close_ms - 2 * 60 * 1000
+                soft_stop_time_ms = effective_close_ms - 5 * 60 * 1000
+                hard_stop_time_ms = effective_close_ms - 10 * 60 * 1000
+                flatten_only_time_ms = effective_close_ms - 15 * 60 * 1000
 
         confidence = 0.40
         if inferred_start_source == "ticker_datetime_token":

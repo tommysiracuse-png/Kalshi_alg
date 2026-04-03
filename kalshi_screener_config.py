@@ -19,10 +19,21 @@ MIN_SPREAD_CENTS = 5
 MAX_SPREAD_CENTS = 35
 MIN_YES_BID_CENTS = 5
 MIN_NO_BID_CENTS = 5
-MIN_VOL24H = 500
+MIN_VOL24H = 2000   # raised from 500 — kills dead zero-fill slots
 MIN_OI = 100
 MIN_TIME_TO_CLOSE_HRS = 2
 MAX_TIME_TO_CLOSE_HRS = 50
+
+# Series prefixes to exclude entirely from screening.
+# These were net money-losers in back-analysis: WTI/XRP spreads are too tight
+# relative to their informed taker flow; LowtLAX and SpotstreamGlobal have the
+# same problem.  Add a series prefix (uppercase) to keep it out of the bot.
+EXCLUDED_SERIES: list[str] = [
+    "KXWTI",             # avg -4.1¢/fill after 30 s adverse selection
+    "KXXRPD",            # avg -8.9¢/fill
+    "KXLOWTLAX",         # avg -4.1¢/fill
+    "KXSPOTSTREAMGLOBAL",# avg -20¢/fill
+]
 
 # Quote-planning logic used only for the screener CSV output
 TARGET_EDGE_CENTS = 2
