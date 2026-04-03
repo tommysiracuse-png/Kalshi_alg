@@ -31,6 +31,7 @@ import json
 import logging
 import math
 import os
+import pathlib
 import random
 import sqlite3
 import tempfile
@@ -186,6 +187,84 @@ def log_event(event_name: str, **fields: object) -> None:
         LOGGER.info("%s", event_name)
 
 
+# ---------------------------------------------------------------------------
+# P&L tracker — appends one JSON line per fill to logs/pnl_tracker.jsonl
+# ---------------------------------------------------------------------------
+
+_CATEGORY_PREFIXES: List[Tuple[str, str]] = [
+    # Weather
+    ("KXLOWT", "weather"), ("KXHIGHT", "weather"), ("KXHIGHDEN", "weather"),
+    # Commodities
+    ("KXWTI", "commodities"), ("KXBRENTD", "commodities"), ("KXBRENTW", "commodities"),
+    ("KXGOLDD", "commodities"), ("KXGOLDW", "commodities"),
+    ("KXSILVERD", "commodities"), ("KXSILVERW", "commodities"),
+    ("KXAAAGASD", "commodities"),
+    # Crypto
+    ("KXBTCD", "crypto"), ("KXBTCW", "crypto"),
+    ("KXETHD", "crypto"), ("KXETHW", "crypto"), ("KXETH-", "crypto"),
+    ("KXXRPD", "crypto"), ("KXSOLD", "crypto"), ("KXSOLE", "crypto"),
+    # Baseball
+    ("KXMLB", "baseball"),
+    # Basketball
+    ("KXNBA", "basketball"), ("KXCBAGAME", "basketball"),
+    ("KXEUROCUP", "basketball"), ("KXNCAAWB", "basketball"),
+    # Esports
+    ("KXCS2", "esports"), ("KXVALORANT", "esports"),
+    # Golf
+    ("KXPGA", "golf"),
+    # Hockey
+    ("KXDEL", "hockey"), ("KXNHL", "hockey"),
+    # Tennis
+    ("KXATP", "tennis"), ("KXWTA", "tennis"),
+    # Politics / econ
+    ("KXPOLITICS", "politics"), ("KXMAMDANI", "politics"),
+    ("KXBONDI", "politics"), ("KXAPRPOTUS", "politics"),
+    ("KXUSNFP", "economics"),
+    # Entertainment
+    ("KXALBUMSALES", "entertainment"),
+]
+
+
+def categorize_ticker(ticker: str) -> str:
+    upper = ticker.upper()
+    for prefix, category in _CATEGORY_PREFIXES:
+        if upper.startswith(prefix):
+            return category
+    return "other"
+
+
+_PNL_TRACKER_LOCK = Lock()
+
+
+def append_pnl_fill(
+    ticker: str,
+    side: str,
+    price_cents: Optional[float],
+    quantity: float,
+    fee_cents: Optional[float],
+    net_position_after: float,
+    fair_value_cents: Optional[float],
+) -> None:
+    """Append a single fill record to the shared pnl_tracker.jsonl."""
+    record = {
+        "ts": datetime.utcnow().isoformat(timespec="milliseconds") + "Z",
+        "ticker": ticker,
+        "category": categorize_ticker(ticker),
+        "side": side,
+        "price_c": price_cents,
+        "qty": quantity,
+        "fee_c": fee_cents,
+        "net_pos": net_position_after,
+        "fair_c": fair_value_cents,
+    }
+    line = json.dumps(record, separators=(",", ":")) + "\n"
+    logs_dir = pathlib.Path(__file__).resolve().parent / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    pnl_path = logs_dir / "pnl_tracker.jsonl"
+    with _PNL_TRACKER_LOCK:
+        with open(pnl_path, "a") as f:
+            f.write(line)
+
 
 def is_post_only_cross_error(exception: Exception) -> bool:
     message = str(exception).lower()
@@ -289,6 +368,29 @@ def parse_bot_args() -> argparse.Namespace:
         default=None,
         help="Optional Kalshi subaccount number. Defaults to 0 (primary account).",
     )
+    parser.add_argument(
+        "--watchdog-state-file",
+        default="",
+        help="Path to the cached watchdog state JSON file for this ticker.",
+    )
+    parser.add_argument(
+        "--watchdog-refresh-seconds",
+        type=float,
+        default=3.0,
+        help="How often V1 should refresh its cached watchdog state.",
+    )
+    parser.add_argument(
+        "--watchdog-extreme-stale-seconds",
+        type=float,
+        default=30.0,
+        help="Fail-safe flatten if the watchdog state becomes older than this.",
+    )
+    parser.add_argument(
+        "--watchdog-flatten-retries",
+        type=int,
+        default=2,
+        help="Number of emergency flatten retries before exiting with residual-risk code.",
+    )
     return parser.parse_args()
 
 
@@ -306,56 +408,69 @@ class BotSettings:
     use_demo_environment: bool = False
     dry_run: bool = False
     subaccount_number: int = 0
+    watchdog_state_file: str = ""
+    watchdog_refresh_seconds: float = 3.0
+    watchdog_extreme_stale_seconds: float = 30.0
+    watchdog_flatten_retries: int = 2
 
     # --- Order sizing ---
     yes_order_budget_cents: int = 100
     no_order_budget_cents: int = 100
-    maximum_contracts_per_order: int = 2_000
+    maximum_contracts_per_order: int = 25
     budget_fee_buffer_cents: int = 2
     allow_fractional_order_entry_when_supported: bool = False
     refill_resting_size_after_partial_fill: bool = False
 
     # --- Quote behavior ---
     post_only_quotes: bool = True
-    cancel_quotes_if_exchange_pauses: bool = True
-    minimum_milliseconds_between_requotes: int = 200
+    cancel_quotes_if_exchange_pauses: bool = False
+    minimum_milliseconds_between_requotes: int = 100
 
     # Use longer expirations than the earlier version so we stop resetting queue
     # priority every 45 seconds.
-    resting_order_expiration_seconds: int = 240
-    expiration_refresh_lead_seconds: int = 20
+    resting_order_expiration_seconds: int =500
+    expiration_refresh_lead_seconds: int = 30
     expiration_jitter_seconds: int = 20
     stagger_yes_no_expiration_offsets_seconds: int = 10
 
-    aggressive_improvement_ticks_when_spread_is_wide: int = 0
-    minimum_spread_ticks_required_for_aggressive_improvement: int = 2
-    passive_offset_ticks_when_not_improving: int = 1
+    aggressive_improvement_ticks_when_spread_is_wide: int = 2
+    minimum_spread_ticks_required_for_aggressive_improvement: int = 8
+    passive_offset_ticks_when_not_improving: int = 0
     join_current_best_bid_when_starting_new_quote_cycle: bool = True
 
     # After any fill, suppress same-side quoting for a while to reduce the
     # "got filled, stepped right back in, got filled again" pattern.
-    post_fill_no_improve_cooldown_ms: int = 4_000
-    same_side_reentry_cooldown_ms: int = 4_000
+    post_fill_no_improve_cooldown_ms: int = 2_000
+    same_side_reentry_cooldown_ms: int = 5_000
     suppress_same_side_quotes_during_reentry_cooldown: bool = True
 
     # Only chase upward when the market moved materially. Downward / de-risking
     # reprices still happen immediately.
     minimum_upward_reprice_ticks_required: int = 4
 
-    minimum_best_bid_cents_required_to_quote: int = 15
-    minimum_implied_ask_cents_required_to_quote: int = 15
-    minimum_market_best_bid_cents_required_to_quote_any_side: int = 15
+    minimum_best_bid_cents_required_to_quote: int = 8
+    minimum_implied_ask_cents_required_to_quote: int = 8
+    minimum_market_best_bid_cents_required_to_quote_any_side: int = 8
     enforce_one_tick_safety_below_implied_ask: bool = True
 
     # --- Inventory controls ---
     enable_one_way_inventory_guard: bool = True
-    one_way_inventory_guard_contracts: int = 30
-    inventory_skew_contracts_per_tick: int = 15
-    maximum_inventory_skew_ticks: int = 5
+    one_way_inventory_guard_contracts: int = 8
+    inventory_skew_contracts_per_tick: int = 2
+    maximum_inventory_skew_ticks: int = 6
+
+    # --- Book depth / phantom-spread protection ---
+    # Require at least this many contracts sitting at the best bid on a side
+    # before quoting that side. Blocks thin "decoy" top-of-book orders.
+    minimum_top_level_depth_contracts: int = 15
+    # If the second-best bid level is more than this many cents below the best
+    # bid (or there is no second level at all), do not quote that side.
+    # Prevents entering a market where the apparent spread vanishes instantly.
+    maximum_top_level_gap_cents: int = 20
 
     # --- Pair / spread protection ---
     enable_pair_guard: bool = True
-    maximum_combined_bid_cents: int = 98
+    maximum_combined_bid_cents: int = 97
     additional_profit_buffer_cents: int = 2
     pair_guard_priority: str = "auto"
 
@@ -373,54 +488,54 @@ class BotSettings:
     enable_sqlite_telemetry: bool = True
     telemetry_sqlite_path: str = ""
     trade_history_window_seconds: int = 60
-    model_refresh_interval_seconds: int = 600
+    model_refresh_interval_seconds: int = 50
     markout_horizons_seconds: Tuple[int, ...] = (1, 5, 30, 120)
 
     # --- Fill-probability model ---
-    fill_probability_horizon_seconds: int = 30
+    fill_probability_horizon_seconds: int = 60
     fill_probability_prior_fills: float = 2.0
     fill_probability_prior_misses: float = 3.0
 
     # --- EV-based quoting model ---
     minimum_expected_edge_cents_to_keep_quote: int = 1
-    minimum_expected_edge_cents_to_quote: int = 3
-    inventory_reduction_max_negative_edge_cents: int = 7
-    strong_edge_threshold_cents: int = 6
-    default_toxicity_cents: int = 3
-    default_fee_factor_for_maker_quotes: float = 0.25
+    minimum_expected_edge_cents_to_quote: int = 2
+    inventory_reduction_max_negative_edge_cents: int = 6
+    strong_edge_threshold_cents: int = 8
+    default_toxicity_cents: int = 1
+    default_fee_factor_for_maker_quotes: float = 0.45
     fair_value_mid_weight: float = 0.55
     fair_value_ticker_weight: float = 0.25
     fair_value_trade_weight: float = 0.20
-    fair_value_max_orderbook_imbalance_adjust_cents: int = 4
-    fair_value_max_trade_bias_adjust_cents: int = 6
+    fair_value_max_orderbook_imbalance_adjust_cents: int = 2
+    fair_value_max_trade_bias_adjust_cents: int = 4
     quote_size_min_fraction_of_budget: float = 0.20
-    quote_size_max_fraction_of_budget: float = 1.50
-    candidate_price_levels_to_scan: int = 16
+    quote_size_max_fraction_of_budget: float = 1.00
+    candidate_price_levels_to_scan: int = 22
 
     # Order-book pull toxicity guard.
     enable_orderbook_pull_toxicity_guard: bool = True
-    orderbook_pull_window_ms: int = 1000
-    orderbook_pull_top_levels_to_track: int = 12
-    orderbook_pull_absolute_threshold_contracts: int = 300
-    orderbook_pull_relative_depth_threshold: float = 0.3
-    orderbook_pull_side_cooldown_ms: int = 4_500
-    orderbook_pull_market_cooldown_ms: int = 4_500
-    orderbook_pull_penalty_cents: int = 5
+    orderbook_pull_window_ms: int = 1500
+    orderbook_pull_top_levels_to_track: int = 8
+    orderbook_pull_absolute_threshold_contracts: int = 150
+    orderbook_pull_relative_depth_threshold: float = 0.20
+    orderbook_pull_side_cooldown_ms: int = 5000
+    orderbook_pull_market_cooldown_ms: int = 5000
+    orderbook_pull_penalty_cents: int = 7
 
     # Queue-abandonment logic.
     enable_queue_abandonment_guard: bool = True
-    maximum_queue_ahead_contracts_before_abandonment: int = 300
-    maximum_queue_ahead_multiple_of_our_remaining_size: float = 20.0
+    maximum_queue_ahead_contracts_before_abandonment: int = 200
+    maximum_queue_ahead_multiple_of_our_remaining_size: float = 25.0
     queue_abandonment_consecutive_polls_required: int = 3
-    queue_abandonment_side_cooldown_seconds: int = 30
-    queue_abandonment_market_cooldown_seconds: int = 30
+    queue_abandonment_side_cooldown_seconds: int = 15
+    queue_abandonment_market_cooldown_seconds: int = 15
 
     # Cross-process shared write throttling.
     enable_shared_write_rate_limiter: bool = True
-    shared_write_rate_limit_writes_per_second: float = 8.0
-    shared_write_rate_limit_burst_capacity: int = 4
+    shared_write_rate_limit_writes_per_second: float = 25
+    shared_write_rate_limit_burst_capacity: int = 8
     shared_write_rate_limiter_directory: str = ""
-    global_rate_limit_backoff_seconds: float = 2.0
+    global_rate_limit_backoff_seconds: float = 1.0
 
     primary_client_order_prefix: str = "mm"
     legacy_client_order_prefixes: Tuple[str, ...] = ("mm:", "tob:")
@@ -436,6 +551,12 @@ class BotSettings:
             raise ValueError("budget_fee_buffer_cents must be >= 0")
         if self.subaccount_number < 0:
             raise ValueError("subaccount_number must be >= 0")
+        if self.watchdog_refresh_seconds < 0:
+            raise ValueError("watchdog_refresh_seconds must be >= 0")
+        if self.watchdog_extreme_stale_seconds < 0:
+            raise ValueError("watchdog_extreme_stale_seconds must be >= 0")
+        if self.watchdog_flatten_retries < 0:
+            raise ValueError("watchdog_flatten_retries must be >= 0")
         if self.resting_order_expiration_seconds < 0:
             raise ValueError("resting_order_expiration_seconds must be >= 0")
         if self.expiration_refresh_lead_seconds < 0:
@@ -463,7 +584,11 @@ class BotSettings:
         if self.minimum_best_bid_cents_required_to_quote < 0 or self.minimum_implied_ask_cents_required_to_quote < 0:
             raise ValueError("Quote-threshold cents must be >= 0")
         if self.minimum_market_best_bid_cents_required_to_quote_any_side < 0:
-            raise ValueError("minimum_market_best_bid_cents_required_to_quote_any_side must be >= 0")
+            raise ValueError("minimum_market_best_bid_cents_required_to_quote_any_side must be >= 0") 
+        if self.minimum_top_level_depth_contracts < 0:
+            raise ValueError("minimum_top_level_depth_contracts must be >= 0")
+        if self.maximum_top_level_gap_cents < 0:
+            raise ValueError("maximum_top_level_gap_cents must be >= 0")
         if self.one_way_inventory_guard_contracts < 0:
             raise ValueError("one_way_inventory_guard_contracts must be >= 0")
         if self.inventory_skew_contracts_per_tick <= 0:
@@ -568,6 +693,10 @@ def build_settings_from_args(bot_args: argparse.Namespace) -> BotSettings:
         use_demo_environment=bool(bot_args.use_demo or defaults.use_demo_environment),
         dry_run=bool(bot_args.dry_run or defaults.dry_run),
         subaccount_number=int(bot_args.subaccount if bot_args.subaccount is not None else defaults.subaccount_number),
+        watchdog_state_file=str(bot_args.watchdog_state_file or defaults.watchdog_state_file),
+        watchdog_refresh_seconds=float(bot_args.watchdog_refresh_seconds if bot_args.watchdog_refresh_seconds is not None else defaults.watchdog_refresh_seconds),
+        watchdog_extreme_stale_seconds=float(bot_args.watchdog_extreme_stale_seconds if bot_args.watchdog_extreme_stale_seconds is not None else defaults.watchdog_extreme_stale_seconds),
+        watchdog_flatten_retries=int(bot_args.watchdog_flatten_retries if bot_args.watchdog_flatten_retries is not None else defaults.watchdog_flatten_retries),
         yes_order_budget_cents=int(bot_args.yes_budget_cents if bot_args.yes_budget_cents is not None else defaults.yes_order_budget_cents),
         no_order_budget_cents=int(bot_args.no_budget_cents if bot_args.no_budget_cents is not None else defaults.no_order_budget_cents),
     )
@@ -1050,6 +1179,13 @@ class KalshiApiClient:
         response = self.rest_get(f"{self.api_prefix}/markets/{market_ticker}")
         return response["market"]
 
+    def get_market_quote(self, market_ticker: str) -> dict:
+        market = self.get_market(market_ticker)
+        return {
+            "yes_bid_units": parse_optional_price_units(market, "yes_bid_dollars", "yes_bid"),
+            "no_bid_units": parse_optional_price_units(market, "no_bid_dollars", "no_bid"),
+        }
+
     def get_positions(self, market_ticker: str) -> dict:
         return self.rest_get(
             f"{self.api_prefix}/portfolio/positions",
@@ -1091,31 +1227,42 @@ class KalshiApiClient:
         count_units: int,
         client_order_id: str,
         expiration_timestamp_seconds: Optional[int],
+        action: str = "buy",
+        post_only: Optional[bool] = None,
+        reduce_only: Optional[bool] = None,
+        time_in_force: Optional[str] = None,
+        cancel_order_on_pause: Optional[bool] = None,
     ) -> dict:
         body = {
             "ticker": market_ticker,
             "side": side,
-            "action": "buy",
+            "action": action,
             "client_order_id": client_order_id,
             "count_fp": format_count_fp(count_units),
-            "post_only": bool(self.settings.post_only_quotes),
-            "cancel_order_on_pause": bool(self.settings.cancel_quotes_if_exchange_pauses),
+            "post_only": bool(self.settings.post_only_quotes if post_only is None else post_only),
+            "cancel_order_on_pause": bool(self.settings.cancel_quotes_if_exchange_pauses if cancel_order_on_pause is None else cancel_order_on_pause),
             "subaccount": self.settings.subaccount_number,
-            "time_in_force": "good_till_canceled",
+            "time_in_force": str(time_in_force or "good_till_canceled"),
         }
+        if reduce_only is not None:
+            body["reduce_only"] = bool(reduce_only)
 
         if side == "yes":
             body["yes_price_dollars"] = format_price_dollars(price_units)
         else:
             body["no_price_dollars"] = format_price_dollars(price_units)
 
-        if expiration_timestamp_seconds and expiration_timestamp_seconds > 0:
+        if expiration_timestamp_seconds and expiration_timestamp_seconds > 0 and body.get("time_in_force") != "immediate_or_cancel":
             body["expiration_ts"] = int(expiration_timestamp_seconds)
 
         if self.settings.dry_run:
             log_event(
                 "DRY_CREATE",
                 side=side,
+                action=action,
+                tif=body.get("time_in_force"),
+                post_only=body.get("post_only"),
+                reduce_only=body.get("reduce_only", False),
                 price_dollars=format_price_dollars(price_units),
                 contracts=format_count_fp(count_units),
             )
@@ -1291,6 +1438,20 @@ class ManagedOrderState:
         self.consecutive_queue_ahead_breaches = 0
         if not preserve_quote_cycle:
             self.quote_cycle_filled_units = 0
+
+
+@dataclass
+class WatchdogState:
+    ticker: str
+    generated_at_ms: int
+    effective_close_time_ms: Optional[int]
+    soft_stop_time_ms: Optional[int]
+    hard_stop_time_ms: Optional[int]
+    flatten_only_time_ms: Optional[int]
+    confidence: float
+    mode: str
+    reason: str
+    profile_version: str
 
 
 # ---------------------------------------------------------------------------
@@ -2012,7 +2173,17 @@ class FairValueEngine:
         adjusted_fair_units = self.market.price_grid.floor_to_valid(adjusted_fair_units) or adjusted_fair_units
 
         if self.last_fair_yes_units is not None:
-            adjusted_fair_units = int(round((0.60 * self.last_fair_yes_units) + (0.40 * adjusted_fair_units)))
+            # Use a faster EMA (more weight on new data) when the market is
+            # approaching expiry.  Long-dated markets benefit from smoothing to
+            # suppress noise; short-dated markets move fast and smoothing
+            # introduces toxic lag (fills at stale prices by informed takers).
+            if context.seconds_to_close is not None and context.seconds_to_close <= 1800:
+                ema_alpha = 0.90   # <30 min: nearly no smoothing
+            elif context.seconds_to_close is not None and context.seconds_to_close <= 3600:
+                ema_alpha = 0.80   # 30–60 min: light smoothing
+            else:
+                ema_alpha = 0.60   # >60 min: original smoothing
+            adjusted_fair_units = int(round(((1.0 - ema_alpha) * self.last_fair_yes_units) + (ema_alpha * adjusted_fair_units)))
             adjusted_fair_units = max(self.market.price_grid.minimum_valid_price_units, min(self.market.price_grid.maximum_valid_price_units, adjusted_fair_units))
             adjusted_fair_units = self.market.price_grid.floor_to_valid(adjusted_fair_units) or adjusted_fair_units
 
@@ -2144,8 +2315,8 @@ class ToxicityModel:
         adverse_trade_flow = max(0.0, -context.trade_bias) if side == "yes" else max(0.0, context.trade_bias)
         adverse_imbalance = max(0.0, -context.order_book_imbalance) if side == "yes" else max(0.0, context.order_book_imbalance)
 
-        estimated_units += adverse_trade_flow * PRICE_UNITS_PER_CENT * 2.0
-        estimated_units += adverse_imbalance * PRICE_UNITS_PER_CENT * 1.0
+        estimated_units += adverse_trade_flow * PRICE_UNITS_PER_CENT * 0.5
+        estimated_units += adverse_imbalance * PRICE_UNITS_PER_CENT * 0.3
 
         return max(0, int(round(estimated_units)))
 
@@ -2341,6 +2512,15 @@ class TopOfBookBot:
 
         self.requote_event = asyncio.Event()
         self.requote_lock = asyncio.Lock()
+        self.watchdog_state: Optional[WatchdogState] = None
+        self.watchdog_state_mtime_ns: Optional[int] = None
+        self.started_at_ms = now_ms()
+        self.watchdog_last_mode_logged: Optional[str] = None
+        self.watchdog_shutdown_in_progress = False
+        self.shutdown_requested = False
+        self.shutdown_exit_code: Optional[int] = None
+        self.websocket_connection = None
+        self.background_tasks: List[asyncio.Task] = []
         self.instance_expiration_jitter_seconds = (
             random.randint(0, self.settings.expiration_jitter_seconds)
             if self.settings.expiration_jitter_seconds > 0
@@ -2437,6 +2617,12 @@ class TopOfBookBot:
             return 0
         levels = self.book_yes if side == "yes" else self.book_no
         return int(levels.get(best_price_units, 0) or 0)
+
+    def second_best_bid(self, side: str) -> Optional[int]:
+        """Return the second-best bid price level, or None if fewer than 2 levels exist."""
+        levels = self.book_yes if side == "yes" else self.book_no
+        sorted_prices = sorted(levels.keys(), reverse=True)
+        return sorted_prices[1] if len(sorted_prices) >= 2 else None
 
     def displayed_size_units_at_price(self, side: str, price_units: Optional[int]) -> int:
         if price_units is None:
@@ -2808,7 +2994,7 @@ class TopOfBookBot:
         if blocked_side == side:
             return False, "inventory_block"
 
-        if self.settings.suppress_same_side_quotes_during_reentry_cooldown and self.side_same_side_reentry_cooldown_active(side):
+        if self.settings.suppress_same_side_quotes_during_reentry_cooldown and self.side_same_side_reentry_cooldown_active(side) and not reducing_inventory:
             return False, "same_side_reentry_cooldown"
 
         if self.side_queue_abandonment_cooldown_active(side):
@@ -2828,6 +3014,13 @@ class TopOfBookBot:
                 return False, "best_bid_floor"
             if implied_ask_units < minimum_ask_units:
                 return False, "implied_ask_floor"
+            if self.settings.minimum_top_level_depth_contracts > 0:
+                if self.best_bid_size_units(side) < contracts_to_count_units(self.settings.minimum_top_level_depth_contracts):
+                    return False, "thin_top_level"
+            if self.settings.maximum_top_level_gap_cents > 0:
+                second = self.second_best_bid(side)
+                if second is None or (best_bid_units - second) > cents_to_price_units(self.settings.maximum_top_level_gap_cents):
+                    return False, "wide_book_gap"
             if market_guard_active:
                 return False, "market_probability_guard"
         else:
@@ -3100,7 +3293,7 @@ class TopOfBookBot:
         if queue_units is None or queue_units <= 0:
             return 0
         queue_contracts = queue_units / COUNT_SCALE
-        queue_penalty_cents = min(6.0, queue_contracts / 30.0)
+        queue_penalty_cents = min(3.0, queue_contracts / 50.0)
         return int(round(queue_penalty_cents * PRICE_UNITS_PER_CENT))
 
     def queue_abandonment_threshold_for_size_units(self, target_size_units: int) -> int:
@@ -4145,6 +4338,19 @@ class TopOfBookBot:
             fee_dollars=(format_price_dollars(fee_units) if fee_units is not None else "unknown"),
             net_position_contracts=format_count_fp(self.net_position_units),
         )
+        append_pnl_fill(
+            ticker=self.market.ticker,
+            side=side,
+            price_cents=round(price_units / PRICE_UNITS_PER_CENT, 2) if price_units is not None else None,
+            quantity=round(count_units / COUNT_SCALE, 2),
+            fee_cents=round(fee_units / PRICE_UNITS_PER_CENT, 2) if fee_units is not None else None,
+            net_position_after=round(self.net_position_units / COUNT_SCALE, 2),
+            fair_value_cents=(
+                round(self.last_quote_decisions[side].fair_yes_units / PRICE_UNITS_PER_CENT, 2)
+                if self.last_quote_decisions.get(side) and self.last_quote_decisions[side].fair_yes_units is not None
+                else None
+            ),
+        )
         if price_units is not None and context_before is not None:
             self.schedule_fill_markouts(
                 fill_key=fill_key,
@@ -4236,7 +4442,7 @@ class TopOfBookBot:
     # -------------------------
 
     async def requote_worker(self) -> None:
-        while True:
+        while not self.shutdown_requested:
             await self.requote_event.wait()
             self.requote_event.clear()
 
@@ -4296,11 +4502,220 @@ class TopOfBookBot:
 
     async def model_refresh_worker(self) -> None:
         refresh_interval_seconds = max(60, int(self.settings.model_refresh_interval_seconds))
-        while True:
+        while not self.shutdown_requested:
             try:
                 await asyncio.to_thread(self.refresh_external_models)
             except Exception as exc:
                 log_event("MODEL_REFRESH_ERROR", error=str(exc))
+            await asyncio.sleep(refresh_interval_seconds)
+
+    def sync_position_from_rest(self) -> int:
+        response = self.api_client.get_positions(self.settings.market_ticker)
+        market_positions = response.get("market_positions") or []
+        if not market_positions:
+            self.net_position_units = 0
+            return 0
+
+        position_payload = market_positions[0]
+        position_units = parse_optional_count_units(position_payload, "position_fp", "position")
+        self.net_position_units = int(position_units or 0)
+        return self.net_position_units
+
+    def maybe_load_watchdog_state(self) -> Optional[WatchdogState]:
+        state_path = self.settings.watchdog_state_file.strip()
+        if not state_path:
+            return None
+
+        try:
+            stat_result = os.stat(state_path)
+        except FileNotFoundError:
+            return None
+
+        if self.watchdog_state_mtime_ns == stat_result.st_mtime_ns and self.watchdog_state is not None:
+            return self.watchdog_state
+
+        with open(state_path, "r", encoding="utf-8") as state_file:
+            payload = json.load(state_file)
+
+        state = WatchdogState(
+            ticker=str(payload.get("ticker") or self.settings.market_ticker),
+            generated_at_ms=int(payload.get("generated_at_ms") or 0),
+            effective_close_time_ms=(int(payload["effective_close_time_ms"]) if payload.get("effective_close_time_ms") not in (None, "") else None),
+            soft_stop_time_ms=(int(payload["soft_stop_time_ms"]) if payload.get("soft_stop_time_ms") not in (None, "") else None),
+            hard_stop_time_ms=(int(payload["hard_stop_time_ms"]) if payload.get("hard_stop_time_ms") not in (None, "") else None),
+            flatten_only_time_ms=(int(payload["flatten_only_time_ms"]) if payload.get("flatten_only_time_ms") not in (None, "") else None),
+            confidence=float(payload.get("confidence") or 0.0),
+            mode=str(payload.get("mode") or "normal"),
+            reason=str(payload.get("reason") or "unknown"),
+            profile_version=str(payload.get("profile_version") or "heuristic-v2"),
+        )
+        self.watchdog_state = state
+        self.watchdog_state_mtime_ns = stat_result.st_mtime_ns
+
+        if self.watchdog_last_mode_logged != state.mode:
+            log_event(
+                "WATCHDOG_MODE_CHANGE",
+                ticker=state.ticker,
+                old_mode=(self.watchdog_last_mode_logged or "none"),
+                new_mode=state.mode,
+                reason=state.reason,
+                confidence=f"{state.confidence:.3f}",
+            )
+            self.watchdog_last_mode_logged = state.mode
+
+        return state
+
+    async def request_shutdown(self, exit_code: int) -> None:
+        self.shutdown_requested = True
+        self.shutdown_exit_code = int(exit_code)
+        self.requote_event.set()
+        websocket = self.websocket_connection
+        if websocket is not None:
+            try:
+                await websocket.close()
+            except Exception:
+                pass
+
+    async def emergency_cancel_all_quotes(self, *, reason: str) -> None:
+        await self.cancel_side_quote("yes", reason=reason, reset_quote_cycle=True)
+        await self.cancel_side_quote("no", reason=reason, reset_quote_cycle=True)
+
+    async def submit_watchdog_exit_order(self) -> bool:
+        net_position_units = int(self.sync_position_from_rest())
+        if net_position_units == 0:
+            return True
+
+        quote = await asyncio.to_thread(self.api_client.get_market_quote, self.settings.market_ticker)
+        held_side = "yes" if net_position_units > 0 else "no"
+        best_bid_units = int(quote.get("yes_bid_units") or 0) if held_side == "yes" else int(quote.get("no_bid_units") or 0)
+        if best_bid_units <= 0:
+            log_event("WATCHDOG_EXIT_NO_BID", side=held_side, net_position_contracts=format_count_fp(net_position_units))
+            return False
+
+        exit_count_units = abs(net_position_units)
+        client_order_id = f"wd:{held_side}:{uuid.uuid4().hex[:16]}"
+        response = await asyncio.to_thread(
+            self.api_client.create_order,
+            market_ticker=self.settings.market_ticker,
+            side=held_side,
+            action="sell",
+            price_units=best_bid_units,
+            count_units=exit_count_units,
+            client_order_id=client_order_id,
+            expiration_timestamp_seconds=None,
+            post_only=False,
+            reduce_only=True,
+            time_in_force="immediate_or_cancel",
+            cancel_order_on_pause=False,
+        )
+        order_payload = (response or {}).get("order") or {}
+        log_event(
+            "WATCHDOG_EXIT_ORDER",
+            side=held_side,
+            price_dollars=format_price_dollars(best_bid_units),
+            contracts=format_count_fp(exit_count_units),
+            status=(order_payload.get("status") or "unknown"),
+            order_id=(order_payload.get("order_id") or "unknown"),
+        )
+        await asyncio.sleep(0.75)
+        refreshed_position_units = int(self.sync_position_from_rest())
+        return refreshed_position_units == 0
+
+    async def execute_watchdog_shutdown(self, *, reason: str, requested_exit_code: int) -> None:
+        if self.watchdog_shutdown_in_progress:
+            return
+        self.watchdog_shutdown_in_progress = True
+
+        log_event(
+            "WATCHDOG_FLATTEN_TRIGGER",
+            ticker=self.settings.market_ticker,
+            reason=reason,
+            threshold="watchdog",
+            observed_value=(self.watchdog_state.confidence if self.watchdog_state is not None else "unknown"),
+        )
+
+        residual_exit_code = 63
+        async with self.requote_lock:
+            try:
+                await self.emergency_cancel_all_quotes(reason=f"watchdog_{reason}")
+                net_position_units = int(self.sync_position_from_rest())
+                if net_position_units == 0:
+                    await self.request_shutdown(requested_exit_code)
+                    return
+
+                for attempt in range(max(1, self.settings.watchdog_flatten_retries)):
+                    flattened = await self.submit_watchdog_exit_order()
+                    if flattened:
+                        await self.request_shutdown(requested_exit_code)
+                        return
+                    log_event(
+                        "WATCHDOG_FLATTEN_RETRY",
+                        ticker=self.settings.market_ticker,
+                        attempt=attempt + 1,
+                        net_position_contracts=format_count_fp(self.net_position_units),
+                    )
+                    await self.emergency_cancel_all_quotes(reason=f"watchdog_retry_{attempt + 1}")
+
+                log_event(
+                    "WATCHDOG_FLATTEN_RESIDUAL",
+                    ticker=self.settings.market_ticker,
+                    net_position_contracts=format_count_fp(self.net_position_units),
+                )
+                await self.request_shutdown(residual_exit_code)
+                return
+            except Exception as exc:
+                log_event("WATCHDOG_FLATTEN_ERROR", ticker=self.settings.market_ticker, error=str(exc))
+                await self.request_shutdown(residual_exit_code)
+                return
+
+    async def watchdog_worker(self) -> None:
+        if not self.settings.watchdog_state_file.strip():
+            return
+
+        refresh_interval_seconds = max(1.0, float(self.settings.watchdog_refresh_seconds))
+        while not self.shutdown_requested:
+            try:
+                state = self.maybe_load_watchdog_state()
+                current_ms = now_ms()
+                if state is None:
+                    missing_age_seconds = max(0.0, (current_ms - self.started_at_ms) / 1000.0)
+                    if missing_age_seconds > float(self.settings.watchdog_extreme_stale_seconds):
+                        log_event(
+                            "WATCHDOG_PROFILE_STALE",
+                            ticker=self.settings.market_ticker,
+                            age_seconds=f"{missing_age_seconds:.1f}",
+                            action="flatten_only_missing_state",
+                        )
+                        await self.execute_watchdog_shutdown(reason="profile_missing", requested_exit_code=64)
+                        return
+                    await asyncio.sleep(refresh_interval_seconds)
+                    continue
+
+                if state.generated_at_ms > 0:
+                    age_seconds = max(0.0, (current_ms - state.generated_at_ms) / 1000.0)
+                    if age_seconds > float(self.settings.watchdog_extreme_stale_seconds):
+                        log_event(
+                            "WATCHDOG_PROFILE_STALE",
+                            ticker=state.ticker,
+                            age_seconds=f"{age_seconds:.1f}",
+                            action="flatten_only",
+                        )
+                        await self.execute_watchdog_shutdown(reason="profile_stale", requested_exit_code=64)
+                        return
+
+                if state.effective_close_time_ms is not None and current_ms >= int(state.effective_close_time_ms):
+                    await self.execute_watchdog_shutdown(reason="effective_close", requested_exit_code=61)
+                    return
+
+                if state.mode == "flatten_only":
+                    exit_code = 64 if state.reason in {"invalid_effective_close", "profile_stale"} else 62
+                    if state.reason == "effective_close_window":
+                        exit_code = 61
+                    await self.execute_watchdog_shutdown(reason=state.reason, requested_exit_code=exit_code)
+                    return
+            except Exception as exc:
+                log_event("WATCHDOG_STATE_ERROR", ticker=self.settings.market_ticker, error=str(exc))
+
             await asyncio.sleep(refresh_interval_seconds)
 
     async def websocket_main(self) -> None:
@@ -4325,6 +4740,7 @@ class TopOfBookBot:
                     )
 
                 async with connection as websocket:
+                    self.websocket_connection = websocket
                     backoff_seconds = 1
                     self.book_ready = False
                     self.last_orderbook_sequence = None
@@ -4382,6 +4798,8 @@ class TopOfBookBot:
                     log_event("WS_CONNECTED_AND_SUBSCRIBED")
 
                     async for raw_message in websocket:
+                        if self.shutdown_requested:
+                            return
                         data = json.loads(raw_message)
                         message_type = data.get("type")
 
@@ -4421,9 +4839,13 @@ class TopOfBookBot:
                             log_event("WS_ERROR", payload=data)
 
             except Exception as exc:
+                if self.shutdown_requested:
+                    return
                 log_event("WS_DISCONNECT", error=str(exc), reconnect_backoff_seconds=backoff_seconds)
                 await asyncio.sleep(backoff_seconds)
                 backoff_seconds = min(30, backoff_seconds * 2)
+            finally:
+                self.websocket_connection = None
 
     async def run(self) -> None:
         log_event(
@@ -4440,17 +4862,32 @@ class TopOfBookBot:
             expiration_seconds=self.settings.resting_order_expiration_seconds,
             same_side_reentry_cooldown_ms=self.settings.same_side_reentry_cooldown_ms,
             queue_guard=self.settings.enable_queue_abandonment_guard,
+            watchdog_state_file=(self.settings.watchdog_state_file or "none"),
+            watchdog_refresh_seconds=self.settings.watchdog_refresh_seconds,
         )
 
         self.load_startup_position()
         self.cancel_owned_resting_quotes_on_startup()
         await asyncio.to_thread(self.refresh_external_models)
 
-        asyncio.create_task(self.requote_worker())
-        asyncio.create_task(self.queue_position_worker())
-        asyncio.create_task(self.model_refresh_worker())
+        self.background_tasks = [
+            asyncio.create_task(self.requote_worker()),
+            asyncio.create_task(self.queue_position_worker()),
+            asyncio.create_task(self.model_refresh_worker()),
+        ]
+        if self.settings.watchdog_state_file.strip():
+            self.background_tasks.append(asyncio.create_task(self.watchdog_worker()))
 
-        await self.websocket_main()
+        try:
+            await self.websocket_main()
+        finally:
+            for task in self.background_tasks:
+                task.cancel()
+            if self.background_tasks:
+                await asyncio.gather(*self.background_tasks, return_exceptions=True)
+
+        if self.shutdown_exit_code is not None:
+            raise SystemExit(self.shutdown_exit_code)
 
 
 # ---------------------------------------------------------------------------
@@ -4506,7 +4943,19 @@ def main() -> None:
         api_client=api_client,
         market=market,
     )
-    asyncio.run(bot.run())
+    try:
+        asyncio.run(bot.run())
+    except KeyboardInterrupt:
+        log_event(
+            "GRACEFUL_SHUTDOWN",
+            ticker=settings.market_ticker,
+            net_position_contracts=format_count_fp(bot.net_position_units),
+            reason="SIGINT",
+        )
+        try:
+            bot.cancel_owned_resting_quotes_on_startup()
+        except Exception as exc:
+            log_event("SHUTDOWN_CANCEL_ERROR", error=str(exc))
 
 
 if __name__ == "__main__":
