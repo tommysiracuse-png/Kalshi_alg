@@ -610,12 +610,13 @@ class MarketRiskProfiler:
             notes.append("Fell back to official close because no validated event end estimate was available.")
 
         # Front-loaded speech/event contracts get compressed further.
+        # 25 min: speeches typically run 20-25 min; 15 min was too aggressive.
         if family == "speech_event" and effective_close_ms is not None:
             remaining_ms = max(0, effective_close_ms - current_ms)
-            capped_remaining_ms = min(remaining_ms, 15 * 60 * 1000)
+            capped_remaining_ms = min(remaining_ms, 25 * 60 * 1000)
             if capped_remaining_ms < remaining_ms:
                 effective_close_ms = current_ms + capped_remaining_ms
-                notes.append("Speech/event market capped to 15-minute maximum effective remaining window.")
+                notes.append("Speech/event market capped to 25-minute maximum effective remaining window.")
 
         # Live-game compression: if already live, shorten horizon when instability is high.
         if event_live_now_inferred and effective_close_ms is not None:
@@ -626,20 +627,25 @@ class MarketRiskProfiler:
                 effective_close_ms = current_ms + compressed_ms
                 notes.append("Live market with high instability; compressed effective close to <=20 minutes remaining.")
             elif family in {"mlb", "nba", "nhl", "soccer", "esports"}:
-                # Even in calmer live sports, do not let the bot assume a huge remaining window.
-                compressed_ms = min(remaining_ms, 120 * 60 * 1000)
+                # 180 min: esports fills observed as late as 186 min into a session;
+                # MLB/NBA sessions in data run only 14-17 min so cap is irrelevant there.
+                compressed_ms = min(remaining_ms, 180 * 60 * 1000)
                 effective_close_ms = current_ms + compressed_ms
-                notes.append("Live sports/esports market; capped effective remaining window to 60 minutes.")
+                notes.append("Live sports/esports market; capped effective remaining window to 180 minutes.")
 
         # General instability shrink.
         if effective_close_ms is not None:
             remaining_ms = max(0, effective_close_ms - current_ms)
             if observed_vol_bp >= 500 or observed_range_bp >= 400:
-                effective_close_ms = current_ms + min(remaining_ms, 20 * 60 * 1000)
-                notes.append("Extreme startup instability; effective close capped to 10 minutes remaining.")
+                # 45 min: tennis/darts sessions hit this threshold 56% of the time
+                # and run up to 46 min with fills throughout. 10 min was cutting matches short.
+                effective_close_ms = current_ms + min(remaining_ms, 45 * 60 * 1000)
+                notes.append("Extreme startup instability; effective close capped to 45 minutes remaining.")
             elif observed_vol_bp >= 250 or observed_range_bp >= 200:
-                effective_close_ms = current_ms + min(remaining_ms, 60 * 60 * 1000)
-                notes.append("Elevated startup instability; effective close capped to 30 minutes remaining.")
+                # 120 min: commodity sessions hit this 36% of the time and run 400+ min
+                # with 398 fills after the 240-min mark. 30 min was missing most of them.
+                effective_close_ms = current_ms + min(remaining_ms, 120 * 60 * 1000)
+                notes.append("Elevated startup instability; effective close capped to 120 minutes remaining.")
 
         if official_close_ms is not None and effective_close_ms is not None:
             effective_close_ms = min(effective_close_ms, official_close_ms)
