@@ -1,0 +1,87 @@
+
+=== START 2026-04-30 21:24:44 ===
+CMD: /home/codespace/.python/current/bin/python3 /workspaces/Kalshi_alg/market_watchdog_runner.py --ticker KXAAAGASD-26MAY01-4.375 --state-file /workspaces/Kalshi_alg/watchdog_state/KXAAAGASD-26MAY01-4.375.json --profiler-script /workspaces/Kalshi_alg/market_risk_profiler.py --interval-seconds 60.0 --sample-seconds 2.5 --poll-interval-seconds 0.35 --confidence-reduction-threshold 0.68 --confidence-flatten-threshold 0.55
+21:24:44 INFO WATCHDOG_PROFILE_START | ticker=KXAAAGASD-26MAY01-4.375 sample_seconds=2.5 poll_interval_seconds=0.35
+21:24:47 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:25:50 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:26:53 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:27:56 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:28:59 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:30:02 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:31:05 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:32:08 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:33:11 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:34:14 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:35:17 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:36:20 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:37:23 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:38:26 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:39:29 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:40:32 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:41:35 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:42:38 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:43:41 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:44:44 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:45:47 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:46:50 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:47:53 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:48:56 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:49:59 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:51:02 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:52:05 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:53:08 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:54:11 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:55:14 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:56:17 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:57:20 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+21:58:23 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/market_watchdog_runner.py", line 350, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/workspaces/Kalshi_alg/market_watchdog_runner.py", line 346, in main
+    time.sleep(max(1.0, float(args.interval_seconds)))
+KeyboardInterrupt
+
+=== START 2026-04-30 21:58:58 ===
+CMD: /home/codespace/.python/current/bin/python3 /workspaces/Kalshi_alg/market_watchdog_runner.py --ticker KXAAAGASD-26MAY01-4.375 --state-file /workspaces/Kalshi_alg/watchdog_state/KXAAAGASD-26MAY01-4.375.json --profiler-script /workspaces/Kalshi_alg/market_risk_profiler.py --interval-seconds 60.0 --sample-seconds 2.5 --poll-interval-seconds 0.35 --confidence-reduction-threshold 0.68 --confidence-flatten-threshold 0.55
+21:58:58 INFO WATCHDOG_PROFILE_START | ticker=KXAAAGASD-26MAY01-4.375 sample_seconds=2.5 poll_interval_seconds=0.35
+21:59:01 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:00:04 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:01:07 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:02:10 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:03:13 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:04:16 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:05:19 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:06:22 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:07:26 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:08:28 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:09:31 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:10:34 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:11:37 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:12:40 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:13:43 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:14:46 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:15:50 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:16:52 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:17:55 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:18:58 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:20:01 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:21:04 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:22:07 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:23:11 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:24:14 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:25:17 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:26:20 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:27:23 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:28:26 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:29:29 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:30:32 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+22:31:35 INFO WATCHDOG_PROFILE_RESULT | ticker=KXAAAGASD-26MAY01-4.375 effective_close=1777607940000 hard_stop=1777607340000 flatten_only=1777607040000 confidence=0.75 mode=normal reason=normal
+Traceback (most recent call last):
+  File "/workspaces/Kalshi_alg/market_watchdog_runner.py", line 350, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/workspaces/Kalshi_alg/market_watchdog_runner.py", line 346, in main
+    time.sleep(max(1.0, float(args.interval_seconds)))
+KeyboardInterrupt

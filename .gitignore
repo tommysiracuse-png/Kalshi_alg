@@ -1,0 +1,29 @@
+# Secrets — never commit
+tizzler2003.txt
+privkey.txt
+*.pem
+.env
+
+# Runtime artifacts
+logs/*.log
+logs/*.jsonl
+!logs/SAMPLE_*.log
+!logs/README.md
+
+watchdog_state/
+watchdog_disable_list.json
+watchdog_disable_list.json.bak
+
+# Telemetry databases
+telemetry_*.sqlite3
+telemetry_*.sqlite3-shm
+telemetry_*.sqlite3-wal
+
+# Python
+__pycache__/
+*.pyc
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
