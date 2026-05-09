@@ -353,6 +353,11 @@ def parse_bot_args() -> argparse.Namespace:
         help="Path to the Kalshi private key PEM file. If omitted, KALSHI_PRIVATE_KEY_PATH or PRIVATE_KEY_PATH is used.",
     )
     parser.add_argument(
+        "--telemetry-sqlite-path",
+        default="",
+        help="Path to the telemetry SQLite database file for this bot.",
+    )
+    parser.add_argument(
         "--use-demo",
         action="store_true",
         help="Use the Kalshi demo environment instead of production.",
@@ -726,6 +731,7 @@ def build_settings_from_args(bot_args: argparse.Namespace) -> BotSettings:
         watchdog_state_file=str(bot_args.watchdog_state_file or defaults.watchdog_state_file),
         watchdog_refresh_seconds=float(bot_args.watchdog_refresh_seconds if bot_args.watchdog_refresh_seconds is not None else defaults.watchdog_refresh_seconds),
         watchdog_extreme_stale_seconds=float(bot_args.watchdog_extreme_stale_seconds if bot_args.watchdog_extreme_stale_seconds is not None else defaults.watchdog_extreme_stale_seconds),
+        telemetry_sqlite_path=str(bot_args.telemetry_sqlite_path or defaults.telemetry_sqlite_path),
         watchdog_flatten_retries=int(bot_args.watchdog_flatten_retries if bot_args.watchdog_flatten_retries is not None else defaults.watchdog_flatten_retries),
         yes_order_budget_cents=int(bot_args.yes_budget_cents if bot_args.yes_budget_cents is not None else defaults.yes_order_budget_cents),
         no_order_budget_cents=int(bot_args.no_budget_cents if bot_args.no_budget_cents is not None else defaults.no_order_budget_cents),

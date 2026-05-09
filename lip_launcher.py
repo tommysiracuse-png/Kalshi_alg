@@ -314,6 +314,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--watchdog-profiler-script", default="", help="Path to market_risk_profiler.py")
     parser.add_argument("--watchdog-state-dir", default="", help="Directory for watchdog state JSON files.")
     parser.add_argument("--watchdog-disable-file", default="", help="Path to the permanent watchdog disable-list JSON file.")
+    parser.add_argument("--telemetry-dir", default="", help="Optional directory for session telemetry SQLite files.")
     parser.add_argument("--watchdog-interval-seconds", type=float, default=180.0, help="How often each watchdog runner recomputes the profile.")
     parser.add_argument("--watchdog-state-refresh-seconds", type=float, default=3.0, help="How often V1 refreshes its cached watchdog state.")
     parser.add_argument("--watchdog-extreme-stale-seconds", type=float, default=30.0, help="Fail-safe flatten if the watchdog state is older than this.")
@@ -612,6 +613,7 @@ def build_child_command(
     watchdog_state_file: Optional[Path],
     watchdog_state_refresh_seconds: float,
     watchdog_extreme_stale_seconds: float,
+    telemetry_sqlite_path: Optional[str],
 ) -> List[str]:
     command: List[str] = [
         python_executable,
@@ -646,6 +648,9 @@ def build_child_command(
             "--watchdog-extreme-stale-seconds",
             str(watchdog_extreme_stale_seconds),
         ])
+
+    if telemetry_sqlite_path is not None:
+        command.extend(["--telemetry-sqlite-path", telemetry_sqlite_path])
 
     return command
 
@@ -712,6 +717,8 @@ def spawn_single_bot(
     watchdog_state_file: Optional[Path],
     watchdog_runner_script_path: Optional[Path],
     watchdog_profiler_script_path: Optional[Path],
+    watchdog_state_dir: Path,
+    telemetry_dir: Optional[Path],
     watchdog_interval_seconds: float,
     watchdog_state_refresh_seconds: float,
     watchdog_extreme_stale_seconds: float,
@@ -726,6 +733,12 @@ def spawn_single_bot(
     logs_directory.mkdir(parents=True, exist_ok=True)
     bot_working_directory = bot_script_path.parent.resolve()
 
+    telemetry_sqlite_path = None
+    if telemetry_dir is not None:
+        telemetry_dir.mkdir(parents=True, exist_ok=True)
+        safe_ticker = pick.ticker.replace("/", "_").replace("\\", "_")
+        telemetry_sqlite_path = str(telemetry_dir / f"telemetry_{safe_ticker}.sqlite3")
+
     child_command = build_child_command(
         python_executable=sys.executable,
         bot_script_path=bot_script_path,
@@ -739,6 +752,7 @@ def spawn_single_bot(
         watchdog_state_file=watchdog_state_file,
         watchdog_state_refresh_seconds=watchdog_state_refresh_seconds,
         watchdog_extreme_stale_seconds=watchdog_extreme_stale_seconds,
+        telemetry_sqlite_path=telemetry_sqlite_path,
     )
 
     child_environment = dict(os.environ)
@@ -831,6 +845,7 @@ def spawn_bots(
     watchdog_profiler_script_path: Optional[Path],
     watchdog_state_dir: Path,
     watchdog_disable_file: Path,
+    telemetry_dir: Optional[Path],
     watchdog_interval_seconds: float,
     watchdog_state_refresh_seconds: float,
     watchdog_extreme_stale_seconds: float,
@@ -905,6 +920,8 @@ def spawn_bots(
             watchdog_state_file=watchdog_state_file,
             watchdog_runner_script_path=watchdog_runner_script_path,
             watchdog_profiler_script_path=watchdog_profiler_script_path,
+            watchdog_state_dir=watchdog_state_dir,
+            telemetry_dir=telemetry_dir,
             watchdog_interval_seconds=watchdog_interval_seconds,
             watchdog_state_refresh_seconds=watchdog_state_refresh_seconds,
             watchdog_extreme_stale_seconds=watchdog_extreme_stale_seconds,
@@ -1182,6 +1199,7 @@ def monitor_and_refresh(
     watchdog_profiler_script_path: Optional[Path],
     watchdog_state_dir: Path,
     watchdog_disable_file: Path,
+    telemetry_dir: Optional[Path],
     watchdog_interval_seconds: float,
     watchdog_state_refresh_seconds: float,
     watchdog_extreme_stale_seconds: float,
@@ -1283,6 +1301,7 @@ def monitor_and_refresh(
                             watchdog_profiler_script_path=watchdog_profiler_script_path,
                             watchdog_state_dir=watchdog_state_dir,
                             watchdog_disable_file=watchdog_disable_file,
+                            telemetry_dir=telemetry_dir,
                             watchdog_interval_seconds=watchdog_interval_seconds,
                             watchdog_state_refresh_seconds=watchdog_state_refresh_seconds,
                             watchdog_extreme_stale_seconds=watchdog_extreme_stale_seconds,
@@ -1349,6 +1368,11 @@ def main() -> int:
         Path(arguments.watchdog_disable_file).expanduser().resolve()
         if arguments.watchdog_disable_file
         else bot_script_path.parent.resolve() / "watchdog_disable_list.json"
+    )
+    telemetry_dir = (
+        Path(arguments.telemetry_dir).expanduser().resolve()
+        if arguments.telemetry_dir
+        else None
     )
 
     if not bot_script_path.exists():
@@ -1452,6 +1476,7 @@ def main() -> int:
         watchdog_profiler_script_path=watchdog_profiler_script_path,
         watchdog_state_dir=watchdog_state_dir,
         watchdog_disable_file=watchdog_disable_file,
+        telemetry_dir=telemetry_dir,
         watchdog_interval_seconds=arguments.watchdog_interval_seconds,
         watchdog_state_refresh_seconds=arguments.watchdog_state_refresh_seconds,
         watchdog_extreme_stale_seconds=arguments.watchdog_extreme_stale_seconds,
@@ -1496,8 +1521,8 @@ def main() -> int:
         watchdog_poll_interval_seconds=arguments.watchdog_poll_interval_seconds,
         watchdog_confidence_reduction_threshold=arguments.watchdog_confidence_reduction_threshold,
         watchdog_confidence_flatten_threshold=arguments.watchdog_confidence_flatten_threshold,
+        telemetry_dir=telemetry_dir,
     )
-
 
 if __name__ == "__main__":
     raise SystemExit(main())
