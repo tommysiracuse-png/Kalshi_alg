@@ -27,3 +27,7 @@ __pycache__/
 .DS_Store
 .vscode/
 .idea/
+
+# Launcher Configs
+launcher_configs/
+!launcher_configs/sample.json
