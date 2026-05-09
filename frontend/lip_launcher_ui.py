@@ -4,7 +4,10 @@ Streamlit UI for LIP Launcher
 Provides a nice interface for running lip_launcher and managing configurations.
 """
 
+import datetime
 import json
+import os
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -24,10 +27,80 @@ st.set_page_config(
 st.title("🚀 LIP Launcher UI")
 st.markdown("Launch and manage Kalshi bots with ease")
 
-# Get workspace root
-WORKSPACE_ROOT = Path(__file__).parent
-CONFIG_DIR = WORKSPACE_ROOT / "launcher_configs"
+# Get workspace root (parent of frontend directory)
+WORKSPACE_ROOT = Path(__file__).parent.parent
+CONFIG_DIR = WORKSPACE_ROOT / "frontend" / "launcher_configs"
 CONFIG_DIR.mkdir(exist_ok=True)
+
+SESSIONS_DIR = WORKSPACE_ROOT / "sessions"
+SESSIONS_DIR.mkdir(exist_ok=True)
+SESSION_META_FILENAME = "session.json"
+
+
+def safe_session_name(value: str) -> str:
+    candidate = "".join(
+        ch if ch.isalnum() or ch in "-_" else "_"
+        for ch in str(value or "").strip()
+    )
+    return candidate.strip("_") or "session"
+
+
+def create_session_name(config_name: Optional[str] = None) -> str:
+    suffix = datetime.datetime.utcnow().strftime("%Y%m%d-%H%M%SZ")
+    prefix = safe_session_name(config_name) if config_name else "session"
+    return f"{prefix}-{suffix}"
+
+
+def list_sessions() -> List[str]:
+    return sorted(
+        [item.name for item in SESSIONS_DIR.iterdir() if item.is_dir()],
+        reverse=True,
+    )
+
+
+def session_dir(session_name: str) -> Path:
+    return SESSIONS_DIR / safe_session_name(session_name)
+
+
+def ensure_session_dirs(session_name: str) -> tuple[Path, Dict[str, str]]:
+    session_directory = session_dir(session_name)
+    logs_directory = session_directory / "logs"
+    watchdog_directory = session_directory / "watchdog_state"
+    telemetry_directory = session_directory / "telemetry"
+    session_directory.mkdir(parents=True, exist_ok=True)
+    logs_directory.mkdir(parents=True, exist_ok=True)
+    watchdog_directory.mkdir(parents=True, exist_ok=True)
+    telemetry_directory.mkdir(parents=True, exist_ok=True)
+
+    return session_directory, {
+        "logs_dir": str(logs_directory),
+        "watchdog_state_dir": str(watchdog_directory),
+        "screener_output": str(session_directory / "screener_export.csv"),
+        "telemetry_dir": str(telemetry_directory),
+    }
+
+
+def save_session_metadata(session_directory: Path, config_name: str, config: Dict[str, Any]) -> None:
+    metadata = {
+        "created_at_utc": datetime.datetime.utcnow().isoformat() + "Z",
+        "config_name": config_name,
+        "config": config,
+    }
+    (session_directory / SESSION_META_FILENAME).write_text(json.dumps(metadata, indent=2))
+
+
+def load_session_metadata(session_name: str) -> Dict[str, Any]:
+    path = session_dir(session_name) / SESSION_META_FILENAME
+    if not path.exists():
+        return {}
+    try:
+        loaded = json.loads(path.read_text())
+        if isinstance(loaded, dict):
+            return loaded
+    except Exception:
+        pass
+    return {}
+
 
 DEFAULT_CONFIG: Dict[str, Any] = {
     "screen_file": str(WORKSPACE_ROOT / "screener_export.csv"),
@@ -142,7 +215,7 @@ def ensure_venv_dependencies() -> Optional[str]:
     return str(venv_python)
 
 
-def build_launch_command(config: Dict[str, Any], venv_python: str) -> List[str]:
+def build_launch_command(config: Dict[str, Any], venv_python: str, session_paths: Optional[Dict[str, str]] = None) -> List[str]:
     command = [venv_python, str(WORKSPACE_ROOT / "lip_launcher.py")]
     command.extend(["--screen-file", str(config["screen_file"])])
     command.extend(["--bot-script", str(config["bot_script"])])
@@ -167,7 +240,52 @@ def build_launch_command(config: Dict[str, Any], venv_python: str) -> List[str]:
         command.extend(["--api-key-id", str(config["api_key_id"])])
     if config.get("private_key_path"):
         command.extend(["--private-key", str(config["private_key_path"])])
+
+    if session_paths is not None:
+        if session_paths.get("logs_dir"):
+            command.extend(["--logs-dir", session_paths["logs_dir"]])
+        if session_paths.get("watchdog_state_dir"):
+            command.extend(["--watchdog-state-dir", session_paths["watchdog_state_dir"]])
+        if session_paths.get("telemetry_dir"):
+            command.extend(["--telemetry-dir", session_paths["telemetry_dir"]])
+        if session_paths.get("screener_output"):
+            command.extend(["--screener-output", session_paths["screener_output"]])
+
     return command
+
+
+def start_launcher_process(config: Dict[str, Any], session_name: str) -> tuple[Optional[subprocess.Popen], Optional[Path], Optional[str]]:
+    venv_python = ensure_venv_dependencies()
+    if not venv_python:
+        return None, None, "Failed to set up virtual environment"
+
+    session_directory, session_paths = ensure_session_dirs(session_name)
+    command = build_launch_command(config, venv_python, session_paths=session_paths)
+    launcher_log_path = session_directory / "launcher.log"
+    log_handle = launcher_log_path.open("a", encoding="utf-8", buffering=1)
+    log_handle.write(f"\n=== START {datetime.datetime.utcnow().isoformat()} ===\n")
+    log_handle.write("CMD: " + " ".join(command) + "\n")
+    log_handle.flush()
+
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=str(WORKSPACE_ROOT),
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            env=dict(os.environ, PYTHONUNBUFFERED="1"),
+        )
+        return process, session_directory, None
+    except Exception as exc:
+        log_handle.close()
+        return None, session_directory, str(exc)
+
+
+def tail_file(path: Path, max_lines: int = 200) -> str:
+    if not path.exists():
+        return ""
+    lines = path.read_text().splitlines()
+    return "\n".join(lines[-max_lines:])
 
 
 def run_launcher(config: Dict[str, Any]) -> tuple[bool, str, str]:
@@ -190,9 +308,9 @@ def run_launcher(config: Dict[str, Any]) -> tuple[bool, str, str]:
         return False, "", str(e)
 
 
-def get_log_files() -> List[Path]:
+def get_log_files(logs_dir: Optional[Path] = None) -> List[Path]:
     """Get all log files sorted by modification time (newest first)."""
-    logs_dir = WORKSPACE_ROOT / "logs"
+    logs_dir = logs_dir or WORKSPACE_ROOT / "logs"
     if not logs_dir.exists():
         return []
     log_files = list(logs_dir.glob("*.log"))
@@ -420,6 +538,18 @@ if "console_stderr" not in st.session_state:
 if "launch_status" not in st.session_state:
     st.session_state.launch_status = None
 
+if "active_session_name" not in st.session_state:
+    st.session_state.active_session_name = ""
+
+if "active_session_dir" not in st.session_state:
+    st.session_state.active_session_dir = None
+
+if "active_launcher_process" not in st.session_state:
+    st.session_state.active_launcher_process = None
+
+if "active_launcher_log_handle" not in st.session_state:
+    st.session_state.active_launcher_log_handle = None
+
 config = load_config(st.session_state.selected_config)
 
 if page == "Dashboard":
@@ -447,55 +577,66 @@ elif page == "Launch Bot":
         selected_config = st.selectbox("Select configuration", configs, index=configs.index(st.session_state.selected_config) if st.session_state.selected_config in configs else 0)
         st.session_state.selected_config = selected_config
         config = load_config(selected_config)
-        
+
+        selected_session = st.selectbox("Existing session", [""] + list_sessions())
+        session_name_input = st.text_input("Session name", value=st.session_state.active_session_name or "")
+        if selected_session:
+            st.info(f"Selected existing session: {selected_session}")
+
         with st.expander(f"Saved configuration: {selected_config}"):
             st.json(config)
-        
+
         if st.button("🚀 Launch with selected configuration", use_container_width=True, type="primary"):
+            session_name = selected_session or session_name_input.strip() or create_session_name(selected_config)
+            session_name = safe_session_name(session_name)
+            session_directory, _ = ensure_session_dirs(session_name)
+            save_session_metadata(session_directory, selected_config, config)
+
             with st.spinner("Setting up virtual environment and installing dependencies..."):
-                venv_python = ensure_venv_dependencies()
-            
-            if not venv_python:
-                st.error("Failed to set up virtual environment. See messages above.")
+                process, session_directory, error = start_launcher_process(config, session_name)
+
+            if error or process is None:
+                st.error(f"Failed to launch session: {error or 'unknown error'}")
                 st.session_state.launch_status = "failed"
             else:
-                st.info(f"🔄 Launching bots with configuration '{selected_config}'...")
-                success, stdout, stderr = run_launcher(config)
-                
-                st.session_state.console_output = stdout
-                st.session_state.console_stderr = stderr
-                st.session_state.launch_status = "success" if success else "failed"
-                
-                if success:
-                    st.success("✅ Bots launched successfully!")
-                else:
-                    st.error("❌ Failed to launch bots")
-                    venv_python_path = WORKSPACE_ROOT / ".venv" / "bin" / "python"
-                    cmd = build_launch_command(config, str(venv_python_path))
-                    st.markdown(f"**Command attempted:** `{' '.join(cmd)}`")
-        
+                st.session_state.active_session_name = session_name
+                st.session_state.active_session_dir = session_directory
+                st.session_state.active_launcher_process = process
+                st.session_state.launch_status = "running"
+                st.success(f"✅ Session '{session_name}' launched successfully!")
+                st.info(f"Session directory: {session_directory}")
+
         st.markdown("---")
-        st.subheader("📋 Console Output")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("🔄 Clear console", use_container_width=True):
-                st.session_state.console_output = ""
-                st.session_state.console_stderr = ""
-                st.session_state.launch_status = None
-                st.rerun()
-        
-        if st.session_state.console_output or st.session_state.console_stderr:
-            if st.session_state.console_output:
-                st.markdown("**STDOUT:**")
-                st.code(st.session_state.console_output, language=None)
-            
-            if st.session_state.console_stderr:
-                st.markdown("**STDERR:**")
-                st.code(st.session_state.console_stderr, language=None)
+        st.subheader("Session status")
+        if st.session_state.active_session_name:
+            st.markdown(f"**Active session:** {st.session_state.active_session_name}")
+            if st.session_state.active_session_dir:
+                st.markdown(f"**Session path:** {st.session_state.active_session_dir}")
+
+            process = st.session_state.active_launcher_process
+            if process is not None:
+                return_code = process.poll()
+                if return_code is None:
+                    st.success("Launcher process is running")
+                    if st.button("🛑 Stop active session", use_container_width=True):
+                        try:
+                            process.send_signal(signal.SIGINT)
+                            st.info("Stopping launcher process...")
+                        except Exception as exc:
+                            st.error(f"Failed to stop launcher: {exc}")
+                else:
+                    st.warning(f"Launcher process exited with code {return_code}")
+            else:
+                st.info("No active launcher process in this browser session.")
+
+            if st.session_state.active_session_dir is not None:
+                launcher_log_path = st.session_state.active_session_dir / "launcher.log"
+                st.markdown("---")
+                st.subheader("Launcher log")
+                st.code(tail_file(launcher_log_path), language=None)
         else:
-            st.info("Console output will appear here after launching.")
-    
+            st.info("Launch a session to start monitoring logs and bot output.")
+
     else:
         st.warning("No saved configurations found. Please create one on the Launcher Config page.")
 
