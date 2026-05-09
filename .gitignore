@@ -31,3 +31,6 @@ __pycache__/
 # Launcher Configs
 launcher_configs/
 !launcher_configs/sample.json
+
+# Saved Sessions
+sessions/
