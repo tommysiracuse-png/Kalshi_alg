@@ -318,6 +318,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--watchdog-interval-seconds", type=float, default=180.0, help="How often each watchdog runner recomputes the profile.")
     parser.add_argument("--watchdog-state-refresh-seconds", type=float, default=3.0, help="How often V1 refreshes its cached watchdog state.")
     parser.add_argument("--watchdog-extreme-stale-seconds", type=float, default=30.0, help="Fail-safe flatten if the watchdog state is older than this.")
+    parser.add_argument("--watchdog-flatten-retries", type=int, default=2, help="Number of emergency flatten retries before exiting with residual-risk code.")
     parser.add_argument("--watchdog-sample-seconds", type=float, default=4.0, help="Sample window for the heuristic watchdog profiler.")
     parser.add_argument("--watchdog-poll-interval-seconds", type=float, default=0.35, help="Polling interval inside the heuristic watchdog profiler.")
     parser.add_argument("--watchdog-confidence-reduction-threshold", type=float, default=0.70, help="Confidence below this moves the watchdog to reduction_only.")
@@ -613,6 +614,7 @@ def build_child_command(
     watchdog_state_file: Optional[Path],
     watchdog_state_refresh_seconds: float,
     watchdog_extreme_stale_seconds: float,
+    watchdog_flatten_retries: int,
     telemetry_sqlite_path: Optional[str],
 ) -> List[str]:
     command: List[str] = [
@@ -647,6 +649,8 @@ def build_child_command(
             str(watchdog_state_refresh_seconds),
             "--watchdog-extreme-stale-seconds",
             str(watchdog_extreme_stale_seconds),
+            "--watchdog-flatten-retries",
+            str(watchdog_flatten_retries),
         ])
 
     if telemetry_sqlite_path is not None:
@@ -722,6 +726,7 @@ def spawn_single_bot(
     watchdog_interval_seconds: float,
     watchdog_state_refresh_seconds: float,
     watchdog_extreme_stale_seconds: float,
+    watchdog_flatten_retries: int,
     watchdog_sample_seconds: float,
     watchdog_poll_interval_seconds: float,
     watchdog_confidence_reduction_threshold: float,
@@ -752,6 +757,7 @@ def spawn_single_bot(
         watchdog_state_file=watchdog_state_file,
         watchdog_state_refresh_seconds=watchdog_state_refresh_seconds,
         watchdog_extreme_stale_seconds=watchdog_extreme_stale_seconds,
+        watchdog_flatten_retries=watchdog_flatten_retries,
         telemetry_sqlite_path=telemetry_sqlite_path,
     )
 
@@ -853,6 +859,7 @@ def spawn_bots(
     watchdog_poll_interval_seconds: float,
     watchdog_confidence_reduction_threshold: float,
     watchdog_confidence_flatten_threshold: float,
+    watchdog_flatten_retries: int,
 ) -> List[ChildProcess]:
     print_launch_plan(picks)
 
@@ -925,6 +932,7 @@ def spawn_bots(
             watchdog_interval_seconds=watchdog_interval_seconds,
             watchdog_state_refresh_seconds=watchdog_state_refresh_seconds,
             watchdog_extreme_stale_seconds=watchdog_extreme_stale_seconds,
+            watchdog_flatten_retries=watchdog_flatten_retries,
             watchdog_sample_seconds=watchdog_sample_seconds,
             watchdog_poll_interval_seconds=watchdog_poll_interval_seconds,
             watchdog_confidence_reduction_threshold=watchdog_confidence_reduction_threshold,
@@ -1207,6 +1215,7 @@ def monitor_and_refresh(
     watchdog_poll_interval_seconds: float,
     watchdog_confidence_reduction_threshold: float,
     watchdog_confidence_flatten_threshold: float,
+    watchdog_flatten_retries: int,
 ) -> int:
     if not children:
         return 0
@@ -1309,6 +1318,7 @@ def monitor_and_refresh(
                             watchdog_poll_interval_seconds=watchdog_poll_interval_seconds,
                             watchdog_confidence_reduction_threshold=watchdog_confidence_reduction_threshold,
                             watchdog_confidence_flatten_threshold=watchdog_confidence_flatten_threshold,
+                            watchdog_flatten_retries=watchdog_flatten_retries,
                         )
                     )
                 next_refresh_at = time.time() + refresh_interval_seconds
@@ -1484,6 +1494,7 @@ def main() -> int:
         watchdog_poll_interval_seconds=arguments.watchdog_poll_interval_seconds,
         watchdog_confidence_reduction_threshold=arguments.watchdog_confidence_reduction_threshold,
         watchdog_confidence_flatten_threshold=arguments.watchdog_confidence_flatten_threshold,
+        watchdog_flatten_retries=arguments.watchdog_flatten_retries,
     )
 
     return monitor_and_refresh(
@@ -1521,6 +1532,7 @@ def main() -> int:
         watchdog_poll_interval_seconds=arguments.watchdog_poll_interval_seconds,
         watchdog_confidence_reduction_threshold=arguments.watchdog_confidence_reduction_threshold,
         watchdog_confidence_flatten_threshold=arguments.watchdog_confidence_flatten_threshold,
+        watchdog_flatten_retries=arguments.watchdog_flatten_retries,
         telemetry_dir=telemetry_dir,
     )
 

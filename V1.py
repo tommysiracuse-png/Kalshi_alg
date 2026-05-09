@@ -396,6 +396,596 @@ def parse_bot_args() -> argparse.Namespace:
         default=2,
         help="Number of emergency flatten retries before exiting with residual-risk code.",
     )
+
+    # --- Order sizing ---
+    parser.add_argument(
+        "--maximum-contracts-per-order",
+        type=int,
+        default=None,
+        help="Maximum contracts per order.",
+    )
+    parser.add_argument(
+        "--budget-fee-buffer-cents",
+        type=int,
+        default=None,
+        help="Fee buffer in cents for budget calculations.",
+    )
+    parser.add_argument(
+        "--allow-fractional-order-entry",
+        action="store_true",
+        help="Allow fractional order entry when supported.",
+    )
+    parser.add_argument(
+        "--refill-resting-size-after-partial-fill",
+        action="store_true",
+        help="Refill resting size after partial fill.",
+    )
+
+    # --- Quote behavior ---
+    parser.add_argument(
+        "--post-only-quotes",
+        action="store_true",
+        default=True,
+        help="Use post-only quotes (default: True).",
+    )
+    parser.add_argument(
+        "--no-post-only-quotes",
+        action="store_false",
+        dest="post_only_quotes",
+        help="Disable post-only quotes.",
+    )
+    parser.add_argument(
+        "--cancel-quotes-if-exchange-pauses",
+        action="store_true",
+        help="Cancel quotes if exchange pauses.",
+    )
+    parser.add_argument(
+        "--minimum-milliseconds-between-requotes",
+        type=int,
+        default=None,
+        help="Minimum milliseconds between requotes.",
+    )
+    parser.add_argument(
+        "--resting-order-expiration-seconds",
+        type=int,
+        default=None,
+        help="Resting order expiration in seconds.",
+    )
+    parser.add_argument(
+        "--expiration-refresh-lead-seconds",
+        type=int,
+        default=None,
+        help="Lead time before expiration refresh in seconds.",
+    )
+    parser.add_argument(
+        "--expiration-jitter-seconds",
+        type=int,
+        default=None,
+        help="Jitter for expiration timing in seconds.",
+    )
+    parser.add_argument(
+        "--stagger-yes-no-expiration-offsets-seconds",
+        type=int,
+        default=None,
+        help="Offset between YES and NO expiration in seconds.",
+    )
+    parser.add_argument(
+        "--aggressive-improvement-ticks",
+        type=int,
+        default=None,
+        help="Aggressive improvement ticks when spread is wide.",
+    )
+    parser.add_argument(
+        "--minimum-spread-ticks-for-aggressive-improvement",
+        type=int,
+        default=None,
+        help="Minimum spread ticks required for aggressive improvement.",
+    )
+    parser.add_argument(
+        "--passive-offset-ticks",
+        type=int,
+        default=None,
+        help="Passive offset ticks when not improving.",
+    )
+    parser.add_argument(
+        "--join-current-best-bid-on-start",
+        action="store_true",
+        help="Join current best bid when starting new quote cycle.",
+    )
+    parser.add_argument(
+        "--post-fill-no-improve-cooldown-ms",
+        type=int,
+        default=None,
+        help="Post-fill no-improve cooldown in milliseconds.",
+    )
+    parser.add_argument(
+        "--same-side-reentry-cooldown-ms",
+        type=int,
+        default=None,
+        help="Same-side re-entry cooldown in milliseconds.",
+    )
+    parser.add_argument(
+        "--suppress-same-side-reentry-quotes",
+        action="store_true",
+        help="Suppress same-side quotes during re-entry cooldown.",
+    )
+    parser.add_argument(
+        "--minimum-upward-reprice-ticks",
+        type=int,
+        default=None,
+        help="Minimum upward reprice ticks required.",
+    )
+    parser.add_argument(
+        "--minimum-best-bid-cents-to-quote",
+        type=int,
+        default=None,
+        help="Minimum best bid cents required to quote.",
+    )
+    parser.add_argument(
+        "--minimum-implied-ask-cents-to-quote",
+        type=int,
+        default=None,
+        help="Minimum implied ask cents required to quote.",
+    )
+    parser.add_argument(
+        "--minimum-market-best-bid-cents-to-quote-any-side",
+        type=int,
+        default=None,
+        help="Minimum market best bid cents required to quote any side.",
+    )
+    parser.add_argument(
+        "--enforce-one-tick-safety-below-implied-ask",
+        action="store_true",
+        help="Enforce one-tick safety below implied ask.",
+    )
+
+    # --- Inventory controls ---
+    parser.add_argument(
+        "--enable-one-way-inventory-guard",
+        action="store_true",
+        default=True,
+        help="Enable one-way inventory guard (default: True).",
+    )
+    parser.add_argument(
+        "--disable-one-way-inventory-guard",
+        action="store_false",
+        dest="enable_one_way_inventory_guard",
+        help="Disable one-way inventory guard.",
+    )
+    parser.add_argument(
+        "--one-way-inventory-guard-contracts",
+        type=int,
+        default=None,
+        help="One-way inventory guard contracts limit.",
+    )
+    parser.add_argument(
+        "--inventory-skew-contracts-per-tick",
+        type=int,
+        default=None,
+        help="Inventory skew contracts per tick.",
+    )
+    parser.add_argument(
+        "--maximum-inventory-skew-ticks",
+        type=int,
+        default=None,
+        help="Maximum inventory skew ticks.",
+    )
+
+    # --- Book depth / phantom-spread protection ---
+    parser.add_argument(
+        "--minimum-top-level-depth-contracts",
+        type=int,
+        default=None,
+        help="Minimum contracts required at best level.",
+    )
+    parser.add_argument(
+        "--maximum-top-level-gap-cents",
+        type=int,
+        default=None,
+        help="Maximum gap between top two levels in cents.",
+    )
+
+    # --- Pair / spread protection ---
+    parser.add_argument(
+        "--enable-pair-guard",
+        action="store_true",
+        default=True,
+        help="Enable pair guard (default: True).",
+    )
+    parser.add_argument(
+        "--disable-pair-guard",
+        action="store_false",
+        dest="enable_pair_guard",
+        help="Disable pair guard.",
+    )
+    parser.add_argument(
+        "--maximum-combined-bid-cents",
+        type=int,
+        default=None,
+        help="Maximum combined bid in cents.",
+    )
+    parser.add_argument(
+        "--additional-profit-buffer-cents",
+        type=int,
+        default=None,
+        help="Additional profit buffer in cents.",
+    )
+    parser.add_argument(
+        "--pair-guard-priority",
+        type=str,
+        default=None,
+        choices=["yes", "no", "auto"],
+        help="Pair guard priority (yes, no, or auto).",
+    )
+
+    # --- Post-only collision handling ---
+    parser.add_argument(
+        "--maximum-post-only-reprice-attempts",
+        type=int,
+        default=None,
+        help="Maximum post-only reprice attempts.",
+    )
+    parser.add_argument(
+        "--post-only-reprice-cooldown-seconds",
+        type=float,
+        default=None,
+        help="Post-only reprice cooldown in seconds.",
+    )
+
+    # --- Startup / monitoring ---
+    parser.add_argument(
+        "--cancel-strategy-quotes-on-startup",
+        action="store_true",
+        default=True,
+        help="Cancel strategy quotes on startup (default: True).",
+    )
+    parser.add_argument(
+        "--no-cancel-strategy-quotes-on-startup",
+        action="store_false",
+        dest="cancel_strategy_quotes_on_startup",
+        help="Do not cancel strategy quotes on startup.",
+    )
+    parser.add_argument(
+        "--subscribe-to-market-positions-channel",
+        action="store_true",
+        default=True,
+        help="Subscribe to market positions channel (default: True).",
+    )
+    parser.add_argument(
+        "--no-subscribe-to-market-positions-channel",
+        action="store_false",
+        dest="subscribe_to_market_positions_channel",
+        help="Do not subscribe to market positions channel.",
+    )
+    parser.add_argument(
+        "--enable-queue-position-logging",
+        action="store_true",
+        default=True,
+        help="Enable queue position logging (default: True).",
+    )
+    parser.add_argument(
+        "--disable-queue-position-logging",
+        action="store_false",
+        dest="enable_queue_position_logging",
+        help="Disable queue position logging.",
+    )
+    parser.add_argument(
+        "--queue-position-log-interval-seconds",
+        type=float,
+        default=None,
+        help="Queue position log interval in seconds.",
+    )
+
+    # --- Telemetry / model inputs ---
+    parser.add_argument(
+        "--enable-sqlite-telemetry",
+        action="store_true",
+        default=True,
+        help="Enable SQLite telemetry (default: True).",
+    )
+    parser.add_argument(
+        "--disable-sqlite-telemetry",
+        action="store_false",
+        dest="enable_sqlite_telemetry",
+        help="Disable SQLite telemetry.",
+    )
+    parser.add_argument(
+        "--trade-history-window-seconds",
+        type=int,
+        default=None,
+        help="Trade history window in seconds.",
+    )
+    parser.add_argument(
+        "--model-refresh-interval-seconds",
+        type=int,
+        default=None,
+        help="Model refresh interval in seconds.",
+    )
+    parser.add_argument(
+        "--markout-horizons-seconds",
+        type=str,
+        default=None,
+        help="Markout horizons in seconds (comma-separated).",
+    )
+
+    # --- Fill-probability model ---
+    parser.add_argument(
+        "--fill-probability-horizon-seconds",
+        type=int,
+        default=None,
+        help="Fill probability horizon in seconds.",
+    )
+    parser.add_argument(
+        "--fill-probability-prior-fills",
+        type=float,
+        default=None,
+        help="Prior fills for fill probability model.",
+    )
+    parser.add_argument(
+        "--fill-probability-prior-misses",
+        type=float,
+        default=None,
+        help="Prior misses for fill probability model.",
+    )
+
+    # --- EV-based quoting model ---
+    parser.add_argument(
+        "--minimum-expected-edge-cents-to-keep-quote",
+        type=int,
+        default=None,
+        help="Minimum expected edge cents to keep quote.",
+    )
+    parser.add_argument(
+        "--minimum-expected-edge-cents-to-quote",
+        type=int,
+        default=None,
+        help="Minimum expected edge cents to quote.",
+    )
+    parser.add_argument(
+        "--inventory-reduction-max-negative-edge-cents",
+        type=int,
+        default=None,
+        help="Inventory reduction max negative edge in cents.",
+    )
+    parser.add_argument(
+        "--strong-edge-threshold-cents",
+        type=int,
+        default=None,
+        help="Strong edge threshold in cents.",
+    )
+    parser.add_argument(
+        "--default-toxicity-cents",
+        type=int,
+        default=None,
+        help="Default toxicity in cents.",
+    )
+
+    # --- Bucket pessimism ---
+    parser.add_argument(
+        "--enable-bucket-pessimism",
+        action="store_true",
+        default=True,
+        help="Enable bucket pessimism (default: True).",
+    )
+    parser.add_argument(
+        "--disable-bucket-pessimism",
+        action="store_false",
+        dest="bucket_pessimism_enabled",
+        help="Disable bucket pessimism.",
+    )
+    parser.add_argument(
+        "--bucket-pessimism-max-cents",
+        type=float,
+        default=None,
+        help="Bucket pessimism max in cents.",
+    )
+    parser.add_argument(
+        "--bucket-pessimism-min-observations",
+        type=int,
+        default=None,
+        help="Bucket pessimism minimum observations.",
+    )
+    parser.add_argument(
+        "--default-fee-factor-for-maker-quotes",
+        type=float,
+        default=None,
+        help="Default fee factor for maker quotes.",
+    )
+    parser.add_argument(
+        "--fair-value-mid-weight",
+        type=float,
+        default=None,
+        help="Fair value mid weight.",
+    )
+    parser.add_argument(
+        "--fair-value-ticker-weight",
+        type=float,
+        default=None,
+        help="Fair value ticker weight.",
+    )
+    parser.add_argument(
+        "--fair-value-trade-weight",
+        type=float,
+        default=None,
+        help="Fair value trade weight.",
+    )
+    parser.add_argument(
+        "--fair-value-max-orderbook-imbalance-adjust-cents",
+        type=int,
+        default=None,
+        help="Fair value max orderbook imbalance adjust in cents.",
+    )
+    parser.add_argument(
+        "--fair-value-max-trade-bias-adjust-cents",
+        type=int,
+        default=None,
+        help="Fair value max trade bias adjust in cents.",
+    )
+    parser.add_argument(
+        "--quote-size-min-fraction-of-budget",
+        type=float,
+        default=None,
+        help="Quote size minimum fraction of budget.",
+    )
+    parser.add_argument(
+        "--quote-size-max-fraction-of-budget",
+        type=float,
+        default=None,
+        help="Quote size maximum fraction of budget.",
+    )
+    parser.add_argument(
+        "--candidate-price-levels-to-scan",
+        type=int,
+        default=None,
+        help="Candidate price levels to scan.",
+    )
+
+    # --- Order-book pull toxicity guard ---
+    parser.add_argument(
+        "--enable-orderbook-pull-toxicity-guard",
+        action="store_true",
+        default=True,
+        help="Enable orderbook pull toxicity guard (default: True).",
+    )
+    parser.add_argument(
+        "--disable-orderbook-pull-toxicity-guard",
+        action="store_false",
+        dest="enable_orderbook_pull_toxicity_guard",
+        help="Disable orderbook pull toxicity guard.",
+    )
+    parser.add_argument(
+        "--orderbook-pull-window-ms",
+        type=int,
+        default=None,
+        help="Orderbook pull window in milliseconds.",
+    )
+    parser.add_argument(
+        "--orderbook-pull-top-levels-to-track",
+        type=int,
+        default=None,
+        help="Orderbook pull top levels to track.",
+    )
+    parser.add_argument(
+        "--orderbook-pull-absolute-threshold-contracts",
+        type=int,
+        default=None,
+        help="Orderbook pull absolute threshold in contracts.",
+    )
+    parser.add_argument(
+        "--orderbook-pull-relative-depth-threshold",
+        type=float,
+        default=None,
+        help="Orderbook pull relative depth threshold.",
+    )
+    parser.add_argument(
+        "--orderbook-pull-side-cooldown-ms",
+        type=int,
+        default=None,
+        help="Orderbook pull side cooldown in milliseconds.",
+    )
+    parser.add_argument(
+        "--orderbook-pull-market-cooldown-ms",
+        type=int,
+        default=None,
+        help="Orderbook pull market cooldown in milliseconds.",
+    )
+    parser.add_argument(
+        "--orderbook-pull-penalty-cents",
+        type=int,
+        default=None,
+        help="Orderbook pull penalty in cents.",
+    )
+
+    # --- Queue-abandonment logic ---
+    parser.add_argument(
+        "--enable-queue-abandonment-guard",
+        action="store_true",
+        default=True,
+        help="Enable queue abandonment guard (default: True).",
+    )
+    parser.add_argument(
+        "--disable-queue-abandonment-guard",
+        action="store_false",
+        dest="enable_queue_abandonment_guard",
+        help="Disable queue abandonment guard.",
+    )
+    parser.add_argument(
+        "--maximum-queue-ahead-contracts-before-abandonment",
+        type=int,
+        default=None,
+        help="Maximum queue ahead contracts before abandonment.",
+    )
+    parser.add_argument(
+        "--maximum-queue-ahead-multiple-of-our-remaining-size",
+        type=float,
+        default=None,
+        help="Maximum queue ahead multiple of our remaining size.",
+    )
+    parser.add_argument(
+        "--queue-abandonment-consecutive-polls-required",
+        type=int,
+        default=None,
+        help="Queue abandonment consecutive polls required.",
+    )
+    parser.add_argument(
+        "--queue-abandonment-side-cooldown-seconds",
+        type=int,
+        default=None,
+        help="Queue abandonment side cooldown in seconds.",
+    )
+    parser.add_argument(
+        "--queue-abandonment-market-cooldown-seconds",
+        type=int,
+        default=None,
+        help="Queue abandonment market cooldown in seconds.",
+    )
+
+    # --- Shared write rate limiting ---
+    parser.add_argument(
+        "--enable-shared-write-rate-limiter",
+        action="store_true",
+        default=True,
+        help="Enable shared write rate limiter (default: True).",
+    )
+    parser.add_argument(
+        "--disable-shared-write-rate-limiter",
+        action="store_false",
+        dest="enable_shared_write_rate_limiter",
+        help="Disable shared write rate limiter.",
+    )
+    parser.add_argument(
+        "--shared-write-rate-limit-writes-per-second",
+        type=float,
+        default=None,
+        help="Shared write rate limit writes per second.",
+    )
+    parser.add_argument(
+        "--shared-write-rate-limit-burst-capacity",
+        type=int,
+        default=None,
+        help="Shared write rate limit burst capacity.",
+    )
+    parser.add_argument(
+        "--shared-write-rate-limiter-directory",
+        type=str,
+        default=None,
+        help="Shared write rate limiter directory.",
+    )
+    parser.add_argument(
+        "--global-rate-limit-backoff-seconds",
+        type=float,
+        default=None,
+        help="Global rate limit backoff in seconds.",
+    )
+
+    # --- Order prefix configuration ---
+    parser.add_argument(
+        "--primary-client-order-prefix",
+        type=str,
+        default=None,
+        help="Primary client order prefix.",
+    )
+
     return parser.parse_args()
 
 
@@ -721,7 +1311,21 @@ def build_settings_from_args(bot_args: argparse.Namespace) -> BotSettings:
     api_key_id = (bot_args.api_key_id or env_api_key or defaults.api_key_id).strip()
     private_key_path = (bot_args.private_key or env_private_key_path or defaults.private_key_path).strip()
 
+    # Parse markout horizons if provided
+    markout_horizons_seconds = defaults.markout_horizons_seconds
+    if bot_args.markout_horizons_seconds is not None:
+        try:
+            markout_horizons_seconds = tuple(
+                int(x.strip()) for x in bot_args.markout_horizons_seconds.split(",")
+            )
+        except Exception:
+            pass
+
+    # Parse legacy_client_order_prefixes (not exposed in CLI, use default)
+    legacy_client_order_prefixes = defaults.legacy_client_order_prefixes
+
     settings = BotSettings(
+        # --- Core identity / credentials ---
         market_ticker=market_ticker,
         api_key_id=api_key_id,
         private_key_path=private_key_path,
@@ -731,10 +1335,124 @@ def build_settings_from_args(bot_args: argparse.Namespace) -> BotSettings:
         watchdog_state_file=str(bot_args.watchdog_state_file or defaults.watchdog_state_file),
         watchdog_refresh_seconds=float(bot_args.watchdog_refresh_seconds if bot_args.watchdog_refresh_seconds is not None else defaults.watchdog_refresh_seconds),
         watchdog_extreme_stale_seconds=float(bot_args.watchdog_extreme_stale_seconds if bot_args.watchdog_extreme_stale_seconds is not None else defaults.watchdog_extreme_stale_seconds),
-        telemetry_sqlite_path=str(bot_args.telemetry_sqlite_path or defaults.telemetry_sqlite_path),
         watchdog_flatten_retries=int(bot_args.watchdog_flatten_retries if bot_args.watchdog_flatten_retries is not None else defaults.watchdog_flatten_retries),
+
+        # --- Order sizing ---
         yes_order_budget_cents=int(bot_args.yes_budget_cents if bot_args.yes_budget_cents is not None else defaults.yes_order_budget_cents),
         no_order_budget_cents=int(bot_args.no_budget_cents if bot_args.no_budget_cents is not None else defaults.no_order_budget_cents),
+        maximum_contracts_per_order=int(bot_args.maximum_contracts_per_order if bot_args.maximum_contracts_per_order is not None else defaults.maximum_contracts_per_order),
+        budget_fee_buffer_cents=int(bot_args.budget_fee_buffer_cents if bot_args.budget_fee_buffer_cents is not None else defaults.budget_fee_buffer_cents),
+        allow_fractional_order_entry_when_supported=bool(bot_args.allow_fractional_order_entry if hasattr(bot_args, 'allow_fractional_order_entry') else defaults.allow_fractional_order_entry_when_supported),
+        refill_resting_size_after_partial_fill=bool(bot_args.refill_resting_size_after_partial_fill if hasattr(bot_args, 'refill_resting_size_after_partial_fill') else defaults.refill_resting_size_after_partial_fill),
+
+        # --- Quote behavior ---
+        post_only_quotes=bool(bot_args.post_only_quotes if hasattr(bot_args, 'post_only_quotes') else defaults.post_only_quotes),
+        cancel_quotes_if_exchange_pauses=bool(bot_args.cancel_quotes_if_exchange_pauses if hasattr(bot_args, 'cancel_quotes_if_exchange_pauses') else defaults.cancel_quotes_if_exchange_pauses),
+        minimum_milliseconds_between_requotes=int(bot_args.minimum_milliseconds_between_requotes if bot_args.minimum_milliseconds_between_requotes is not None else defaults.minimum_milliseconds_between_requotes),
+        resting_order_expiration_seconds=int(bot_args.resting_order_expiration_seconds if bot_args.resting_order_expiration_seconds is not None else defaults.resting_order_expiration_seconds),
+        expiration_refresh_lead_seconds=int(bot_args.expiration_refresh_lead_seconds if bot_args.expiration_refresh_lead_seconds is not None else defaults.expiration_refresh_lead_seconds),
+        expiration_jitter_seconds=int(bot_args.expiration_jitter_seconds if bot_args.expiration_jitter_seconds is not None else defaults.expiration_jitter_seconds),
+        stagger_yes_no_expiration_offsets_seconds=int(bot_args.stagger_yes_no_expiration_offsets_seconds if bot_args.stagger_yes_no_expiration_offsets_seconds is not None else defaults.stagger_yes_no_expiration_offsets_seconds),
+        aggressive_improvement_ticks_when_spread_is_wide=int(bot_args.aggressive_improvement_ticks if bot_args.aggressive_improvement_ticks is not None else defaults.aggressive_improvement_ticks_when_spread_is_wide),
+        minimum_spread_ticks_required_for_aggressive_improvement=int(bot_args.minimum_spread_ticks_for_aggressive_improvement if bot_args.minimum_spread_ticks_for_aggressive_improvement is not None else defaults.minimum_spread_ticks_required_for_aggressive_improvement),
+        passive_offset_ticks_when_not_improving=int(bot_args.passive_offset_ticks if bot_args.passive_offset_ticks is not None else defaults.passive_offset_ticks_when_not_improving),
+        join_current_best_bid_when_starting_new_quote_cycle=bool(bot_args.join_current_best_bid_on_start if hasattr(bot_args, 'join_current_best_bid_on_start') else defaults.join_current_best_bid_when_starting_new_quote_cycle),
+        post_fill_no_improve_cooldown_ms=int(bot_args.post_fill_no_improve_cooldown_ms if bot_args.post_fill_no_improve_cooldown_ms is not None else defaults.post_fill_no_improve_cooldown_ms),
+        same_side_reentry_cooldown_ms=int(bot_args.same_side_reentry_cooldown_ms if bot_args.same_side_reentry_cooldown_ms is not None else defaults.same_side_reentry_cooldown_ms),
+        suppress_same_side_quotes_during_reentry_cooldown=bool(bot_args.suppress_same_side_reentry_quotes if hasattr(bot_args, 'suppress_same_side_reentry_quotes') else defaults.suppress_same_side_quotes_during_reentry_cooldown),
+        minimum_upward_reprice_ticks_required=int(bot_args.minimum_upward_reprice_ticks if bot_args.minimum_upward_reprice_ticks is not None else defaults.minimum_upward_reprice_ticks_required),
+        minimum_best_bid_cents_required_to_quote=int(bot_args.minimum_best_bid_cents_to_quote if bot_args.minimum_best_bid_cents_to_quote is not None else defaults.minimum_best_bid_cents_required_to_quote),
+        minimum_implied_ask_cents_required_to_quote=int(bot_args.minimum_implied_ask_cents_to_quote if bot_args.minimum_implied_ask_cents_to_quote is not None else defaults.minimum_implied_ask_cents_required_to_quote),
+        minimum_market_best_bid_cents_required_to_quote_any_side=int(bot_args.minimum_market_best_bid_cents_to_quote_any_side if bot_args.minimum_market_best_bid_cents_to_quote_any_side is not None else defaults.minimum_market_best_bid_cents_required_to_quote_any_side),
+        enforce_one_tick_safety_below_implied_ask=bool(bot_args.enforce_one_tick_safety_below_implied_ask if hasattr(bot_args, 'enforce_one_tick_safety_below_implied_ask') else defaults.enforce_one_tick_safety_below_implied_ask),
+
+        # --- Inventory controls ---
+        enable_one_way_inventory_guard=bool(bot_args.enable_one_way_inventory_guard if hasattr(bot_args, 'enable_one_way_inventory_guard') else defaults.enable_one_way_inventory_guard),
+        one_way_inventory_guard_contracts=int(bot_args.one_way_inventory_guard_contracts if bot_args.one_way_inventory_guard_contracts is not None else defaults.one_way_inventory_guard_contracts),
+        inventory_skew_contracts_per_tick=int(bot_args.inventory_skew_contracts_per_tick if bot_args.inventory_skew_contracts_per_tick is not None else defaults.inventory_skew_contracts_per_tick),
+        maximum_inventory_skew_ticks=int(bot_args.maximum_inventory_skew_ticks if bot_args.maximum_inventory_skew_ticks is not None else defaults.maximum_inventory_skew_ticks),
+
+        # --- Book depth / phantom-spread protection ---
+        minimum_top_level_depth_contracts=int(bot_args.minimum_top_level_depth_contracts if bot_args.minimum_top_level_depth_contracts is not None else defaults.minimum_top_level_depth_contracts),
+        maximum_top_level_gap_cents=int(bot_args.maximum_top_level_gap_cents if bot_args.maximum_top_level_gap_cents is not None else defaults.maximum_top_level_gap_cents),
+
+        # --- Pair / spread protection ---
+        enable_pair_guard=bool(bot_args.enable_pair_guard if hasattr(bot_args, 'enable_pair_guard') else defaults.enable_pair_guard),
+        maximum_combined_bid_cents=int(bot_args.maximum_combined_bid_cents if bot_args.maximum_combined_bid_cents is not None else defaults.maximum_combined_bid_cents),
+        additional_profit_buffer_cents=int(bot_args.additional_profit_buffer_cents if bot_args.additional_profit_buffer_cents is not None else defaults.additional_profit_buffer_cents),
+        pair_guard_priority=str(bot_args.pair_guard_priority if bot_args.pair_guard_priority is not None else defaults.pair_guard_priority),
+
+        # --- Post-only collision handling ---
+        maximum_post_only_reprice_attempts=int(bot_args.maximum_post_only_reprice_attempts if bot_args.maximum_post_only_reprice_attempts is not None else defaults.maximum_post_only_reprice_attempts),
+        post_only_reprice_cooldown_seconds=float(bot_args.post_only_reprice_cooldown_seconds if bot_args.post_only_reprice_cooldown_seconds is not None else defaults.post_only_reprice_cooldown_seconds),
+
+        # --- Startup / monitoring ---
+        cancel_strategy_quotes_on_startup=bool(bot_args.cancel_strategy_quotes_on_startup if hasattr(bot_args, 'cancel_strategy_quotes_on_startup') else defaults.cancel_strategy_quotes_on_startup),
+        subscribe_to_market_positions_channel=bool(bot_args.subscribe_to_market_positions_channel if hasattr(bot_args, 'subscribe_to_market_positions_channel') else defaults.subscribe_to_market_positions_channel),
+        enable_queue_position_logging=bool(bot_args.enable_queue_position_logging if hasattr(bot_args, 'enable_queue_position_logging') else defaults.enable_queue_position_logging),
+        queue_position_log_interval_seconds=float(bot_args.queue_position_log_interval_seconds if bot_args.queue_position_log_interval_seconds is not None else defaults.queue_position_log_interval_seconds),
+
+        # --- Telemetry / model inputs ---
+        enable_sqlite_telemetry=bool(bot_args.enable_sqlite_telemetry if hasattr(bot_args, 'enable_sqlite_telemetry') else defaults.enable_sqlite_telemetry),
+        telemetry_sqlite_path=str(bot_args.telemetry_sqlite_path or defaults.telemetry_sqlite_path),
+        trade_history_window_seconds=int(bot_args.trade_history_window_seconds if bot_args.trade_history_window_seconds is not None else defaults.trade_history_window_seconds),
+        model_refresh_interval_seconds=int(bot_args.model_refresh_interval_seconds if bot_args.model_refresh_interval_seconds is not None else defaults.model_refresh_interval_seconds),
+        markout_horizons_seconds=markout_horizons_seconds,
+
+        # --- Fill-probability model ---
+        fill_probability_horizon_seconds=int(bot_args.fill_probability_horizon_seconds if bot_args.fill_probability_horizon_seconds is not None else defaults.fill_probability_horizon_seconds),
+        fill_probability_prior_fills=float(bot_args.fill_probability_prior_fills if bot_args.fill_probability_prior_fills is not None else defaults.fill_probability_prior_fills),
+        fill_probability_prior_misses=float(bot_args.fill_probability_prior_misses if bot_args.fill_probability_prior_misses is not None else defaults.fill_probability_prior_misses),
+
+        # --- EV-based quoting model ---
+        minimum_expected_edge_cents_to_keep_quote=int(bot_args.minimum_expected_edge_cents_to_keep_quote if bot_args.minimum_expected_edge_cents_to_keep_quote is not None else defaults.minimum_expected_edge_cents_to_keep_quote),
+        minimum_expected_edge_cents_to_quote=int(bot_args.minimum_expected_edge_cents_to_quote if bot_args.minimum_expected_edge_cents_to_quote is not None else defaults.minimum_expected_edge_cents_to_quote),
+        inventory_reduction_max_negative_edge_cents=int(bot_args.inventory_reduction_max_negative_edge_cents if bot_args.inventory_reduction_max_negative_edge_cents is not None else defaults.inventory_reduction_max_negative_edge_cents),
+        strong_edge_threshold_cents=int(bot_args.strong_edge_threshold_cents if bot_args.strong_edge_threshold_cents is not None else defaults.strong_edge_threshold_cents),
+        default_toxicity_cents=int(bot_args.default_toxicity_cents if bot_args.default_toxicity_cents is not None else defaults.default_toxicity_cents),
+
+        # --- Bucket pessimism ---
+        bucket_pessimism_enabled=bool(bot_args.bucket_pessimism_enabled if hasattr(bot_args, 'bucket_pessimism_enabled') else defaults.bucket_pessimism_enabled),
+        bucket_pessimism_max_cents=float(bot_args.bucket_pessimism_max_cents if bot_args.bucket_pessimism_max_cents is not None else defaults.bucket_pessimism_max_cents),
+        bucket_pessimism_min_observations=int(bot_args.bucket_pessimism_min_observations if bot_args.bucket_pessimism_min_observations is not None else defaults.bucket_pessimism_min_observations),
+        default_fee_factor_for_maker_quotes=float(bot_args.default_fee_factor_for_maker_quotes if bot_args.default_fee_factor_for_maker_quotes is not None else defaults.default_fee_factor_for_maker_quotes),
+        fair_value_mid_weight=float(bot_args.fair_value_mid_weight if bot_args.fair_value_mid_weight is not None else defaults.fair_value_mid_weight),
+        fair_value_ticker_weight=float(bot_args.fair_value_ticker_weight if bot_args.fair_value_ticker_weight is not None else defaults.fair_value_ticker_weight),
+        fair_value_trade_weight=float(bot_args.fair_value_trade_weight if bot_args.fair_value_trade_weight is not None else defaults.fair_value_trade_weight),
+        fair_value_max_orderbook_imbalance_adjust_cents=int(bot_args.fair_value_max_orderbook_imbalance_adjust_cents if bot_args.fair_value_max_orderbook_imbalance_adjust_cents is not None else defaults.fair_value_max_orderbook_imbalance_adjust_cents),
+        fair_value_max_trade_bias_adjust_cents=int(bot_args.fair_value_max_trade_bias_adjust_cents if bot_args.fair_value_max_trade_bias_adjust_cents is not None else defaults.fair_value_max_trade_bias_adjust_cents),
+        quote_size_min_fraction_of_budget=float(bot_args.quote_size_min_fraction_of_budget if bot_args.quote_size_min_fraction_of_budget is not None else defaults.quote_size_min_fraction_of_budget),
+        quote_size_max_fraction_of_budget=float(bot_args.quote_size_max_fraction_of_budget if bot_args.quote_size_max_fraction_of_budget is not None else defaults.quote_size_max_fraction_of_budget),
+        candidate_price_levels_to_scan=int(bot_args.candidate_price_levels_to_scan if bot_args.candidate_price_levels_to_scan is not None else defaults.candidate_price_levels_to_scan),
+
+        # --- Order-book pull toxicity guard ---
+        enable_orderbook_pull_toxicity_guard=bool(bot_args.enable_orderbook_pull_toxicity_guard if hasattr(bot_args, 'enable_orderbook_pull_toxicity_guard') else defaults.enable_orderbook_pull_toxicity_guard),
+        orderbook_pull_window_ms=int(bot_args.orderbook_pull_window_ms if bot_args.orderbook_pull_window_ms is not None else defaults.orderbook_pull_window_ms),
+        orderbook_pull_top_levels_to_track=int(bot_args.orderbook_pull_top_levels_to_track if bot_args.orderbook_pull_top_levels_to_track is not None else defaults.orderbook_pull_top_levels_to_track),
+        orderbook_pull_absolute_threshold_contracts=int(bot_args.orderbook_pull_absolute_threshold_contracts if bot_args.orderbook_pull_absolute_threshold_contracts is not None else defaults.orderbook_pull_absolute_threshold_contracts),
+        orderbook_pull_relative_depth_threshold=float(bot_args.orderbook_pull_relative_depth_threshold if bot_args.orderbook_pull_relative_depth_threshold is not None else defaults.orderbook_pull_relative_depth_threshold),
+        orderbook_pull_side_cooldown_ms=int(bot_args.orderbook_pull_side_cooldown_ms if bot_args.orderbook_pull_side_cooldown_ms is not None else defaults.orderbook_pull_side_cooldown_ms),
+        orderbook_pull_market_cooldown_ms=int(bot_args.orderbook_pull_market_cooldown_ms if bot_args.orderbook_pull_market_cooldown_ms is not None else defaults.orderbook_pull_market_cooldown_ms),
+        orderbook_pull_penalty_cents=int(bot_args.orderbook_pull_penalty_cents if bot_args.orderbook_pull_penalty_cents is not None else defaults.orderbook_pull_penalty_cents),
+
+        # --- Queue-abandonment logic ---
+        enable_queue_abandonment_guard=bool(bot_args.enable_queue_abandonment_guard if hasattr(bot_args, 'enable_queue_abandonment_guard') else defaults.enable_queue_abandonment_guard),
+        maximum_queue_ahead_contracts_before_abandonment=int(bot_args.maximum_queue_ahead_contracts_before_abandonment if bot_args.maximum_queue_ahead_contracts_before_abandonment is not None else defaults.maximum_queue_ahead_contracts_before_abandonment),
+        maximum_queue_ahead_multiple_of_our_remaining_size=float(bot_args.maximum_queue_ahead_multiple_of_our_remaining_size if bot_args.maximum_queue_ahead_multiple_of_our_remaining_size is not None else defaults.maximum_queue_ahead_multiple_of_our_remaining_size),
+        queue_abandonment_consecutive_polls_required=int(bot_args.queue_abandonment_consecutive_polls_required if bot_args.queue_abandonment_consecutive_polls_required is not None else defaults.queue_abandonment_consecutive_polls_required),
+        queue_abandonment_side_cooldown_seconds=int(bot_args.queue_abandonment_side_cooldown_seconds if bot_args.queue_abandonment_side_cooldown_seconds is not None else defaults.queue_abandonment_side_cooldown_seconds),
+        queue_abandonment_market_cooldown_seconds=int(bot_args.queue_abandonment_market_cooldown_seconds if bot_args.queue_abandonment_market_cooldown_seconds is not None else defaults.queue_abandonment_market_cooldown_seconds),
+
+        # --- Shared write rate limiting ---
+        enable_shared_write_rate_limiter=bool(bot_args.enable_shared_write_rate_limiter if hasattr(bot_args, 'enable_shared_write_rate_limiter') else defaults.enable_shared_write_rate_limiter),
+        shared_write_rate_limit_writes_per_second=float(bot_args.shared_write_rate_limit_writes_per_second if bot_args.shared_write_rate_limit_writes_per_second is not None else defaults.shared_write_rate_limit_writes_per_second),
+        shared_write_rate_limit_burst_capacity=int(bot_args.shared_write_rate_limit_burst_capacity if bot_args.shared_write_rate_limit_burst_capacity is not None else defaults.shared_write_rate_limit_burst_capacity),
+        shared_write_rate_limiter_directory=str(bot_args.shared_write_rate_limiter_directory if bot_args.shared_write_rate_limiter_directory is not None else defaults.shared_write_rate_limiter_directory),
+        global_rate_limit_backoff_seconds=float(bot_args.global_rate_limit_backoff_seconds if bot_args.global_rate_limit_backoff_seconds is not None else defaults.global_rate_limit_backoff_seconds),
+
+        # --- Order prefix configuration ---
+        primary_client_order_prefix=str(bot_args.primary_client_order_prefix if bot_args.primary_client_order_prefix is not None else defaults.primary_client_order_prefix),
+        legacy_client_order_prefixes=legacy_client_order_prefixes,
     )
     settings.validate()
     return settings
