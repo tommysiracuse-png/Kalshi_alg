@@ -311,7 +311,7 @@ def parse_args() -> argparse.Namespace:
         help="Polling interval for monitoring child processes and refresh timing.",
     )
     parser.add_argument("--watchdog-runner-script", default="", help="Path to market_watchdog_runner.py")
-    parser.add_argument("--watchdog-profiler-script", default="", help="Path to market_risk_rofile.py")
+    parser.add_argument("--watchdog-profiler-script", default="", help="Path to market_risk_profiler.py")
     parser.add_argument("--watchdog-state-dir", default="", help="Directory for watchdog state JSON files.")
     parser.add_argument("--watchdog-disable-file", default="", help="Path to the permanent watchdog disable-list JSON file.")
     parser.add_argument("--watchdog-interval-seconds", type=float, default=180.0, help="How often each watchdog runner recomputes the profile.")
@@ -1338,7 +1338,7 @@ def main() -> int:
     watchdog_profiler_script_path = (
         Path(arguments.watchdog_profiler_script).expanduser().resolve()
         if arguments.watchdog_profiler_script
-        else bot_script_path.parent.resolve() / "market_risk_rofile.py"
+        else bot_script_path.parent.resolve() / "market_risk_profiler.py"
     )
     watchdog_state_dir = (
         Path(arguments.watchdog_state_dir).expanduser().resolve()
