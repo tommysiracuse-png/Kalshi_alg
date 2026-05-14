@@ -3,6 +3,7 @@ tizzler2003.txt
 privkey.txt
 *.pem
 .env
+id_rsa
 
 # Runtime artifacts
 logs/*.log
@@ -22,6 +23,8 @@ telemetry_*.sqlite3-wal
 # Python
 __pycache__/
 *.pyc
+.venv/
+venv/
 
 # OS / editor
 .DS_Store
