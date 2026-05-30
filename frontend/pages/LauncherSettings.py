@@ -46,15 +46,34 @@ def load_launcher_settings(name: str):
     return LauncherConfig.loadLauncherConfig(name)
 
 configs = list_configs()
-selected_config_name = st.selectbox("Load Existing Configuration", configs, index=0)
-if selected_config_name:
+print(f"Found configs: {configs}")
+selected_config_name = st.selectbox("Load Existing Configuration", configs, index=0, help="Select configuration")
+if selected_config_name is not None:
     # TODO - Load Selected Config
     config = load_launcher_settings(selected_config_name)
     st.info(f"Loaded Configuration: {selected_config_name}")
 else:
-    config = LauncherConfig()
+    config = LauncherConfig.LauncherConfig()
 
 with st.form("launcher_settings"):
     st.write("### Launcher Settings")
     launcherSettings = render_launcher_settings(config)
-    submitted = st.form_submit_button("Save Settings")
+    with st.container(horizontal=True):
+        if selected_config_name is not None:
+            save_btn = st.form_submit_button("Save Settings")
+            if save_btn:
+                # TODO - Save Config
+                st.success(f"Settings saved to {selected_config_name}!")
+        save_new = st.form_submit_button("Save as New Configuration")
+        new_name = st.text_input("Enter a name for the new configuration")
+        if new_name in configs:
+            st.error("A configuration with this name already exists. Please choose a different name.")
+        if new_name and save_new:
+            if new_name:
+                # TODO - Save Config with new name
+                st.write(f"Saving new configuration as {new_name}...")
+                saved = LauncherConfig.saveLauncherConfig(launcherSettings, new_name)
+                if saved:
+                    st.success(f"Settings saved as {new_name}!")
+        elif save_new:
+            st.error("Please enter a name for the new configuration before saving.")
