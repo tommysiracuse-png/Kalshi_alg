@@ -1,5 +1,4 @@
 #!/bin/bash
-# Start LIP Launcher UI on port 6969
 
 cd "$(dirname "$0")"
 
@@ -12,11 +11,7 @@ if [ ! -x "$PYTHON" ]; then
     python3 -m venv "$VENV_DIR"
 fi
 
-if ! "$PYTHON" -c "import streamlit" 2>/dev/null; then
-    echo "Installing streamlit into virtual environment..."
-    "$PIP" install --upgrade pip
-    "$PIP" install streamlit
-fi
+"$PIP" install -r requirements.txt
 
 echo "Starting LIP Launcher UI on port 6969..."
-"$PYTHON" -m streamlit run lip_launcher_ui.py --server.port 6969 --server.address localhost
+"$PYTHON" -m streamlit run Main.py --server.port 6969 --server.address localhost
