@@ -31,13 +31,14 @@ class Session:
     watchdog_dir: Path
     telemetry_dir: Path
     session_log_path: Path
+    screener_output: Path
     config: LauncherConfig
 
     def __init__(self, name: str):
         self.name = name
         self.ensure_session_dirs()
         self.create_session_dirs()
-
+        self.create_session_files()
 
     def ensure_session_dirs(self):
         session_directory = session_dir(self.name)
@@ -50,10 +51,15 @@ class Session:
         self.watchdog_dir = watchdog_directory
         self.telemetry_dir = telemetry_directory
 
-        print(self.session_dir, self.logs_dir, self.watchdog_dir, self.telemetry_dir)
-
     def create_session_dirs(self):
         self.session_dir.mkdir(parents=True, exist_ok=True)
         self.logs_dir.mkdir(parents=True, exist_ok=True)
         self.watchdog_dir.mkdir(parents=True, exist_ok=True)
         self.telemetry_dir.mkdir(parents=True, exist_ok=True)
+
+    def create_session_files(self):
+        self.session_log_path = self.session_dir / f"{self.name}.log"
+        self.screener_output = self.session_dir / "screener_output.csv"
+
+        self.session_log_path.touch()
+        self.screener_output.touch()
