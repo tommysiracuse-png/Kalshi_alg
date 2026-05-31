@@ -71,6 +71,42 @@ def list_configs() -> List[str]:
 def load_launcher_settings(name: str):
     return LauncherConfig.loadLauncherConfig(name)
 
+def list_sessions() -> List[str]:
+    return [d.name for d in Sessions.SESSIONS_DIR.iterdir() if d.is_dir()]
+
+def update_session_selection():
+    st.session_state.new_session_name = st.session_state.selected_session_input
+    print(f"Updated selected session to {st.session_state.new_session_name}")
+
+def create_session():
+    if st.session_state.new_session_name in st.session_state.sessions:
+        st.session_state.session_create_error = True
+        return
+    
+    Sessions.Session(st.session_state.new_session_name)
+    st.session_state.session_create_error = False
+    print(f"Successfully created session {st.session_state.new_session_name}")
+
+if "session_create_error" not in st.session_state:
+    st.session_state.session_create_error = False
+
+st.session_state.sessions = list_sessions()
+# print(f"Found sessions: {st.session_state.sessions}")
+
+with st.container(horizontal=True):
+    st.session_state.selected_session_name = st.selectbox("Select Session", st.session_state.sessions, index=0, help="Select session", on_change=update_session_selection, key="selected_session_input")
+    st.text_input("New Session", key="new_session_name")
+    create_new_session = st.button("Create", on_click=create_session)
+
+if create_new_session:
+    if st.session_state.session_create_error:
+        st.error(f"Error: Session {st.session_state.new_session_name} already exists")
+    else:
+        st.info(f"Created session {st.session_state.new_session_name}")
+
+st.session_state.session = Sessions.Session(st.session_state.selected_session_name)
+
+
 st.session_state.configs = list_configs()
 configs = st.session_state.configs
 print(f"Found configs: {configs}")
