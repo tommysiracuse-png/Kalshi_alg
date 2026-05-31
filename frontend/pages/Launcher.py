@@ -1,8 +1,12 @@
+import datetime
 from logging import config
+import os
 from pathlib import Path
-from typing import List
+import sys
+from typing import List, Optional
 
 import streamlit as st
+import subprocess
 
 import LauncherConfig
 import Sessions
@@ -17,12 +21,14 @@ CONFIG_DIR.mkdir(exist_ok=True)
 class LipLauncher:
     command: list[str]
     config: LauncherConfig
+    session: Sessions.Session
     log_path: str
 
-    def __init__(self, config: LauncherConfig, session: str):
+    def __init__(self, config: LauncherConfig, session: Sessions.Session):
         self.config = config
-        self.command = self.build_launch_command()
+        self.session = session
         self.log_path = "launcher.log"
+        self.command = self.build_launch_command()
 
     def build_launch_command(self):
         command = ["python", str(WORKSPACE_ROOT / "lip_launcher.py")]
@@ -49,21 +55,69 @@ class LipLauncher:
             command.extend(["--api-key-id", self.config.api_key_id])
         if self.config.private_key_path:
             command.extend(["--private-key", self.config.private_key_path])
-
-    # if session_paths is not None:
-    #     if session_paths.get("logs_dir"):
-    #         command.extend(["--logs-dir", session_paths["logs_dir"]])
-    #     if session_paths.get("watchdog_state_dir"):
-    #         command.extend(["--watchdog-state-dir", session_paths["watchdog_state_dir"]])
-    #     if session_paths.get("telemetry_dir"):
-    #         command.extend(["--telemetry-dir", session_paths["telemetry_dir"]])
-    #     if session_paths.get("screener_output"):
-    #         command.extend(["--screener-output", session_paths["screener_output"]])
+        if self.session.logs_dir.name:
+            command.extend(["--logs-dir", self.session.logs_dir.as_posix()])
+        if self.session.watchdog_dir:
+            command.extend(["--watchdog-state-dir", self.session.watchdog_dir.as_posix()])
+        if self.session.telemetry_dir:
+            command.extend(["--telemetry-dir", self.session.telemetry_dir.as_posix()])
+        if self.session.screener_output:
+            command.extend(["--screener-output", self.session.screener_output.as_posix()])
 
         return command
     
+    def ensure_venv_dependencies(self) -> Optional[str]:
+
+        venv_dir = WORKSPACE_ROOT / ".venv"
+        venv_python = venv_dir / "bin" / "python"
+        
+        if not venv_python.exists():
+            st.warning(f"Creating virtual environment in {venv_dir}...")
+            try:
+                subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], check=True, capture_output=True)
+            except subprocess.CalledProcessError as e:
+                st.error(f"Failed to create venv: {e}")
+                return None
+        
+        # Install/upgrade pip and dependencies
+        try:
+            subprocess.run([str(venv_python), "-m", "pip", "install", "--upgrade", "pip"], check=True, capture_output=True, timeout=60)
+            requirements_file = WORKSPACE_ROOT / "requirements.txt"
+            if requirements_file.exists():
+                subprocess.run([str(venv_python), "-m", "pip", "install", "-r", str(requirements_file)], check=True, capture_output=True, timeout=120)
+        except subprocess.CalledProcessError as e:
+            st.error(f"Failed to install dependencies: {e}")
+            return None
+        except subprocess.TimeoutExpired:
+            st.error("Dependency installation timed out")
+            return None
+        
+        return str(venv_python)
+    
     def launch(self):
         log_handle = self.log_path
+        venv_python = self.ensure_venv_dependencies()
+        if not venv_python:
+            return None, None, "Failed to set up virtual environment"
+
+        launcher_log_path = self.session.session_dir / "launcher.log"
+        log_handle = launcher_log_path.open("a", encoding="utf-8", buffering=1)
+        log_handle.write(f"\n=== START {datetime.datetime.utcnow().isoformat()} ===\n")
+        log_handle.write("CMD: " + " ".join(self.command) + "\n")
+        log_handle.flush()
+
+        try:
+            process = subprocess.Popen(
+                self.command,
+                cwd=str(WORKSPACE_ROOT),
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+                env=dict(os.environ, PYTHONUNBUFFERED="1"),
+            )
+            return process, None, None
+        except Exception as exc:
+            log_handle.close()
+            return None, None, str(exc)
 
 def list_configs() -> List[str]:
     return [f.stem for f in CONFIG_DIR.glob("*.json")]
@@ -109,15 +163,23 @@ st.session_state.session = Sessions.Session(st.session_state.selected_session_na
 
 st.session_state.configs = list_configs()
 configs = st.session_state.configs
-print(f"Found configs: {configs}")
-selected_config_name = st.selectbox("Load Existing Configuration", configs, index=0, help="Select configuration")
-if selected_config_name is not None:
+# print(f"Found configs: {configs}")
+st.session_state.selected_config_name = st.selectbox("Load Existing Configuration", st.session_state.configs, index=0, help="Select configuration")
+if st.session_state.selected_config_name is not None:
     # TODO - Load Selected Config
-    config = load_launcher_settings(selected_config_name)
-    st.info(f"Loaded Configuration: {selected_config_name}")
+    config = load_launcher_settings(st.session_state.selected_config_name)
+    st.info(f"Loaded Configuration: {st.session_state.selected_config_name}")
 else:
     config = LauncherConfig.LauncherConfig()
 
-launcher = LipLauncher(config=config, session="")
+st.session_state.config = config
 
-session = Sessions.Session("Test3")
+launcher = LipLauncher(config=st.session_state.config, session=st.session_state.session)
+st.info(launcher.command)
+
+with st.container():
+    launch = st.button("Launch!", key="launch", on_click=launcher.launch)
+
+
+
+# session = Sessions.Session("Test3")
