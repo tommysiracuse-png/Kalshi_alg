@@ -193,7 +193,7 @@ def display_launcher_log(session: Optional[Sessions.Session] = None, target=None
     launcher_log_path = session.session_dir / "launcher.log"
 
     if "log_auto_refresh" not in st.session_state:
-        st.session_state.log_auto_refresh = False
+        st.session_state.log_auto_refresh = True
     expander = target.expander("Launcher Log", expanded=True) if target is not None else st.expander("Launcher Log", expanded=True)
 
     with expander:
