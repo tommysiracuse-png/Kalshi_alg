@@ -221,20 +221,22 @@ def display_launcher_log(session: Optional[Sessions.Session] = None, target=None
             max_lines = 50
             display_height = min(len(log_lines), max_lines) * line_height_px
 
-            escaped = (log_content.replace("&", "&amp;")
-                        .replace("<", "&lt;")
-                        .replace(">", "&gt;")
-                        .replace('"', "&quot;")
-                        .replace("'", "&#39;"))
+            escaped_lines = []
+            for line in log_lines:
+                escaped_line = (line.replace("&", "&amp;")
+                                   .replace("<", "&lt;")
+                                   .replace(">", "&gt;")
+                                   .replace('"', "&quot;")
+                                   .replace("'", "&#39;"))
+                escaped_lines.append(f'<div style="white-space:nowrap; overflow-x:auto; padding:2px 0;">{escaped_line}</div>')
 
+            lines_html = "".join(escaped_lines)
             html = ("""
-            <div id="log-container" style="height:%dpx; overflow:auto; background-color:#0e1117; color:#c9d1d9; padding:12px; border-radius:6px; font-family:monospace; font-size:13px; white-space:pre-wrap; line-height:1.4;">
-              <pre style="margin:0">%s</pre>
+            <div id="log-container" style="height:%dpx; overflow-y:auto; background-color:#0e1117; color:#c9d1d9; padding:12px; border-radius:6px; font-family:monospace; font-size:13px; line-height:1.4;">
+              %s
             </div>
-            <script>
-              setTimeout(function(){ var el = document.getElementById('log-container'); if(el) { el.scrollTop = el.scrollHeight; } }, 50);
-            </script>
-            """) % (display_height, escaped)
+
+            """) % (display_height, lines_html)
 
             code_ph.markdown(html, unsafe_allow_html=True)
         else:
