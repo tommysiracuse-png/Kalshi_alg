@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import signal
 import sys
+import time
 from typing import List, Optional
 
 import streamlit as st
@@ -154,8 +155,23 @@ def list_sessions() -> List[str]:
     return [d.name for d in Sessions.SESSIONS_DIR.iterdir() if d.is_dir()]
 
 def update_session_selection():
-    st.session_state.new_session_name = st.session_state.selected_session_input
-    print(f"Updated selected session to {st.session_state.new_session_name}")
+    selected = st.session_state.get("selected_session_input")
+    if not selected:
+        print("No session selected")
+        return
+
+    st.session_state.selected_session_name = selected
+    st.session_state.new_session_name = selected
+    st.session_state.session = Sessions.Session(selected)
+
+    print(f"Updated selected session to {selected}")
+
+    if "launcher" in st.session_state:
+        st.session_state.launcher.session = st.session_state.session
+        try:
+            st.session_state.launcher.command = st.session_state.launcher.build_launch_command()
+        except Exception:
+            pass
 
 def create_session():
     if st.session_state.new_session_name in st.session_state.sessions:
@@ -166,18 +182,30 @@ def create_session():
     st.session_state.session_create_error = False
     print(f"Successfully created session {st.session_state.new_session_name}")
 
-def display_launcher_log(session):
+def display_launcher_log(session: Optional[Sessions.Session] = None, target=None):
+
+    if session is None:
+        selected = st.session_state.get("selected_session_name") or st.session_state.get("selected_session_input")
+        if not selected:
+            st.info("No session selected yet.")
+            return
+        session = Sessions.Session(selected)
+
     launcher_log_path = session.session_dir / "launcher.log"
-    
-    # Initialize session state for auto-refresh
+
     if "log_auto_refresh" not in st.session_state:
         st.session_state.log_auto_refresh = False
     if "last_log_update" not in st.session_state:
         st.session_state.last_log_update = 0
-    
-    with st.expander("Launcher Log", expanded=True):
+
+    if target is not None:
+        expander = target.expander("Launcher Log", expanded=True)
+    else:
+        expander = st.expander("Launcher Log", expanded=True)
+
+    with expander:
         col1, col2 = st.columns([1, 4])
-        
+
         with col1:
             auto_refresh = st.checkbox(
                 "Auto-refresh",
@@ -185,23 +213,41 @@ def display_launcher_log(session):
                 key="log_auto_refresh_checkbox"
             )
             st.session_state.log_auto_refresh = auto_refresh
-        
+
         with col2:
             if st.button("Refresh Log", key="refresh_log_button"):
                 st.rerun()
-        
+
+        code_ph = st.empty()
+        caption_ph = st.empty()
+
         if launcher_log_path.exists():
             log_content = launcher_log_path.read_text(encoding="utf-8")
             log_lines = log_content.split("\n")
-            
+
             file_stat = launcher_log_path.stat()
-            st.caption(f"Total lines: {len(log_lines)} | Last updated: {datetime.datetime.fromtimestamp(file_stat.st_mtime).isoformat()} | Size: {file_stat.st_size} bytes")
-            
-            with st.container(height=600, border=True):
-                st.code(log_content, language="text")
+            caption_ph.caption(f"Total lines: {len(log_lines)} | Last updated: {datetime.datetime.fromtimestamp(file_stat.st_mtime).isoformat()} | Size: {file_stat.st_size} bytes")
+
+            code_ph.code(log_content, language="text")
+            scroll_script = """
+            <script>
+            (function(){
+                setTimeout(function(){
+                    const blocks = document.getElementsByClassName('stCodeBlock');
+                    if(blocks.length){
+                        const el = blocks[blocks.length - 1];
+                        try { el.scrollTop = el.scrollHeight; } catch(e) {}
+                    }
+                }, 50);
+            })();
+            </script>
+            """
+            st.markdown(scroll_script, unsafe_allow_html=True)
         else:
+            code_ph.empty()
+            caption_ph.empty()
             st.info("No launcher log found. Launch a bot to create one.")
-    
+
     if st.session_state.log_auto_refresh:
         time.sleep(1)
         st.rerun()
@@ -227,10 +273,8 @@ st.session_state.session = Sessions.Session(st.session_state.selected_session_na
 
 st.session_state.configs = list_configs()
 configs = st.session_state.configs
-# print(f"Found configs: {configs}")
 st.session_state.selected_config_name = st.selectbox("Load Existing Configuration", st.session_state.configs, index=0, help="Select configuration")
 if st.session_state.selected_config_name is not None:
-    # TODO - Load Selected Config
     config = load_launcher_settings(st.session_state.selected_config_name)
     st.info(f"Loaded Configuration: {st.session_state.selected_config_name}")
 else:
@@ -261,5 +305,5 @@ if st.session_state.launcher.process is not None and st.session_state.launcher.p
     st.info(f"Launcher is running with PID: {st.session_state.launcher.process.pid}")
 else:    st.info("Launcher is not currently running.")
 
-# Display launcher log
-display_launcher_log(st.session_state.session)
+log_placeholder = st.empty()
+display_launcher_log(st.session_state.session, target=log_placeholder)
