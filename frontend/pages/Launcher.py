@@ -2,6 +2,7 @@ import datetime
 from logging import config
 import os
 from pathlib import Path
+import signal
 import sys
 from typing import List, Optional
 
@@ -23,26 +24,30 @@ class LipLauncher:
     config: LauncherConfig
     session: Sessions.Session
     log_path: str
+    process: Optional[subprocess.Popen]
 
     def __init__(self, config: LauncherConfig, session: Sessions.Session):
         self.config = config
         self.session = session
         self.log_path = "launcher.log"
         self.command = self.build_launch_command()
+        self.process = None
 
     def build_launch_command(self):
         command = ["python", str(WORKSPACE_ROOT / "lip_launcher.py")]
         command.extend(["--screen-file", self.config.screen_file])
         command.extend(["--bot-script", self.config.bot_script])
-        command.extend(["--max-bots", self.config.max_bots])
-        command.extend(["--yes-budget-cents", self.config.yes_budget_cents])
-        command.extend(["--no-budget-cents", self.config.no_budget_cents])
-        command.extend(["--launch-delay-seconds", self.config.launch_delay_seconds])
-        command.extend(["--refresh-interval-seconds", self.config.refresh_interval_seconds])
-        command.extend(["--poll-seconds", self.config.poll_seconds])
-        command.extend(["--minimum-carryover-value-cents", self.config.minimum_carryover_value_cents])
+        command.extend(["--max-bots", str(self.config.max_bots)])
+        command.extend(["--yes-budget-cents", str(self.config.yes_budget_cents)])
+        command.extend(["--no-budget-cents", str(self.config.no_budget_cents)])
+        command.extend(["--launch-delay-seconds", str(self.config.launch_delay_seconds)])
+        command.extend(["--refresh-interval-seconds", str(self.config.refresh_interval_seconds)])
+        command.extend(["--poll-seconds", str(self.config.poll_seconds)])
+        command.extend(["--minimum-carryover-value-cents", str(self.config.minimum_carryover_value_cents)])
         command.extend(["--screener-script", self.config.screener_script])
         command.extend(["--screener-output", self.config.screener_output])
+        command.extend(["--api-key-id", self.config.api_key_id])
+        command.extend(["--private-key", self.config.private_key_path])
         if self.config.run_screener_on_start:
             command.append("--run-screener-on-start")
         if self.config.use_demo:
@@ -107,16 +112,36 @@ class LipLauncher:
         log_handle.flush()
 
         try:
-            process = subprocess.Popen(
-                self.command,
-                cwd=str(WORKSPACE_ROOT),
-                stdout=log_handle,
-                stderr=subprocess.STDOUT,
-                env=dict(os.environ, PYTHONUNBUFFERED="1"),
-            )
+            popen_kwargs = {
+                "cwd": str(WORKSPACE_ROOT),
+                "stdout": log_handle,
+                "stderr": subprocess.STDOUT,
+                "env": dict(os.environ, PYTHONUNBUFFERED="1"),
+            }
+                
+            popen_kwargs["start_new_session"] = True
+
+            process = subprocess.Popen(self.command, **popen_kwargs)
+            self.process = process
             return process, None, None
         except Exception as exc:
             log_handle.close()
+            return None, None, str(exc)
+
+    def stop(self):
+        if self.process is None:
+            st.warning("No launcher process is currently running.")
+            return None, None, "No process to stop"
+
+        if self.process.poll() is not None:
+            st.info("Launcher process has already exited.")
+            return None, None, None
+
+        try:
+            self.process.send_signal(signal.SIGINT)
+            st.info("Sent stop signal to launcher process.")
+            return None, None, None
+        except Exception as exc:
             return None, None, str(exc)
 
 def list_configs() -> List[str]:
@@ -141,11 +166,50 @@ def create_session():
     st.session_state.session_create_error = False
     print(f"Successfully created session {st.session_state.new_session_name}")
 
+def display_launcher_log(session):
+    launcher_log_path = session.session_dir / "launcher.log"
+    
+    # Initialize session state for auto-refresh
+    if "log_auto_refresh" not in st.session_state:
+        st.session_state.log_auto_refresh = False
+    if "last_log_update" not in st.session_state:
+        st.session_state.last_log_update = 0
+    
+    with st.expander("Launcher Log", expanded=True):
+        col1, col2 = st.columns([1, 4])
+        
+        with col1:
+            auto_refresh = st.checkbox(
+                "Auto-refresh",
+                value=st.session_state.log_auto_refresh,
+                key="log_auto_refresh_checkbox"
+            )
+            st.session_state.log_auto_refresh = auto_refresh
+        
+        with col2:
+            if st.button("Refresh Log", key="refresh_log_button"):
+                st.rerun()
+        
+        if launcher_log_path.exists():
+            log_content = launcher_log_path.read_text(encoding="utf-8")
+            log_lines = log_content.split("\n")
+            
+            file_stat = launcher_log_path.stat()
+            st.caption(f"Total lines: {len(log_lines)} | Last updated: {datetime.datetime.fromtimestamp(file_stat.st_mtime).isoformat()} | Size: {file_stat.st_size} bytes")
+            
+            with st.container(height=600, border=True):
+                st.code(log_content, language="text")
+        else:
+            st.info("No launcher log found. Launch a bot to create one.")
+    
+    if st.session_state.log_auto_refresh:
+        time.sleep(1)
+        st.rerun()
+
 if "session_create_error" not in st.session_state:
     st.session_state.session_create_error = False
 
 st.session_state.sessions = list_sessions()
-# print(f"Found sessions: {st.session_state.sessions}")
 
 with st.container(horizontal=True):
     st.session_state.selected_session_name = st.selectbox("Select Session", st.session_state.sessions, index=0, help="Select session", on_change=update_session_selection, key="selected_session_input")
@@ -174,12 +238,28 @@ else:
 
 st.session_state.config = config
 
-launcher = LipLauncher(config=st.session_state.config, session=st.session_state.session)
-st.info(launcher.command)
+if "launcher" not in st.session_state:
+    st.session_state.launcher = LipLauncher(config=st.session_state.config, session=st.session_state.session)
+else:
+    st.session_state.launcher.config = st.session_state.config
+    st.session_state.launcher.session = st.session_state.session
+    st.session_state.launcher.command = st.session_state.launcher.build_launch_command()
+
+st.info(st.session_state.launcher.command)
 
 with st.container():
-    launch = st.button("Launch!", key="launch", on_click=launcher.launch)
+    col1, col2 = st.columns(2)
+    with col1:
+        launch = st.button("Launch!", key="launch", on_click=st.session_state.launcher.launch)
+    with col2:
+        stop = st.button("Stop", key="stop")
+    if stop:
+        st.session_state.launcher.stop()
 
+if st.session_state.launcher.process is not None and st.session_state.launcher.process.poll() is None:
+    stop = False
+    st.info(f"Launcher is running with PID: {st.session_state.launcher.process.pid}")
+else:    st.info("Launcher is not currently running.")
 
-
-# session = Sessions.Session("Test3")
+# Display launcher log
+display_launcher_log(st.session_state.session)

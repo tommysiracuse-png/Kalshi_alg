@@ -40,7 +40,25 @@ def render_launcher_settings(config: LauncherConfig) -> LauncherConfig:
         use_demo = st.checkbox("Use demo mode", value=bool(config.use_demo))
         dry_run = st.checkbox("Dry run", value=bool(config.dry_run))
 
-    return config
+    return LauncherConfig.LauncherConfig(
+        screen_file=screen_file,
+        bot_script=bot_script,
+        screener_script=screener_script,
+        screener_output=screener_output,
+        api_key_id=api_key_id,
+        private_key_path=private_key_path,
+        subaccount=subaccount,
+        max_bots=max_bots,
+        yes_budget_cents=yes_budget_cents,
+        no_budget_cents=no_budget_cents,
+        launch_delay_seconds=launch_delay_seconds,
+        refresh_interval_seconds=refresh_interval_seconds,
+        poll_seconds=poll_seconds,
+        minimum_carryover_value_cents=minimum_carryover_value_cents,
+        run_screener_on_start=run_screener_on_start,
+        use_demo=use_demo,
+        dry_run=dry_run
+    )
 
 def load_launcher_settings(name: str):
     return LauncherConfig.loadLauncherConfig(name)
