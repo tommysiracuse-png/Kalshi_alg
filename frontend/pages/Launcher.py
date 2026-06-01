@@ -183,7 +183,6 @@ def create_session():
     print(f"Successfully created session {st.session_state.new_session_name}")
 
 def display_launcher_log(session: Optional[Sessions.Session] = None, target=None):
-
     if session is None:
         selected = st.session_state.get("selected_session_name") or st.session_state.get("selected_session_input")
         if not selected:
@@ -195,23 +194,13 @@ def display_launcher_log(session: Optional[Sessions.Session] = None, target=None
 
     if "log_auto_refresh" not in st.session_state:
         st.session_state.log_auto_refresh = False
-    if "last_log_update" not in st.session_state:
-        st.session_state.last_log_update = 0
-
-    if target is not None:
-        expander = target.expander("Launcher Log", expanded=True)
-    else:
-        expander = st.expander("Launcher Log", expanded=True)
+    expander = target.expander("Launcher Log", expanded=True) if target is not None else st.expander("Launcher Log", expanded=True)
 
     with expander:
         col1, col2 = st.columns([1, 4])
 
         with col1:
-            auto_refresh = st.checkbox(
-                "Auto-refresh",
-                value=st.session_state.log_auto_refresh,
-                key="log_auto_refresh_checkbox"
-            )
+            auto_refresh = st.checkbox("Auto-refresh", value=st.session_state.log_auto_refresh, key="log_auto_refresh_checkbox")
             st.session_state.log_auto_refresh = auto_refresh
 
         with col2:
@@ -228,21 +217,26 @@ def display_launcher_log(session: Optional[Sessions.Session] = None, target=None
             file_stat = launcher_log_path.stat()
             caption_ph.caption(f"Total lines: {len(log_lines)} | Last updated: {datetime.datetime.fromtimestamp(file_stat.st_mtime).isoformat()} | Size: {file_stat.st_size} bytes")
 
-            code_ph.code(log_content, language="text")
-            scroll_script = """
+            line_height_px = 16
+            max_lines = 50
+            display_height = min(len(log_lines), max_lines) * line_height_px
+
+            escaped = (log_content.replace("&", "&amp;")
+                        .replace("<", "&lt;")
+                        .replace(">", "&gt;")
+                        .replace('"', "&quot;")
+                        .replace("'", "&#39;"))
+
+            html = ("""
+            <div id="log-container" style="height:%dpx; overflow:auto; background-color:#0e1117; color:#c9d1d9; padding:12px; border-radius:6px; font-family:monospace; font-size:13px; white-space:pre-wrap; line-height:1.4;">
+              <pre style="margin:0">%s</pre>
+            </div>
             <script>
-            (function(){
-                setTimeout(function(){
-                    const blocks = document.getElementsByClassName('stCodeBlock');
-                    if(blocks.length){
-                        const el = blocks[blocks.length - 1];
-                        try { el.scrollTop = el.scrollHeight; } catch(e) {}
-                    }
-                }, 50);
-            })();
+              setTimeout(function(){ var el = document.getElementById('log-container'); if(el) { el.scrollTop = el.scrollHeight; } }, 50);
             </script>
-            """
-            st.markdown(scroll_script, unsafe_allow_html=True)
+            """) % (display_height, escaped)
+
+            code_ph.markdown(html, unsafe_allow_html=True)
         else:
             code_ph.empty()
             caption_ph.empty()
@@ -256,9 +250,14 @@ if "session_create_error" not in st.session_state:
     st.session_state.session_create_error = False
 
 st.session_state.sessions = list_sessions()
+is_running = False
+if "launcher" in st.session_state:
+    proc = getattr(st.session_state.launcher, "process", None)
+    if proc is not None and proc.poll() is None:
+        is_running = True
 
 with st.container(horizontal=True):
-    st.session_state.selected_session_name = st.selectbox("Select Session", st.session_state.sessions, index=0, help="Select session", on_change=update_session_selection, key="selected_session_input")
+    st.session_state.selected_session_name = st.selectbox("Select Session", st.session_state.sessions, index=0, help="Select session", on_change=update_session_selection, key="selected_session_input", disabled=is_running)
     st.text_input("New Session", key="new_session_name")
     create_new_session = st.button("Create", on_click=create_session)
 
@@ -273,10 +272,9 @@ st.session_state.session = Sessions.Session(st.session_state.selected_session_na
 
 st.session_state.configs = list_configs()
 configs = st.session_state.configs
-st.session_state.selected_config_name = st.selectbox("Load Existing Configuration", st.session_state.configs, index=0, help="Select configuration")
+st.session_state.selected_config_name = st.selectbox("Load Existing Configuration", st.session_state.configs, index=0, help="Select configuration", disabled=is_running)
 if st.session_state.selected_config_name is not None:
     config = load_launcher_settings(st.session_state.selected_config_name)
-    st.info(f"Loaded Configuration: {st.session_state.selected_config_name}")
 else:
     config = LauncherConfig.LauncherConfig()
 
@@ -288,8 +286,6 @@ else:
     st.session_state.launcher.config = st.session_state.config
     st.session_state.launcher.session = st.session_state.session
     st.session_state.launcher.command = st.session_state.launcher.build_launch_command()
-
-st.info(st.session_state.launcher.command)
 
 with st.container():
     col1, col2 = st.columns(2)
