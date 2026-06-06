@@ -1,7 +1,14 @@
+import logging
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    stream=sys.stderr,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 
 import streamlit as st
 from database.connection import init_db
@@ -107,33 +114,31 @@ def page_login():
     if submitted:
         if not email or not password:
             st.error("Please fill in all fields.")
-            return
-
-        ok, msg, user_data = login_user(email, password)
-        if not ok:
-            st.error(msg)
-            return
-
-        st.session_state.user = user_data
-        st.session_state.password_ok = True
-
-        if user_data["has_2fa"]:
-            # Pick first available method to send challenge
-            method = user_data["2fa_methods"][0]
-            st.session_state.pending_method = method
-            sent_ok, sent_msg = send_login_challenge(user_data["id"], method)
-            if not sent_ok:
-                st.error(f"Could not send 2FA code: {sent_msg}")
-                st.session_state.password_ok = False
-                st.session_state.user = None
-                return
-            st.session_state.page = "2fa_challenge"
         else:
-            # No 2FA yet — let them in but restrict license key
-            st.session_state.fully_authenticated = True
-            st.session_state.page = "dashboard"
+            ok, msg, user_data = login_user(email, password)
+            if not ok or not user_data:
+                st.error(msg)
+            else:
+                st.session_state.user = user_data
+                st.session_state.password_ok = True
 
-        st.rerun()
+                if user_data["has_2fa"]:
+                    # Pick first available method to send challenge
+                    method = user_data["2fa_methods"][0]
+                    st.session_state.pending_method = method
+                    sent_ok, sent_msg = send_login_challenge(user_data["id"], method)
+                    if not sent_ok:
+                        st.error(f"Could not send 2FA code: {sent_msg}")
+                        st.session_state.password_ok = False
+                        st.session_state.user = None
+                    else:
+                        st.session_state.page = "2fa_challenge"
+                        st.rerun()
+                else:
+                    # No 2FA yet — let them in but restrict license key
+                    st.session_state.fully_authenticated = True
+                    st.session_state.page = "dashboard"
+                    st.rerun()
 
     st.markdown("---")
     if st.button("Create an account", use_container_width=True):
@@ -158,19 +163,16 @@ def page_register():
     if submitted:
         if not email or not password or not confirm:
             st.error("Please fill in all fields.")
-            return
-        if password != confirm:
+        elif password != confirm:
             st.error("Passwords do not match.")
-            return
-
-        ok, msg = register_user(email, password)
-        if not ok:
-            st.error(msg)
-            return
-
-        _flash("Account created. Please sign in.")
-        st.session_state.page = "login"
-        st.rerun()
+        else:
+            ok, msg = register_user(email, password)
+            if not ok:
+                st.error(msg)
+            else:
+                _flash("Account created. Please sign in.")
+                st.session_state.page = "login"
+                st.rerun()
 
     st.markdown("---")
     if st.button("Already have an account? Sign in", use_container_width=True):

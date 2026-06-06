@@ -281,9 +281,73 @@ SMS via SNS also has a default spending limit of $1/month. Request an increase u
 
 ## Tearing Down
 
+Three resources have deletion safeguards that will block `terraform destroy` unless you clear them first: the ALB has deletion protection enabled, Aurora has deletion protection enabled and will take a final snapshot, and ECR will refuse to delete a repository that still contains images.
+
+### Step 1 — Scale down ECS
+
+Drain running tasks so the ALB target group empties cleanly:
+
+```bash
+aws ecs update-service \
+  --cluster auth-svc-cluster \
+  --service auth-svc-service \
+  --desired-count 0
+```
+
+### Step 2 — Delete ECR images
+
+Terraform cannot delete a non-empty ECR repository. Empty it first:
+
+```bash
+aws ecr batch-delete-image \
+  --repository-name auth-svc/app \
+  --image-ids "$(aws ecr list-images \
+      --repository-name auth-svc/app \
+      --query 'imageIds[*]' \
+      --output json)"
+```
+
+### Step 3 — Disable ALB deletion protection
+
+```bash
+ALB_ARN=$(aws elbv2 describe-load-balancers \
+  --query "LoadBalancers[?contains(LoadBalancerName,'auth-svc')].LoadBalancerArn" \
+  --output text)
+
+aws elbv2 modify-load-balancer-attributes \
+  --load-balancer-arn "$ALB_ARN" \
+  --attributes Key=deletion_protection.enabled,Value=false
+```
+
+### Step 4 — Disable RDS deletion protection
+
+```bash
+CLUSTER_ID=$(aws rds describe-db-clusters \
+  --query "DBClusters[?contains(DBClusterIdentifier,'auth-svc')].DBClusterIdentifier" \
+  --output text)
+
+aws rds modify-db-cluster \
+  --db-cluster-identifier "$CLUSTER_ID" \
+  --no-deletion-protection \
+  --apply-immediately
+```
+
+### Step 5 — Destroy all infrastructure
+
 ```bash
 cd terraform
 terraform destroy
 ```
 
-> The Aurora cluster has `deletion_protection = true` and will take a final snapshot before being removed. You can disable deletion protection in `rds.tf` if you want a clean destroy without the snapshot prompt.
+Terraform will pause and ask you to confirm the final Aurora snapshot identifier (`auth-svc-final-snapshot`) before deleting the cluster. Type `yes` to proceed.
+
+### Step 6 — Delete the final snapshot (optional)
+
+The final Aurora snapshot is not managed by Terraform and will persist (and incur storage charges) until manually removed:
+
+```bash
+aws rds delete-db-cluster-snapshot \
+  --db-cluster-snapshot-identifier auth-svc-final-snapshot
+```
+
+Skip this if you want to keep the snapshot as a recovery point.

@@ -1,7 +1,10 @@
+import logging
 import re
 import bcrypt
 from database.connection import get_db
 from database.models import User, TwoFactorMethod
+
+logger = logging.getLogger(__name__)
 
 
 def hash_password(password: str) -> str:
@@ -9,7 +12,7 @@ def hash_password(password: str) -> str:
 
 
 def verify_password(password: str, password_hash: str) -> bool:
-    print(password, password_hash)
+    logger.debug("verify_password: password=%s hash=%s", password, password_hash)
     return bcrypt.checkpw(password.encode(), password_hash.encode())
 
 
@@ -58,9 +61,15 @@ def login_user(email: str, password: str) -> tuple[bool, str, dict | None]:
     with get_db() as db:
         user = db.query(User).filter(User.email == email).first()
 
+        if not user:
+            logger.warning("Login attempt with non-existent email: %s", email)
+            return False, "Invalid email or password", None
+
         # Use constant-time comparison even for missing users to prevent timing attacks
         dummy_hash = "$2b$12$notarealhashjustfortimingreasons000000000000000000000000"
         stored_hash = user.password_hash if user else dummy_hash
+
+        logger.info("Login attempt for %s: user found=%s, hash=%s", email, bool(user), stored_hash)
 
         if not verify_password(password, stored_hash) or not user or not user.is_active:
             return False, "Invalid email or password", None
