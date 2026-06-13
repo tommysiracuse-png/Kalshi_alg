@@ -18,7 +18,7 @@ resource "aws_rds_cluster" "main" {
   cluster_identifier = "${var.project_name}-cluster"
   engine             = "aurora-postgresql"
   engine_mode        = "provisioned"
-  engine_version     = "16.1"
+  engine_version     = "16.6"
 
   database_name   = var.db_name
   master_username = var.db_username
@@ -38,7 +38,7 @@ resource "aws_rds_cluster" "main" {
   # Automated backups retained 7 days
   backup_retention_period   = 7
   preferred_backup_window   = "03:00-04:00"
-  deletion_protection       = true
+  deletion_protection       = false
   skip_final_snapshot       = false
   final_snapshot_identifier = "${var.project_name}-final-snapshot"
 
