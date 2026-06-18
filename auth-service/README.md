@@ -1,16 +1,22 @@
-# Auth Service
+# Auth Service API
 
-A containerized authentication service with email/password login, two-factor authentication (2FA) via email or SMS, and license key access control. Built with Python/Streamlit, deployed on AWS using Docker and Terraform.
+A REST authentication API with email/password login, two-factor authentication
+(2FA) via email or SMS, and license-key access control. Built with
+**FastAPI**, packaged as a Docker container, and deployed on a single **EC2**
+instance on AWS with Terraform. Designed to be consumed by a separate
+application (e.g. another service hosted in AWS) over HTTP/JSON.
 
 ---
 
 ## Features
 
-- Email/password registration and login with bcrypt hashing
+- REST endpoints for account creation, login, 2FA, and license-key retrieval
+- **JWT access tokens** — login returns a signed bearer token the consuming app sends on subsequent requests
 - Two-factor authentication via email (AWS SES) or SMS (AWS SNS)
-- Users must have at least one verified 2FA method to access their license key
-- Persistent storage in Aurora PostgreSQL (AWS)
-- Horizontally scalable — multiple containers behind an Application Load Balancer
+- Email/password hashing with bcrypt; 2FA codes hashed, single-use, 10-min expiry
+- Persistent storage in Aurora PostgreSQL (unchanged from the original design)
+- Full request + server monitoring via CloudWatch (structured access logs, metrics, dashboard, alarms)
+- Interactive OpenAPI docs at `/docs`
 - All AWS infrastructure defined in Terraform
 
 ---
@@ -18,43 +24,112 @@ A containerized authentication service with email/password login, two-factor aut
 ## Architecture
 
 ```
-Internet
+Consuming Application (AWS)
+   │  HTTPS + Bearer JWT
+   ▼
+Application Load Balancer (HTTPS, TLS 1.3)
    │
    ▼
-Application Load Balancer (HTTPS, sticky sessions)
-   │
-   ├── ECS Fargate Task (Streamlit app) ─── AWS SES (email 2FA)
-   ├── ECS Fargate Task (Streamlit app) ─── AWS SNS (SMS 2FA)
-   └── ECS Fargate Task (Streamlit app)
-              │
+EC2 instance (private subnet)
+   └── Docker container: FastAPI / Uvicorn  ─── AWS SES (email 2FA)
+              │                              └── AWS SNS (SMS 2FA)
               ▼
    Aurora PostgreSQL Serverless v2 (private subnet)
+
+Monitoring:  CloudWatch Logs (access logs) · CloudWatch metrics ·
+             Dashboard · Alarms → SNS email
 ```
 
-**Sticky sessions** on the ALB keep each user's WebSocket connection pinned to a single container for the duration of their session — required for Streamlit's stateful architecture.
-
-### Database — Aurora PostgreSQL Serverless v2
-
-Chosen over standard RDS because:
-- Auto-scales from 0.5 to 4 ACU (near-zero cost at idle, handles traffic bursts instantly)
-- Multi-AZ failover is built in
-- Fully managed with automated backups
-- Encryption at rest enabled by default
+The EC2 instance runs in a **private subnet** — the ALB is its only inbound
+path, and it reaches ECR / Secrets Manager / SES / SNS outbound through a NAT
+gateway. Secrets (DB URL, JWT signing key) are pulled from Secrets Manager at
+launch and never appear in user-data or environment dumps.
 
 ### AWS Services Used
 
 | Service | Purpose |
 |---|---|
-| ECS Fargate | Runs Streamlit app containers — no server management |
-| Aurora PostgreSQL Serverless v2 | Persistent user data storage |
-| Application Load Balancer | Routes traffic, terminates TLS, sticky sessions |
+| EC2 | Runs the API container (single instance, auto-recovers on failure) |
+| Aurora PostgreSQL Serverless v2 | Persistent user data storage *(unchanged)* |
+| Application Load Balancer | Routes traffic, terminates TLS |
 | AWS SES | Sends 2FA codes via email |
 | AWS SNS | Sends 2FA codes via SMS |
-| ECR | Stores Docker images |
-| Secrets Manager | Stores DB credentials — never exposed in env vars |
+| ECR | Stores the Docker image |
+| Secrets Manager | DB credentials + JWT signing secret |
 | ACM | TLS certificate, auto-renewed |
-| Route53 | DNS + automatic SES DKIM record provisioning |
-| CloudWatch | Container logs (30-day retention) |
+| Route53 | DNS + SES DKIM record provisioning |
+| CloudWatch | Logs, metrics, dashboard, alarms |
+| SSM | Session Manager shell access + CloudWatch agent config |
+
+---
+
+## API Reference
+
+Base URL: `https://<your-domain>` · Interactive docs: `https://<your-domain>/docs`
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| `POST` | `/auth/register` | — | Create an account |
+| `POST` | `/auth/login` | — | Log in; returns a JWT, or a 2FA challenge |
+| `POST` | `/auth/2fa/verify` | challenge token | Submit a 2FA code, returns a JWT |
+| `GET`  | `/auth/me` | Bearer | Current user identity |
+| `GET`  | `/auth/license-keys` | Bearer (+2FA) | List the user's license keys |
+| `GET`  | `/auth/2fa/methods` | Bearer | List configured 2FA methods |
+| `POST` | `/auth/2fa/setup` | Bearer | Begin adding an email/SMS 2FA method |
+| `POST` | `/auth/2fa/confirm` | Bearer | Confirm a 2FA method with the emailed/texted code |
+| `DELETE` | `/auth/2fa/{method_type}` | Bearer | Disable a 2FA method |
+| `GET`  | `/health` | — | Liveness + DB check (ALB health check) |
+| `GET`  | `/metrics` | — | Prometheus metrics |
+
+### Example flow
+
+```bash
+BASE=https://auth.example.com
+
+# 1. Register
+curl -sX POST $BASE/auth/register \
+  -H 'content-type: application/json' \
+  -d '{"email":"you@example.com","password":"S3cur3!pass"}'
+
+# 2. Log in
+curl -sX POST $BASE/auth/login \
+  -H 'content-type: application/json' \
+  -d '{"email":"you@example.com","password":"S3cur3!pass"}'
+# → {"access_token":"eyJ...","token_type":"bearer","expires_in":43200}
+#   (or, if 2FA is enabled: {"challenge_required":true,"challenge_token":"eyJ...", ...})
+
+# 2b. If a challenge was returned, submit the 6-digit code:
+curl -sX POST $BASE/auth/2fa/verify \
+  -H 'content-type: application/json' \
+  -d '{"challenge_token":"eyJ...","code":"123456"}'
+
+# 3. Call an authenticated endpoint
+curl -s $BASE/auth/me -H "authorization: Bearer eyJ..."
+```
+
+---
+
+## Local Development
+
+```bash
+cp .env.example .env          # fill in AWS creds + SES_FROM_EMAIL for 2FA
+docker compose up --build
+```
+
+The API is then available at `http://localhost:8000` (docs at
+`http://localhost:8000/docs`). A local PostgreSQL instance starts automatically;
+tables are created on first boot. `JWT_SECRET` defaults to a dev value — set a
+strong one for anything non-local.
+
+### Browser test console
+
+A point-and-click console for exercising every endpoint (it chains the flow:
+register → login → 2FA → authenticated calls, auto-storing the JWT/challenge
+tokens) is served at **`http://localhost:8000/test`**.
+
+It is gated behind the `ENABLE_TEST_UI` env var, which `docker-compose.yml` sets
+for local dev only. The AWS deployment never sets it, so `/test` is unreachable
+in production.
 
 ---
 
@@ -63,72 +138,32 @@ Chosen over standard RDS because:
 ```
 auth-service/
 ├── app/
-│   ├── main.py                  # Streamlit app (all pages + auth state machine)
+│   ├── api/
+│   │   ├── app.py            # FastAPI app: routes, startup, CORS
+│   │   ├── schemas.py        # Pydantic request/response models
+│   │   ├── security.py       # JWT issuance/verification + auth dependency
+│   │   └── monitoring.py     # Request logging + Prometheus middleware
+│   ├── auth/                 # Login, registration, 2FA logic (reused, unchanged)
+│   ├── database/             # SQLAlchemy models + connection
+│   ├── utils/                # Phone normalization, contact masking
+│   ├── main.py               # Legacy Streamlit UI (local use only; not deployed)
 │   ├── requirements.txt
-│   ├── Dockerfile
-│   ├── auth/
-│   │   ├── authentication.py    # Login, registration, password hashing
-│   │   └── two_factor.py        # 2FA code generation, SES/SNS sending, verification
-│   ├── database/
-│   │   ├── models.py            # SQLAlchemy ORM models
-│   │   └── connection.py        # DB engine + session factory
-│   └── utils/
-│       └── validators.py        # Phone normalization, contact masking
+│   └── Dockerfile            # Runs uvicorn on :8000
 ├── terraform/
-│   ├── main.tf                  # Provider config
-│   ├── variables.tf             # All input variables
-│   ├── outputs.tf               # Useful post-deploy values
-│   ├── vpc.tf                   # VPC, subnets, NAT gateways, security groups
-│   ├── rds.tf                   # Aurora PostgreSQL Serverless v2
-│   ├── secrets.tf               # Secrets Manager (DB credentials)
-│   ├── ecr.tf                   # Docker image registry
-│   ├── ecs.tf                   # Fargate cluster, task definition, service
-│   ├── alb.tf                   # Load balancer, HTTPS listener, ACM cert
-│   ├── iam.tf                   # ECS execution and task IAM roles
-│   ├── ses.tf                   # SES domain identity, DKIM/SPF/DMARC DNS records
-│   ├── autoscaling.tf           # ECS auto-scaling policies (CPU-based)
-│   └── cloudwatch.tf            # Log groups
-├── docker-compose.yml           # Local development with local Postgres
-└── .env.example                 # Environment variable template
+│   ├── main.tf · variables.tf · outputs.tf
+│   ├── vpc.tf                # VPC, subnets, NAT, security groups
+│   ├── rds.tf                # Aurora PostgreSQL Serverless v2 (unchanged)
+│   ├── secrets.tf            # DB password + JWT signing secret
+│   ├── ecr.tf                # Docker image registry
+│   ├── ec2.tf                # EC2 instance, instance profile, ALB attachment
+│   ├── user_data.sh.tftpl    # Bootstrap: Docker, CloudWatch agent, run container
+│   ├── alb.tf                # Load balancer, HTTPS listener, ACM cert
+│   ├── iam.tf                # EC2 instance role (secrets, SES/SNS, ECR, CW, SSM)
+│   ├── ses.tf                # SES domain identity + DNS records
+│   └── cloudwatch.tf         # Log group, agent config, alarms, dashboard, SNS
+├── docker-compose.yml        # Local dev with local Postgres
+└── .env.example
 ```
-
----
-
-## Local Development
-
-### Prerequisites
-
-- Docker and Docker Compose
-- AWS credentials with SES and SNS permissions (for 2FA sending)
-
-### Setup
-
-**1. Copy the environment template:**
-
-```bash
-cp .env.example .env
-```
-
-**2. Fill in your AWS credentials in `.env`:**
-
-```
-AWS_ACCESS_KEY_ID=your_key
-AWS_SECRET_ACCESS_KEY=your_secret
-AWS_REGION=us-east-1
-SES_FROM_EMAIL=no-reply@yourdomain.com
-```
-
-> SES must be in production mode (out of sandbox) or both sender and recipient must be verified addresses. See [SES Production Access](#ses-production-access) below.
-
-**3. Start the stack:**
-
-```bash
-docker compose up --build
-```
-
-The app will be available at `http://localhost:8501`.
-
-A local PostgreSQL instance is started automatically. Database tables are created on first boot.
 
 ---
 
@@ -136,218 +171,133 @@ A local PostgreSQL instance is started automatically. Database tables are create
 
 ### Prerequisites
 
-- [Terraform](https://developer.hashicorp.com/terraform/install) >= 1.7
-- [AWS CLI](https://aws.amazon.com/cli/) configured (`aws configure`)
-- [Docker](https://docs.docker.com/get-docker/)
-- A domain in a Route53 hosted zone
-- SES production access granted for your sending domain
+- Terraform >= 1.7, AWS CLI configured, Docker
+- A domain in a Route53 hosted zone, SES production access (see below)
 
-### Step 1 — Create a `terraform.tfvars` file
+### Step 1 — Configure `terraform/terraform.tfvars`
 
 ```hcl
-# terraform/terraform.tfvars
-
 aws_region      = "us-east-1"
 project_name    = "auth-svc"
 environment     = "prod"
 
 domain_name     = "auth.yourdomain.com"
-route53_zone_id = "Z0123456789ABCDEF"   # Your Route53 hosted zone ID
+route53_zone_id = "Z0123456789ABCDEF"
 
 ses_from_email  = "no-reply@yourdomain.com"
 ses_from_domain = "yourdomain.com"
+
+instance_type      = "t3.small"
+cors_allow_origins = "https://your-consuming-app.com"
+alarm_email        = "ops@yourdomain.com"   # receives CloudWatch alarm emails
 ```
 
-### Step 2 — Deploy the infrastructure
+### Step 2 — Provision infrastructure
 
 ```bash
 cd terraform
 terraform init
-terraform plan
 terraform apply
 ```
 
-This provisions everything: VPC, Aurora cluster, ECS cluster, ALB, ACM certificate (auto-validated via Route53), SES domain identity with DKIM/SPF/DMARC records, and IAM roles.
+This creates the VPC, Aurora cluster, ECR repo, ALB + ACM cert, SES identity,
+the EC2 instance, IAM roles, and all CloudWatch monitoring.
 
-### Step 3 — Build and push the Docker image
-
-After `terraform apply`, get the push commands:
-
-```bash
-terraform output ecr_push_commands
-```
-
-This outputs commands like:
+### Step 3 — Build and push the image
 
 ```bash
-aws ecr get-login-password --region us-east-1 | \
-  docker login --username AWS --password-stdin 123456789.dkr.ecr.us-east-1.amazonaws.com
-
-docker build -t auth-svc ../app
-docker tag auth-svc:latest 123456789.dkr.ecr.us-east-1.amazonaws.com/auth-svc/app:latest
-docker push 123456789.dkr.ecr.us-east-1.amazonaws.com/auth-svc/app:latest
+terraform output -raw ecr_push_commands | bash
 ```
 
-### Step 4 — Deploy the updated image
+### Step 4 — Roll out the image
 
-Force a new ECS deployment to pick up the pushed image:
+The instance pulls `:latest` at boot. After pushing a new image, replace the
+host (cleanest way to pick up a new image) or restart the container in place:
 
 ```bash
-aws ecs update-service \
-  --cluster auth-svc-cluster \
-  --service auth-svc-service \
-  --force-new-deployment
+# Restart the container on the running host via SSM:
+aws ssm start-session --target "$(terraform output -raw instance_id)"
+#   then on the host:  sudo docker pull <image> && sudo docker restart auth-api
+
+# — or — recreate the instance so user-data re-runs:
+terraform apply -replace="aws_instance.app"
 ```
 
-The app will be live at `https://auth.yourdomain.com`.
+The API is live at `https://auth.yourdomain.com` (docs at `/docs`).
 
 ---
 
-## User Flow
+## Monitoring
 
-### Registration
+Everything is visible in one CloudWatch **dashboard**
+(`<project>-overview` — see `terraform output dashboard_url`):
 
-1. Go to the app URL and click **Create an account**
-2. Enter email and password
-3. Click **Sign In** on the login page
+- **Per-request view** — request count by status class (2xx/4xx/5xx), response
+  time percentiles (p50/p90/p99), and a live table of the most recent requests
+  from the structured access log.
+- **Server status** — instance CPU & memory %, healthy-host count, and EC2
+  status-check results.
 
-### Setting up 2FA (required to access license key)
+**Access logs** — the API logs every request as a JSON line
+(`method`, `route`, `status`, `duration_ms`, `client_ip`, `request_id`) shipped
+to the `/auth-svc/<project>/api` CloudWatch log group via the Docker `awslogs`
+driver. Query them in Logs Insights:
 
-1. After signing in, go to the **Two-Factor Authentication** section on the dashboard
-2. Click **Add Email 2FA** or **Add SMS 2FA**
-3. Enter your contact (email address or US phone number)
-4. Enter the 6-digit code that was sent
-5. 2FA is now enabled — your license key section will unlock
+```
+fields @timestamp, method, route, status, duration_ms, client_ip
+| filter event = 'http_request' and status >= 500
+| sort @timestamp desc
+```
 
-### Signing in with 2FA
+**Prometheus** — `/metrics` exposes `http_requests_total` and
+`http_request_duration_seconds` for any Prometheus-compatible scraper.
 
-1. Enter email and password
-2. A 6-digit code is automatically sent to your first active 2FA method
-3. Enter the code to complete sign-in
-4. Use **Use different method** if you have multiple methods set up
+**Alarms** (notify the `alarm_email` SNS topic):
 
----
-
-## Scaling
-
-The ECS service auto-scales based on CPU utilization:
-
-| Condition | Action |
+| Alarm | Trigger |
 |---|---|
-| Average CPU ≥ 70% for 2 minutes | Add 2 tasks |
-| Average CPU ≤ 30% for 5 minutes | Remove 1 task |
+| Target 5xx | > `alarm_5xx_threshold` 5xx/min |
+| No healthy host | Healthy targets < 1 |
+| High latency | p90 response time > `alarm_latency_threshold_seconds` |
+| High CPU | Instance CPU > `alarm_cpu_threshold` % |
+| Status check failed | System status check fails → **auto-recovers** the instance |
 
-Default limits: min 2 tasks, max 10 tasks. These can be adjusted in `terraform.tfvars`:
-
-```hcl
-ecs_min_tasks = 2
-ecs_max_tasks = 20
-ecs_scale_out_cpu_threshold = 60
-ecs_scale_in_cpu_threshold  = 20
-```
-
-Aurora Serverless v2 scales independently from 0.5 to 4 ACU. Adjust the ceiling in `terraform.tfvars` if you expect heavy query load:
-
-```hcl
-db_max_capacity = 8.0
-```
-
----
-
-## SES Production Access
-
-AWS SES starts in **sandbox mode**, which only allows sending to verified email addresses. Before going live:
-
-1. Open the [AWS SES console](https://console.aws.amazon.com/ses/home)
-2. Navigate to **Account dashboard** → **Request production access**
-3. Fill out the form describing your use case (transactional 2FA codes)
-4. Approval typically takes 24 hours
-
-SMS via SNS also has a default spending limit of $1/month. Request an increase under **SNS → Text messaging → Preferences** in the AWS console.
+> Setting `alarm_email` subscribes the address to the SNS topic — confirm the
+> subscription via the email AWS sends after `apply`.
 
 ---
 
 ## Security Notes
 
-- Passwords are hashed with bcrypt (cost factor 12)
-- 2FA codes are also bcrypt-hashed before storage — the plaintext code only exists in memory and in transit
-- Codes expire after 10 minutes and are single-use
-- The DB password is stored in Secrets Manager and injected into ECS at launch — it never appears in task definition env vars or logs
-- The RDS cluster is in a private subnet with no public access; only ECS tasks can connect via a scoped security group rule
-- TLS 1.3 is enforced on the ALB listener (`ELBSecurityPolicy-TLS13-1-2-2021-06`)
-- The IAM task role for SES is scoped to the configured `ses_from_email` address only
+- Passwords and 2FA codes are bcrypt-hashed; codes expire after 10 minutes and are single-use
+- JWT access tokens (HS256) are signed with a 64-char secret generated by Terraform and stored in Secrets Manager — never in user-data or task env
+- The DB and JWT secrets are read by the instance at launch; the instance role is scoped to exactly those two secret ARNs
+- Aurora is in a private subnet; only the API instance's security group can reach port 5432
+- The EC2 instance is in a private subnet with no public IP; shell access is via SSM Session Manager (no open SSH port)
+- IMDSv2 is enforced; the root volume is encrypted
+- TLS 1.3 on the ALB listener; SES IAM permission is scoped to the configured from-address
+
+---
+
+## SES Production Access
+
+AWS SES starts in **sandbox mode** (only sends to verified addresses). Request
+production access in the SES console → **Account dashboard** → **Request
+production access**. SMS via SNS has a default $1/month limit — raise it under
+**SNS → Text messaging → Preferences**.
 
 ---
 
 ## Tearing Down
 
-Three resources have deletion safeguards that will block `terraform destroy` unless you clear them first: the ALB has deletion protection enabled, Aurora has deletion protection enabled and will take a final snapshot, and ECR will refuse to delete a repository that still contains images.
-
-### Step 1 — Scale down ECS
-
-Drain running tasks so the ALB target group empties cleanly:
-
 ```bash
-aws ecs update-service \
-  --cluster auth-svc-cluster \
-  --service auth-svc-service \
-  --desired-count 0
+# 1. Empty the ECR repo (Terraform won't delete a non-empty repo)
+aws ecr batch-delete-image --repository-name auth-svc/app \
+  --image-ids "$(aws ecr list-images --repository-name auth-svc/app --query 'imageIds[*]' --output json)"
+
+# 2. Destroy
+cd terraform && terraform destroy
 ```
 
-### Step 2 — Delete ECR images
-
-Terraform cannot delete a non-empty ECR repository. Empty it first:
-
-```bash
-aws ecr batch-delete-image \
-  --repository-name auth-svc/app \
-  --image-ids "$(aws ecr list-images \
-      --repository-name auth-svc/app \
-      --query 'imageIds[*]' \
-      --output json)"
-```
-
-### Step 3 — Disable ALB deletion protection
-
-```bash
-ALB_ARN=$(aws elbv2 describe-load-balancers \
-  --query "LoadBalancers[?contains(LoadBalancerName,'auth-svc')].LoadBalancerArn" \
-  --output text)
-
-aws elbv2 modify-load-balancer-attributes \
-  --load-balancer-arn "$ALB_ARN" \
-  --attributes Key=deletion_protection.enabled,Value=false
-```
-
-### Step 4 — Disable RDS deletion protection
-
-```bash
-CLUSTER_ID=$(aws rds describe-db-clusters \
-  --query "DBClusters[?contains(DBClusterIdentifier,'auth-svc')].DBClusterIdentifier" \
-  --output text)
-
-aws rds modify-db-cluster \
-  --db-cluster-identifier "$CLUSTER_ID" \
-  --no-deletion-protection \
-  --apply-immediately
-```
-
-### Step 5 — Destroy all infrastructure
-
-```bash
-cd terraform
-terraform destroy
-```
-
-Terraform will pause and ask you to confirm the final Aurora snapshot identifier (`auth-svc-final-snapshot`) before deleting the cluster. Type `yes` to proceed.
-
-### Step 6 — Delete the final snapshot (optional)
-
-The final Aurora snapshot is not managed by Terraform and will persist (and incur storage charges) until manually removed:
-
-```bash
-aws rds delete-db-cluster-snapshot \
-  --db-cluster-snapshot-identifier auth-svc-final-snapshot
-```
-
-Skip this if you want to keep the snapshot as a recovery point.
+Aurora takes a final snapshot (`<project>-final-snapshot`) on destroy; delete it
+manually afterward if you don't want to keep the recovery point.

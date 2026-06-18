@@ -1,58 +1,53 @@
-# ── ECS Task Execution Role ───────────────────────────────────────────────────
-# Used by the ECS control plane to pull images and write logs.
+# ── EC2 Instance Role ─────────────────────────────────────────────────────────
+# Attached to the API EC2 instance. Grants exactly what the host needs:
+#   * read the DB + JWT secrets at launch
+#   * send 2FA codes via SES / SNS
+#   * pull the container image from ECR
+#   * ship logs/metrics to CloudWatch
+#   * SSM Session Manager access (shell without opening SSH)
 
-resource "aws_iam_role" "ecs_task_execution" {
-  name = "${var.project_name}-ecs-exec-role"
+resource "aws_iam_role" "app_instance" {
+  name = "${var.project_name}-instance-role"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
       Effect    = "Allow"
-      Principal = { Service = "ecs-tasks.amazonaws.com" }
+      Principal = { Service = "ec2.amazonaws.com" }
       Action    = "sts:AssumeRole"
     }]
   })
+
+  tags = { Name = "${var.project_name}-instance-role" }
 }
 
-resource "aws_iam_role_policy_attachment" "ecs_task_execution_base" {
-  role       = aws_iam_role.ecs_task_execution.name
-  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+resource "aws_iam_instance_profile" "app" {
+  name = "${var.project_name}-instance-profile"
+  role = aws_iam_role.app_instance.name
 }
 
-# Allow execution role to read secrets (for DATABASE_URL injection at launch)
-resource "aws_iam_role_policy" "ecs_exec_secrets" {
-  name = "${var.project_name}-exec-secrets"
-  role = aws_iam_role.ecs_task_execution.id
+# Read the DB and JWT secrets only.
+resource "aws_iam_role_policy" "app_secrets" {
+  name = "${var.project_name}-instance-secrets"
+  role = aws_iam_role.app_instance.id
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Effect   = "Allow"
-      Action   = ["secretsmanager:GetSecretValue"]
-      Resource = [aws_secretsmanager_secret.db_password.arn]
+      Effect = "Allow"
+      Action = ["secretsmanager:GetSecretValue"]
+      Resource = [
+        aws_secretsmanager_secret.db_password.arn,
+        aws_secretsmanager_secret.jwt_secret.arn,
+      ]
     }]
   })
 }
 
-# ── ECS Task Role ─────────────────────────────────────────────────────────────
-# Attached to the running container — grants access to SES and SNS for 2FA.
-
-resource "aws_iam_role" "ecs_task" {
-  name = "${var.project_name}-ecs-task-role"
-
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect    = "Allow"
-      Principal = { Service = "ecs-tasks.amazonaws.com" }
-      Action    = "sts:AssumeRole"
-    }]
-  })
-}
-
-resource "aws_iam_role_policy" "ecs_task_ses_sns" {
+# Send 2FA codes via SES (scoped to the from-address) and SMS via SNS.
+resource "aws_iam_role_policy" "app_ses_sns" {
   name = "${var.project_name}-ses-sns-policy"
-  role = aws_iam_role.ecs_task.id
+  role = aws_iam_role.app_instance.id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -62,31 +57,74 @@ resource "aws_iam_role_policy" "ecs_task_ses_sns" {
         Action   = ["ses:SendEmail", "ses:SendRawEmail"]
         Resource = "*"
         Condition = {
-          StringEquals = {
-            "ses:FromAddress" = var.ses_from_email
-          }
+          StringEquals = { "ses:FromAddress" = var.ses_from_email }
         }
       },
       {
         Effect   = "Allow"
         Action   = ["sns:Publish"]
         Resource = "*"
-        # Restrict to SMS only (no topic ARNs)
         Condition = {
-          StringEquals = {
-            "sns:Protocol" = "sms"
-          }
+          StringEquals = { "sns:Protocol" = "sms" }
         }
-      },
-      {
-        # CloudWatch metrics / logs from within the task
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ]
-        Resource = "${aws_cloudwatch_log_group.app.arn}:*"
       }
     ]
+  })
+}
+
+# Pull the container image from the private ECR repo.
+resource "aws_iam_role_policy" "app_ecr_pull" {
+  name = "${var.project_name}-ecr-pull"
+  role = aws_iam_role.app_instance.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["ecr:GetAuthorizationToken"]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:BatchGetImage",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:BatchCheckLayerAvailability",
+        ]
+        Resource = aws_ecr_repository.app.arn
+      }
+    ]
+  })
+}
+
+# CloudWatch agent (metrics + log shipping) and SSM Session Manager.
+resource "aws_iam_role_policy_attachment" "cloudwatch_agent" {
+  role       = aws_iam_role.app_instance.name
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
+}
+
+resource "aws_iam_role_policy_attachment" "ssm_core" {
+  role       = aws_iam_role.app_instance.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+# Allow the Docker awslogs log driver to create streams in the app log group.
+resource "aws_iam_role_policy" "app_logs" {
+  name = "${var.project_name}-instance-logs"
+  role = aws_iam_role.app_instance.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect = "Allow"
+      Action = [
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents",
+        "logs:DescribeLogStreams",
+      ]
+      Resource = "${aws_cloudwatch_log_group.app.arn}:*"
+    }]
   })
 }

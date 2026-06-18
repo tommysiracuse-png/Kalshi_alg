@@ -10,9 +10,12 @@ route53_zone_id = "Z04124311U7X00857DJXM"   # Your Route53 hosted zone ID
 ses_from_email  = "mail@wsilbersilberste.in"
 ses_from_domain = "williamsilberste.in"
 
-ecs_min_tasks = 2
-ecs_max_tasks = 20
-ecs_scale_out_cpu_threshold = 60
-ecs_scale_in_cpu_threshold  = 20
+# ── API host ──────────────────────────────────────────────────────────────────
+instance_type      = "t3.small"
+cors_allow_origins = "*"   # tighten to your consuming app's origin(s) in production
 
+# ── Monitoring ────────────────────────────────────────────────────────────────
+alarm_email = ""           # set to receive CloudWatch alarm emails
+
+# ── Database ──────────────────────────────────────────────────────────────────
 db_max_capacity = 8.0

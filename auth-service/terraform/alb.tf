@@ -59,27 +59,22 @@ resource "aws_route53_record" "app" {
 }
 
 # ── Target Group ──────────────────────────────────────────────────────────────
+# Targets the EC2 instance directly (instance target type). The REST API is
+# stateless, so no sticky sessions are needed.
 resource "aws_lb_target_group" "app" {
   name        = "${var.project_name}-tg"
-  port        = 8501
+  port        = var.app_port
   protocol    = "HTTP"
   vpc_id      = aws_vpc.main.id
-  target_type = "ip"
+  target_type = "instance"
 
   health_check {
-    path                = "/_stcore/health"
+    path                = "/health"
     interval            = 30
     healthy_threshold   = 2
     unhealthy_threshold = 3
     timeout             = 10
     matcher             = "200"
-  }
-
-  # Sticky sessions keep a user's WebSocket connection on the same container
-  stickiness {
-    type            = "lb_cookie"
-    cookie_duration = 86400 # 1 day
-    enabled         = true
   }
 
   tags = { Name = "${var.project_name}-tg" }

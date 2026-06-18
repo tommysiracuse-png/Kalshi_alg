@@ -69,7 +69,7 @@ def login_user(email: str, password: str) -> tuple[bool, str, dict | None]:
         dummy_hash = "$2b$12$notarealhashjustfortimingreasons000000000000000000000000"
         stored_hash = user.password_hash if user else dummy_hash
 
-        logger.info("Login attempt for %s: user found=%s, hash=%s", email, bool(user), stored_hash)
+        logger.info("Login attempt for %s: user found=%s", email, bool(user))
 
         if not verify_password(password, stored_hash) or not user or not user.is_active:
             return False, "Invalid email or password", None

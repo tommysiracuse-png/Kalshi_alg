@@ -72,7 +72,7 @@ variable "db_max_capacity" {
   default     = 4.0
 }
 
-# ── ECS / App ────────────────────────────────────────────────────────────────
+# ── EC2 / App ────────────────────────────────────────────────────────────────
 
 variable "app_image" {
   description = "Full Docker image URI. Leave empty to use the ECR repo created by this config after pushing your image."
@@ -80,38 +80,52 @@ variable "app_image" {
   default     = ""
 }
 
-variable "ecs_cpu" {
-  description = "Fargate task CPU units (256=0.25 vCPU, 512=0.5, 1024=1)"
+variable "app_port" {
+  description = "Port the API container/host listens on (behind the ALB)"
   type        = number
-  default     = 512
+  default     = 8000
 }
 
-variable "ecs_memory" {
-  description = "Fargate task memory in MiB"
-  type        = number
-  default     = 1024
+variable "instance_type" {
+  description = "EC2 instance type for the API host"
+  type        = string
+  default     = "t3.small"
 }
 
-variable "ecs_min_tasks" {
-  description = "Minimum number of running ECS tasks"
+variable "root_volume_size" {
+  description = "Root EBS volume size in GiB"
+  type        = number
+  default     = 20
+}
+
+variable "cors_allow_origins" {
+  description = "Comma-separated CORS origins the API accepts ('*' for any)"
+  type        = string
+  default     = "*"
+}
+
+# ── Monitoring / Alarms ──────────────────────────────────────────────────────
+
+variable "alarm_email" {
+  description = "Email address to receive CloudWatch alarm notifications. Leave empty to skip the subscription."
+  type        = string
+  default     = ""
+}
+
+variable "alarm_5xx_threshold" {
+  description = "Number of 5xx responses per minute that triggers an alarm"
+  type        = number
+  default     = 5
+}
+
+variable "alarm_latency_threshold_seconds" {
+  description = "p90 target response time (seconds) that triggers an alarm"
   type        = number
   default     = 2
 }
 
-variable "ecs_max_tasks" {
-  description = "Maximum number of ECS tasks (scale ceiling)"
+variable "alarm_cpu_threshold" {
+  description = "Instance CPU % that triggers an alarm"
   type        = number
-  default     = 10
-}
-
-variable "ecs_scale_out_cpu_threshold" {
-  description = "Average CPU % that triggers scale-out"
-  type        = number
-  default     = 70
-}
-
-variable "ecs_scale_in_cpu_threshold" {
-  description = "Average CPU % that triggers scale-in"
-  type        = number
-  default     = 30
+  default     = 80
 }

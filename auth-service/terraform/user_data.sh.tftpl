@@ -1,0 +1,54 @@
+#!/bin/bash
+set -euo pipefail
+exec > >(tee /var/log/user-data.log | logger -t user-data -s 2>/dev/console) 2>&1
+
+REGION="${aws_region}"
+IMAGE="${ecr_image}"
+DB_SECRET_ARN="${db_secret_arn}"
+JWT_SECRET_ARN="${jwt_secret_arn}"
+LOG_GROUP="${log_group}"
+APP_PORT="${app_port}"
+CW_AGENT_PARAM="${cw_agent_param}"
+
+echo "=== Installing Docker + CloudWatch agent ==="
+dnf update -y
+dnf install -y docker amazon-cloudwatch-agent
+systemctl enable --now docker
+
+echo "=== Starting CloudWatch agent (host memory/disk metrics) ==="
+/opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
+  -a fetch-config -m ec2 -s -c ssm:$${CW_AGENT_PARAM}
+
+echo "=== Reading secrets ==="
+get_secret_field() {
+  aws secretsmanager get-secret-value \
+    --secret-id "$1" --region "$REGION" --query SecretString --output text \
+  | python3 -c "import sys,json;print(json.load(sys.stdin)['$2'])"
+}
+DATABASE_URL="$(get_secret_field "$DB_SECRET_ARN" database_url)"
+JWT_SECRET="$(get_secret_field "$JWT_SECRET_ARN" jwt_secret)"
+
+echo "=== Logging in to ECR and pulling image ==="
+REGISTRY="$(echo "$IMAGE" | cut -d/ -f1)"
+aws ecr get-login-password --region "$REGION" \
+  | docker login --username AWS --password-stdin "$REGISTRY"
+docker pull "$IMAGE"
+
+echo "=== Launching API container ==="
+docker rm -f auth-api 2>/dev/null || true
+docker run -d \
+  --name auth-api \
+  --restart unless-stopped \
+  -p $${APP_PORT}:8000 \
+  -e DATABASE_URL="$DATABASE_URL" \
+  -e JWT_SECRET="$JWT_SECRET" \
+  -e AWS_REGION="$REGION" \
+  -e SES_FROM_EMAIL="${ses_from_email}" \
+  -e CORS_ALLOW_ORIGINS="${cors_allow_origins}" \
+  --log-driver=awslogs \
+  --log-opt awslogs-region="$REGION" \
+  --log-opt awslogs-group="$LOG_GROUP" \
+  --log-opt awslogs-stream=auth-api \
+  "$IMAGE"
+
+echo "=== Done ==="

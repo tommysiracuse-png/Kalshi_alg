@@ -3,9 +3,29 @@ output "alb_dns_name" {
   value       = aws_lb.main.dns_name
 }
 
-output "app_url" {
-  description = "Public URL of the auth service"
+output "api_url" {
+  description = "Public base URL of the auth API"
   value       = "https://${var.domain_name}"
+}
+
+output "api_docs_url" {
+  description = "Interactive OpenAPI docs"
+  value       = "https://${var.domain_name}/docs"
+}
+
+output "instance_id" {
+  description = "EC2 instance ID running the API"
+  value       = aws_instance.app.id
+}
+
+output "dashboard_url" {
+  description = "CloudWatch dashboard for requests and server status"
+  value       = "https://${var.aws_region}.console.aws.amazon.com/cloudwatch/home?region=${var.aws_region}#dashboards:name=${aws_cloudwatch_dashboard.main.dashboard_name}"
+}
+
+output "ssm_session_command" {
+  description = "Open a shell on the instance without SSH"
+  value       = "aws ssm start-session --target ${aws_instance.app.id} --region ${var.aws_region}"
 }
 
 output "ecr_repository_url" {
@@ -35,7 +55,7 @@ output "db_secret_arn" {
   value       = aws_secretsmanager_secret.db_password.arn
 }
 
-output "ecs_cluster_name" {
-  description = "ECS cluster name"
-  value       = aws_ecs_cluster.main.name
+output "redeploy_command" {
+  description = "Pull the latest image and restart the API container on the instance"
+  value       = "aws ssm send-command --instance-ids ${aws_instance.app.id} --document-name AWS-RunShellScript --region ${var.aws_region} --parameters 'commands=[\"/var/lib/cloud/instance/scripts/part-001\"]'"
 }

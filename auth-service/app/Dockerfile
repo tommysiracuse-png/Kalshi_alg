@@ -11,14 +11,17 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-EXPOSE 8501
+EXPOSE 8000
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:8501/_stcore/health || exit 1
+# The ALB and Docker health checks both hit the API's /health endpoint.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
 
-CMD ["streamlit", "run", "main.py", \
-     "--server.port=8501", \
-     "--server.address=0.0.0.0", \
-     "--server.headless=true", \
-     "--server.enableCORS=false", \
-     "--server.enableXsrfProtection=true"]
+# Single worker keeps Prometheus counters consistent in-process; scale via more
+# EC2 hosts behind the ALB rather than forking workers here.
+CMD ["uvicorn", "api.app:app", \
+     "--host", "0.0.0.0", \
+     "--port", "8000", \
+     "--workers", "1", \
+     "--proxy-headers", \
+     "--forwarded-allow-ips", "*"]

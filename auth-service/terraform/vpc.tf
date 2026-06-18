@@ -34,7 +34,8 @@ resource "aws_subnet" "private" {
   tags = { Name = "${var.project_name}-private-${count.index + 1}" }
 }
 
-# ── NAT Gateways (one per AZ — allows ECS to reach SES/SNS without internet exposure) ──
+# ── NAT Gateways (one per AZ — lets the private EC2 instance reach ECR / Secrets
+#    Manager / SES / SNS without being publicly exposed) ──
 resource "aws_eip" "nat" {
   count  = 2
   domain = "vpc"
@@ -115,14 +116,15 @@ resource "aws_security_group" "alb" {
   tags = { Name = "${var.project_name}-alb-sg" }
 }
 
-resource "aws_security_group" "ecs" {
-  name        = "${var.project_name}-ecs-sg"
-  description = "Allow Streamlit traffic from ALB only"
+resource "aws_security_group" "app" {
+  name        = "${var.project_name}-app-sg"
+  description = "Allow API traffic from the ALB only"
   vpc_id      = aws_vpc.main.id
 
   ingress {
-    from_port       = 8501
-    to_port         = 8501
+    description     = "API traffic from ALB"
+    from_port       = var.app_port
+    to_port         = var.app_port
     protocol        = "tcp"
     security_groups = [aws_security_group.alb.id]
   }
@@ -134,19 +136,19 @@ resource "aws_security_group" "ecs" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = { Name = "${var.project_name}-ecs-sg" }
+  tags = { Name = "${var.project_name}-app-sg" }
 }
 
 resource "aws_security_group" "rds" {
   name        = "${var.project_name}-rds-sg"
-  description = "Allow PostgreSQL only from ECS tasks"
+  description = "Allow PostgreSQL only from the API instance"
   vpc_id      = aws_vpc.main.id
 
   ingress {
     from_port       = 5432
     to_port         = 5432
     protocol        = "tcp"
-    security_groups = [aws_security_group.ecs.id]
+    security_groups = [aws_security_group.app.id]
   }
 
   tags = { Name = "${var.project_name}-rds-sg" }

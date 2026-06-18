@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Auth Service · API Test Console</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #1a1d24; --border: #2a2f3a; --muted: #8b93a1;
+    --txt: #e6e9ef; --accent: #4f8cff; --ok: #22c55e; --warn: #f59e0b; --err: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--txt);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    padding: 16px 24px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 18px; margin: 0; }
+  .layout { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px 24px; }
+  @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px; margin-bottom: 16px;
+  }
+  .card h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--muted); margin: 0 0 12px; }
+  label { display: block; font-size: 12px; color: var(--muted); margin: 8px 0 4px; }
+  input, select {
+    width: 100%; padding: 8px 10px; background: #11141a; color: var(--txt);
+    border: 1px solid var(--border); border-radius: 6px; font: inherit;
+  }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; }
+  button {
+    margin-top: 12px; padding: 8px 14px; background: var(--accent); color: white;
+    border: 0; border-radius: 6px; font: inherit; font-weight: 600; cursor: pointer;
+  }
+  button.secondary { background: #2a2f3a; }
+  button:hover { filter: brightness(1.1); }
+  .pill { font-size: 11px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); }
+  .pill.set { color: var(--ok); border-color: var(--ok); }
+  .pill.unset { color: var(--muted); }
+  .tokens { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-left: auto; }
+  #log {
+    background: #0b0d11; border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px; height: calc(100vh - 130px); overflow: auto; font-family: ui-monospace, monospace;
+    font-size: 12.5px; white-space: pre-wrap; word-break: break-word;
+  }
+  .entry { margin-bottom: 12px; border-bottom: 1px dashed var(--border); padding-bottom: 12px; }
+  .entry .meth { font-weight: 700; }
+  .s2 { color: var(--ok); } .s4 { color: var(--warn); } .s5 { color: var(--err); }
+  .muted { color: var(--muted); }
+  code { background: #11141a; padding: 1px 5px; border-radius: 4px; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🔐 Auth Service · API Test Console</h1>
+  <span class="hint">Local dev only · <a href="/docs" style="color:var(--accent)">/docs</a></span>
+  <div class="tokens">
+    <label style="margin:0">Base URL</label>
+    <input id="baseUrl" style="width:230px" />
+    <span>Access token: <span id="accessPill" class="pill unset">none</span></span>
+    <span>Challenge: <span id="challengePill" class="pill unset">none</span></span>
+    <button class="secondary" onclick="clearTokens()" style="margin:0">Clear tokens</button>
+  </div>
+</header>
+
+<div class="layout">
+  <div>
+    <div class="card">
+      <h2>Health & metrics</h2>
+      <div class="row">
+        <button class="secondary" onclick="call('GET','/health')">GET /health</button>
+        <button class="secondary" onclick="openRaw('/metrics')">Open /metrics</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>1 · Register</h2>
+      <label>Email</label><input id="regEmail" value="you@example.com" />
+      <label>Password</label><input id="regPassword" value="S3cur3!pass" />
+      <div class="hint">8+ chars, upper, lower, number, special.</div>
+      <button onclick="register()">POST /auth/register</button>
+    </div>
+
+    <div class="card">
+      <h2>2 · Login</h2>
+      <label>Email</label><input id="loginEmail" value="you@example.com" />
+      <label>Password</label><input id="loginPassword" value="S3cur3!pass" />
+      <button onclick="login()">POST /auth/login</button>
+      <div class="hint">If 2FA is on, the challenge token is stored automatically — then use step 3.</div>
+    </div>
+
+    <div class="card">
+      <h2>3 · Verify 2FA login</h2>
+      <label>Code (from email/SMS)</label><input id="verifyCode" placeholder="123456" />
+      <button onclick="verify2fa()">POST /auth/2fa/verify</button>
+      <div class="hint">Uses the stored challenge token. On success the access token is stored.</div>
+    </div>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2>Authenticated (needs access token)</h2>
+      <div class="row">
+        <button class="secondary" onclick="call('GET','/auth/me',null,true)">GET /auth/me</button>
+        <button class="secondary" onclick="call('GET','/auth/license-keys',null,true)">GET /auth/license-keys</button>
+        <button class="secondary" onclick="call('GET','/auth/2fa/methods',null,true)">GET /auth/2fa/methods</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>2FA · Setup → Confirm → Disable</h2>
+      <label>Method</label>
+      <select id="faType"><option value="email">email</option><option value="sms">sms</option></select>
+      <label>Contact (email address or US phone)</label>
+      <input id="faContact" value="you@example.com" />
+      <button onclick="setup2fa()">POST /auth/2fa/setup</button>
+      <div class="hint">Sends a code to the contact (needs SES/SNS creds configured).</div>
+
+      <label style="margin-top:14px">Confirmation code</label>
+      <input id="faCode" placeholder="123456" />
+      <button onclick="confirm2fa()">POST /auth/2fa/confirm</button>
+
+      <div style="margin-top:14px" class="row">
+        <button class="secondary" onclick="disable2fa()">DELETE /auth/2fa/&lt;method&gt;</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Response log</h2>
+      <div id="log"><span class="muted">Responses appear here…</span></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let accessToken = sessionStorage.getItem("accessToken") || "";
+let challengeToken = sessionStorage.getItem("challengeToken") || "";
+
+$("baseUrl").value = window.location.origin;
+
+function refreshPills() {
+  $("accessPill").textContent = accessToken ? "set" : "none";
+  $("accessPill").className = "pill " + (accessToken ? "set" : "unset");
+  $("challengePill").textContent = challengeToken ? "set" : "none";
+  $("challengePill").className = "pill " + (challengeToken ? "set" : "unset");
+}
+function setAccess(t) { accessToken = t || ""; sessionStorage.setItem("accessToken", accessToken); refreshPills(); }
+function setChallenge(t) { challengeToken = t || ""; sessionStorage.setItem("challengeToken", challengeToken); refreshPills(); }
+function clearTokens() { setAccess(""); setChallenge(""); logLine("info", "Tokens cleared."); }
+
+function base() { return ($("baseUrl").value || window.location.origin).replace(/\/$/, ""); }
+function openRaw(path) { window.open(base() + path, "_blank"); }
+
+function logLine(kind, text) {
+  const log = $("log");
+  if (log.querySelector(".muted")) log.innerHTML = "";
+  const div = document.createElement("div");
+  div.className = "entry";
+  div.innerHTML = text;
+  log.prepend(div);
+}
+
+async function call(method, path, body, auth) {
+  const headers = { "content-type": "application/json" };
+  if (auth) {
+    if (!accessToken) { logLine("err", `<span class="s4">⚠ No access token — log in first.</span>`); return null; }
+    headers["authorization"] = "Bearer " + accessToken;
+  }
+  const opts = { method, headers };
+  if (body) opts.body = JSON.stringify(body);
+
+  let res, data, raw;
+  try {
+    res = await fetch(base() + path, opts);
+    raw = await res.text();
+    try { data = JSON.parse(raw); } catch { data = raw; }
+  } catch (e) {
+    logLine("err", `<span class="meth">${method}</span> <code>${path}</code> <span class="s5">network error: ${e.message}</span>`);
+    return null;
+  }
+  const cls = res.status >= 500 ? "s5" : res.status >= 400 ? "s4" : "s2";
+  const pretty = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+  logLine("res",
+    `<span class="meth">${method}</span> <code>${path}</code> ` +
+    `<span class="${cls}">${res.status}</span>\n` +
+    `<span class="muted">${escapeHtml(pretty)}</span>`);
+  return { res, data };
+}
+function escapeHtml(s) { return String(s).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
+
+// ── Flows ─────────────────────────────────────────────────────────────────────
+async function register() {
+  await call("POST", "/auth/register", { email: $("regEmail").value, password: $("regPassword").value });
+}
+
+async function login() {
+  const r = await call("POST", "/auth/login", { email: $("loginEmail").value, password: $("loginPassword").value });
+  if (!r || !r.res.ok) return;
+  if (r.data.access_token) { setAccess(r.data.access_token); logLine("ok", `<span class="s2">✓ Access token stored.</span>`); }
+  else if (r.data.challenge_token) {
+    setChallenge(r.data.challenge_token);
+    logLine("ok", `<span class="s2">✓ 2FA required — challenge token stored. Code sent to ${r.data.contact_masked} via ${r.data.method_type}.</span>`);
+  }
+}
+
+async function verify2fa() {
+  if (!challengeToken) { logLine("err", `<span class="s4">⚠ No challenge token — log in first.</span>`); return; }
+  const r = await call("POST", "/auth/2fa/verify", { challenge_token: challengeToken, code: $("verifyCode").value });
+  if (r && r.res.ok && r.data.access_token) {
+    setAccess(r.data.access_token); setChallenge("");
+    logLine("ok", `<span class="s2">✓ Access token stored.</span>`);
+  }
+}
+
+async function setup2fa() {
+  await call("POST", "/auth/2fa/setup", { method_type: $("faType").value, contact: $("faContact").value }, true);
+}
+async function confirm2fa() {
+  await call("POST", "/auth/2fa/confirm", { method_type: $("faType").value, code: $("faCode").value }, true);
+}
+async function disable2fa() {
+  await call("DELETE", "/auth/2fa/" + $("faType").value, null, true);
+}
+
+refreshPills();
+</script>
+</body>
+</html>

@@ -1,11 +1,15 @@
 services:
-  app:
+  api:
     build: ./app
     ports:
-      - "8501:8501"
+      - "8000:8000"
     environment:
       PYTHONUNBUFFERED: "1"
       DATABASE_URL: postgresql://postgres:postgres@db:5432/authdb
+      JWT_SECRET: ${JWT_SECRET:-local-dev-insecure-secret-change-me}
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:-*}
+      # Serves the browser test console at /test — local dev only, never set in AWS.
+      ENABLE_TEST_UI: "true"
       AWS_REGION: ${AWS_REGION:-us-east-1}
       SES_FROM_EMAIL: ${SES_FROM_EMAIL}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
