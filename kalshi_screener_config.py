@@ -5,7 +5,7 @@ kalshi_screener.py.
 """
 
 USE_DEMO = False
-KALSHI_HOST = "https://demo-api.kalshi.co" if USE_DEMO else "https://api.elections.kalshi.com"
+KALSHI_HOST = "https://external-api.demo.kalshi.co" if USE_DEMO else "https://external-api.kalshi.com"
 API_PREFIX = "/trade-api/v2"
 
 # Market scan settings

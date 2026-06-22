@@ -132,7 +132,7 @@ class KalshiApiClient:
         self.api_key_id = api_key_id
         self.private_key_path = private_key_path
         self.use_demo = bool(use_demo)
-        self.host = "https://demo-api.kalshi.co" if self.use_demo else "https://api.elections.kalshi.com"
+        self.host = "https://external-api.demo.kalshi.co/" if self.use_demo else "https://external-api.kalshi.com"
         self.api_prefix = "/trade-api/v2"
         self.session = requests.Session()
 

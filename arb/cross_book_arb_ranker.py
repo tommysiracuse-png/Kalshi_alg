@@ -67,7 +67,7 @@ from urllib.parse import quote as url_quote
 import requests
 
 
-KALSHI_BASE_URL = "https://api.elections.kalshi.com/trade-api/v2"
+KALSHI_BASE_URL = "https://external-api.kalshi.com/trade-api/v2"
 POLY_GAMMA_BASE_URL = "https://gamma-api.polymarket.com"
 POLY_CLOB_BASE_URL = "https://clob.polymarket.com"
 

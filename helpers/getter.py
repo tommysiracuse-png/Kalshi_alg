@@ -11,11 +11,11 @@ from cryptography.hazmat.primitives.asymmetric import padding
 USE_DEMO = False
 
 if USE_DEMO:
-    WS_URL = "wss://demo-api.kalshi.co/trade-api/ws/v2"
+    WS_URL = "wss://external-api-ws.demo.kalshi.co/trade-api/ws/v2"
     API_KEY_ID = os.getenv("KALSHI_API_KEY_ID", "")
     PRIVATE_KEY_PATH = os.getenv("KALSHI_PRIVATE_KEY_PATH", "./privkey.txt")
 else:
-    WS_URL = "wss://api.elections.kalshi.com/trade-api/ws/v2"
+    WS_URL = "wss://external-api-ws.kalshi.com/trade-api/ws/v2"
     API_KEY_ID = os.getenv("KALSHI_API_KEY_ID", "")
     PRIVATE_KEY_PATH = os.getenv("KALSHI_PRIVATE_KEY_PATH", "./privkey.txt")
 

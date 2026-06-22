@@ -71,7 +71,7 @@ import requests
 # API configuration
 # ---------------------------------------------------------------------------
 
-KALSHI_BASE_URL = "https://api.elections.kalshi.com/trade-api/v2"
+KALSHI_BASE_URL = "https://external-api.kalshi.com/trade-api/v2"
 POLY_GAMMA_BASE_URL = "https://gamma-api.polymarket.com"
 
 USER_AGENT = "cross-book-market-matcher/3.0"

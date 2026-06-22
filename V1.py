@@ -179,6 +179,20 @@ def contracts_to_count_units(contracts: int) -> int:
 
 
 
+def translate_v2_params(side: str, action: str, price_units: int) -> Tuple[str, int]:
+
+    if side == "yes":
+        book_side = "bid" if action == "buy" else "ask"
+        yes_price_units = price_units
+    elif side == "no":
+        book_side = "ask" if action == "buy" else "bid"
+        yes_price_units = ONE_DOLLAR_PRICE_UNITS - price_units
+    else:
+        raise ValueError(f"Unknown order side: {side!r}")
+    return book_side, yes_price_units
+
+
+
 def log_event(event_name: str, **fields: object) -> None:
     if fields:
         detail = " ".join(f"{key}={value}" for key, value in fields.items())
@@ -429,6 +443,12 @@ class BotSettings:
     # --- Quote behavior ---
     post_only_quotes: bool = True
     cancel_quotes_if_exchange_pauses: bool = False
+
+    # Required by the Kalshi V2 order endpoint. "taker_at_cross" cancels our
+    # taker order if it would self-trade (the post-only resting quotes never
+    # take, so this only matters for the IOC watchdog exit order).
+    self_trade_prevention_type: str = "taker_at_cross"
+    
     # 250 ms (raised from 100 ms on 2026-05-01) halves each bot's amend-storm
     # rate, freeing headroom under the cross-process shared write limiter so
     # more bots can run simultaneously without hitting REST 429s. Real reaction
@@ -1090,8 +1110,8 @@ class PriceGrid:
 class KalshiApiClient:
     def __init__(self, settings: BotSettings) -> None:
         self.settings = settings
-        self.host = "https://demo-api.kalshi.co" if settings.use_demo_environment else "https://api.elections.kalshi.com"
-        self.websocket_url = ("wss://demo-api.kalshi.co" if settings.use_demo_environment else "wss://api.elections.kalshi.com") + "/trade-api/ws/v2"
+        self.host = "https://external-api.demo.kalshi.co/" if settings.use_demo_environment else "https://external-api.kalshi.com"
+        self.websocket_url = ("wss://external-api-ws.demo.kalshi.co" if settings.use_demo_environment else "wss://external-api-ws.kalshi.com") + "/trade-api/ws/v2"
         self.api_prefix = "/trade-api/v2"
         self.websocket_path = "/trade-api/ws/v2"
         self.session = requests.Session()
@@ -1175,11 +1195,12 @@ class KalshiApiClient:
             return {}
         return response.json()
 
-    def rest_post(self, path: str, body: dict, *, action_name: str) -> dict:
+    def rest_post(self, path: str, body: dict, *, action_name: str, params: Optional[dict] = None) -> dict:
         response = self.session.post(
             self._build_url(path),
             headers=self._rest_headers("POST", path),
             json=body,
+            params=params,
             timeout=15,
         )
         if response.status_code == 429:
@@ -1262,38 +1283,40 @@ class KalshiApiClient:
         reduce_only: Optional[bool] = None,
         time_in_force: Optional[str] = None,
         cancel_order_on_pause: Optional[bool] = None,
+        self_trade_prevention_type: Optional[str] = None,
     ) -> dict:
+        book_side, yes_price_units = translate_v2_params(side, action, price_units)
+        resolved_tif = str(time_in_force or "good_till_canceled")
         body = {
             "ticker": market_ticker,
-            "side": side,
-            "action": action,
+            "side": book_side,
             "client_order_id": client_order_id,
-            "count_fp": format_count_fp(count_units),
+            "count": format_count_fp(count_units),
+            "price": format_price_dollars(yes_price_units),
+            "time_in_force": resolved_tif,
+            "self_trade_prevention_type": str(
+                self_trade_prevention_type or self.settings.self_trade_prevention_type
+            ),
             "post_only": bool(self.settings.post_only_quotes if post_only is None else post_only),
             "cancel_order_on_pause": bool(self.settings.cancel_quotes_if_exchange_pauses if cancel_order_on_pause is None else cancel_order_on_pause),
             "subaccount": self.settings.subaccount_number,
-            "time_in_force": str(time_in_force or "good_till_canceled"),
         }
         if reduce_only is not None:
             body["reduce_only"] = bool(reduce_only)
 
-        if side == "yes":
-            body["yes_price_dollars"] = format_price_dollars(price_units)
-        else:
-            body["no_price_dollars"] = format_price_dollars(price_units)
-
-        if expiration_timestamp_seconds and expiration_timestamp_seconds > 0 and body.get("time_in_force") != "immediate_or_cancel":
-            body["expiration_ts"] = int(expiration_timestamp_seconds)
+        if expiration_timestamp_seconds and expiration_timestamp_seconds > 0 and resolved_tif != "immediate_or_cancel":
+            body["expiration_time"] = int(expiration_timestamp_seconds)
 
         if self.settings.dry_run:
             log_event(
                 "DRY_CREATE",
                 side=side,
                 action=action,
-                tif=body.get("time_in_force"),
+                book_side=book_side,
+                tif=resolved_tif,
                 post_only=body.get("post_only"),
                 reduce_only=body.get("reduce_only", False),
-                price_dollars=format_price_dollars(price_units),
+                price_dollars=format_price_dollars(yes_price_units),
                 contracts=format_count_fp(count_units),
             )
             return {
@@ -1305,7 +1328,7 @@ class KalshiApiClient:
             }
 
         self._before_write_api_call("create_order")
-        return self.rest_post(f"{self.api_prefix}/portfolio/orders", body, action_name="create_order")
+        return self.rest_post(f"{self.api_prefix}/portfolio/events/orders", body, action_name="create_order")
 
     def amend_order(
         self,
@@ -1317,28 +1340,25 @@ class KalshiApiClient:
         new_total_fillable_count_units: int,
         previous_client_order_id: str,
         updated_client_order_id: str,
+        action: str = "buy",
     ) -> dict:
+        book_side, yes_price_units = translate_v2_params(side, action, new_price_units)
         body = {
             "ticker": market_ticker,
-            "side": side,
-            "action": "buy",
-            "subaccount": self.settings.subaccount_number,
+            "side": book_side,
             "client_order_id": previous_client_order_id,
             "updated_client_order_id": updated_client_order_id,
-            "count_fp": format_count_fp(new_total_fillable_count_units),
+            "count": format_count_fp(new_total_fillable_count_units),
+            "price": format_price_dollars(yes_price_units),
         }
-
-        if side == "yes":
-            body["yes_price_dollars"] = format_price_dollars(new_price_units)
-        else:
-            body["no_price_dollars"] = format_price_dollars(new_price_units)
 
         if self.settings.dry_run:
             log_event(
                 "DRY_AMEND",
                 side=side,
+                book_side=book_side,
                 order_id=order_id,
-                price_dollars=format_price_dollars(new_price_units),
+                price_dollars=format_price_dollars(yes_price_units),
                 total_contracts=format_count_fp(new_total_fillable_count_units),
             )
             return {
@@ -1350,13 +1370,10 @@ class KalshiApiClient:
             }
 
         self._before_write_api_call("amend_order")
-        return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/amend", body, action_name="amend_order")
+        return self.rest_post(f"{self.api_prefix}/portfolio/events/orders/{order_id}/amend", body, action_name="amend_order")
 
     def decrease_order_to(self, *, order_id: str, remaining_count_units: int) -> dict:
-        body = {
-            "subaccount": self.settings.subaccount_number,
-            "reduce_to_fp": format_count_fp(remaining_count_units),
-        }
+        body = {"reduce_to": format_count_fp(remaining_count_units)}
 
         if self.settings.dry_run:
             log_event(
@@ -1367,7 +1384,12 @@ class KalshiApiClient:
             return {"order": {"order_id": order_id}}
 
         self._before_write_api_call("decrease_order")
-        return self.rest_post(f"{self.api_prefix}/portfolio/orders/{order_id}/decrease", body, action_name="decrease_order")
+        return self.rest_post(
+            f"{self.api_prefix}/portfolio/events/orders/{order_id}/decrease",
+            body,
+            action_name="decrease_order",
+            params={"subaccount": self.settings.subaccount_number},
+        )
 
     def cancel_order(self, *, order_id: str) -> dict:
         if self.settings.dry_run:
@@ -1376,7 +1398,7 @@ class KalshiApiClient:
 
         self._before_write_api_call("cancel_order")
         return self.rest_delete(
-            f"{self.api_prefix}/portfolio/orders/{order_id}",
+            f"{self.api_prefix}/portfolio/events/orders/{order_id}",
             params={"subaccount": self.settings.subaccount_number},
             action_name="cancel_order",
         )
