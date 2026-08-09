@@ -1,6 +1,7 @@
 # Secrets — never commit
 tizzler2003.txt
 privkey.txt
+id_rsa
 *.pem
 .env
 
@@ -29,6 +30,8 @@ __pycache__/
 .idea/
 
 auth-service/
+screener_export.csv
+watchdog_disable_list.json.lock
 
 # Operations UI runtime and build artifacts
 runtime/
