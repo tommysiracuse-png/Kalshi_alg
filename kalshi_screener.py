@@ -30,12 +30,14 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import math
 import os
 import sys
 import time
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -821,10 +823,35 @@ def build_settings_from_args(args: argparse.Namespace) -> Dict[str, Any]:
 
 def run_once(args: argparse.Namespace) -> None:
     settings = build_settings_from_args(args)
-    pub = KalshiPublicClient(host=args.host, api_prefix=args.api_prefix)
-    screen_df = screen_markets(pub, settings)
-    export_df = build_export_dataframe(screen_df, settings)
-    export_df.to_csv(args.output, index=False)
+    from adaptors.kalshi import KalshiApiClient, KalshiClientConfig
+    from screener import Screener
+
+    client = KalshiApiClient(
+        KalshiClientConfig(
+            public_only=True,
+            use_demo_environment="demo" in str(args.host).lower(),
+            rest_base_url=str(args.host),
+            api_prefix=str(args.api_prefix),
+        )
+    )
+
+    async def refresh() -> None:
+        screener = Screener(
+            client=client,
+            settings=settings,
+            output_path=Path(args.output).expanduser().resolve(),
+            default_yes_budget_cents=100,
+            default_no_budget_cents=100,
+            max_bots=int(settings["top_n"]),
+            minimum_carryover_value_cents=100.0,
+        )
+        update = await screener.refresh({}, reason="standalone")
+        await client.close()
+        if update is None:
+            event = await screener.events.get()
+            raise RuntimeError(event.error or "screening failed")
+
+    asyncio.run(refresh())
 
 
 def build_parser() -> argparse.ArgumentParser:

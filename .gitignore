@@ -27,3 +27,12 @@ __pycache__/
 .DS_Store
 .vscode/
 .idea/
+
+auth-service/
+
+# Operations UI runtime and build artifacts
+runtime/
+web/node_modules/
+web/.next/
+web/coverage/
+.venv-ui/

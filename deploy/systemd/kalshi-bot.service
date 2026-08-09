@@ -1,0 +1,17 @@
+[Unit]
+Description=Kalshi market-maker fleet
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Kalshi_alg
+EnvironmentFile=%h/.config/kalshi-alg/bot.env
+ExecStart=%h/Kalshi_alg/run_lip.sh
+KillSignal=SIGINT
+KillMode=mixed
+TimeoutStopSec=20
+Restart=no
+
+[Install]
+WantedBy=default.target

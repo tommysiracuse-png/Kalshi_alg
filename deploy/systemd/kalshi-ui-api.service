@@ -1,0 +1,15 @@
+[Unit]
+Description=Kalshi operations API
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Kalshi_alg
+EnvironmentFile=%h/.config/kalshi-alg/ui.env
+ExecStart=%h/Kalshi_alg/.venv-ui/bin/uvicorn ui_api.app:app --host 127.0.0.1 --port 8001
+Restart=on-failure
+RestartSec=3
+UMask=0077
+
+[Install]
+WantedBy=default.target

@@ -6,23 +6,15 @@ import pathlib
 import sys
 from collections import defaultdict
 
+from pnl_core import compute_pnl as compute_pnl_core, load_fills as load_fills_core
+
 PNL_FILE = pathlib.Path(__file__).resolve().parent / "logs" / "pnl_tracker.jsonl"
 
 
 def load_fills(path: pathlib.Path):
-    if not path.exists():
-        print(f"No fill data found at {path}")
-        sys.exit(0)
-    fills = []
-    with open(path) as f:
-        for lineno, line in enumerate(f, 1):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                fills.append(json.loads(line))
-            except json.JSONDecodeError:
-                print(f"Warning: skipping malformed line {lineno}")
+    fills, warnings = load_fills_core(path)
+    for warning in warnings:
+        print(f"Warning: {warning}")
     return fills
 
 
@@ -36,7 +28,7 @@ def compute_pnl(fills):
     Realized P&L comes from round-trips (matched YES+NO fills).
     Unrealized = mark-to-market of open position using last fair_c.
     """
-    tickers = defaultdict(lambda: {
+    return defaultdict(lambda: {
         "category": "other",
         "fills": 0,
         "yes_qty": 0.0,
@@ -48,35 +40,7 @@ def compute_pnl(fills):
         "last_net_pos": 0.0,
         "first_ts": None,
         "last_ts": None,
-    })
-
-    for f in fills:
-        ticker = f["ticker"]
-        t = tickers[ticker]
-        t["category"] = f.get("category", "other")
-        t["fills"] += 1
-        qty = f.get("qty", 0) or 0
-        price_c = f.get("price_c")
-        fee_c = f.get("fee_c") or 0
-        t["fees_c"] += fee_c
-        t["last_net_pos"] = f.get("net_pos", 0)
-        if f.get("fair_c") is not None:
-            t["last_fair_c"] = f["fair_c"]
-        if t["first_ts"] is None:
-            t["first_ts"] = f.get("ts")
-        t["last_ts"] = f.get("ts")
-
-        if price_c is None:
-            continue
-
-        if f["side"] == "yes":
-            t["yes_qty"] += qty
-            t["yes_cost_c"] += price_c * qty
-        else:
-            t["no_qty"] += qty
-            t["no_cost_c"] += price_c * qty
-
-    return tickers
+    }, compute_pnl_core(fills))
 
 
 def print_summary(tickers):

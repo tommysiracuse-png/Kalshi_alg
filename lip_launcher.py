@@ -17,14 +17,17 @@ Periodic refresh behavior in this version:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import base64
 import csv
 import json
 import os
+import queue
 import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,6 +36,13 @@ from typing import Dict, Iterable, IO, List, Optional
 import requests
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
+
+from runtime_control import ControlRequest, ControlServer, STATUS_SCHEMA_VERSION
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - launcher control is Linux-only in production
+    fcntl = None
 
 
 
@@ -69,25 +79,46 @@ def load_disable_list(path: Path) -> Dict[str, object]:
 
 
 def write_disable_list(path: Path, payload: Dict[str, object]) -> None:
-    atomic_write_json(path, payload)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    with lock_path.open("a+", encoding="utf-8") as lock_handle:
+        if fcntl is not None:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        atomic_write_json(path, payload)
+        if fcntl is not None:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
 
 
 def disable_ticker(path: Path, ticker: str, reason: str, *, exit_code: Optional[int] = None) -> None:
-    payload = load_disable_list(path)
-    payload[str(ticker)] = {
-        "ticker": str(ticker),
-        "reason": str(reason),
-        "disabled_at_epoch_seconds": time.time(),
-        "exit_code": exit_code,
-    }
-    write_disable_list(path, payload)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    with lock_path.open("a+", encoding="utf-8") as lock_handle:
+        if fcntl is not None:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        payload = load_disable_list(path)
+        payload[str(ticker)] = {
+            "ticker": str(ticker),
+            "reason": str(reason),
+            "disabled_at_epoch_seconds": time.time(),
+            "exit_code": exit_code,
+        }
+        atomic_write_json(path, payload)
+        if fcntl is not None:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
 
 
 def clear_disabled_ticker(path: Path, ticker: str) -> bool:
-    payload = load_disable_list(path)
-    removed = payload.pop(str(ticker), None) is not None
-    write_disable_list(path, payload)
-    return removed
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    with lock_path.open("a+", encoding="utf-8") as lock_handle:
+        if fcntl is not None:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        payload = load_disable_list(path)
+        removed = payload.pop(str(ticker), None) is not None
+        atomic_write_json(path, payload)
+        if fcntl is not None:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
+        return removed
 
 
 def run_profiler_prestart(
@@ -177,6 +208,7 @@ class ChildProcess:
     watchdog_log_path: Optional[Path] = None
     watchdog_log_handle: Optional[IO[str]] = None
     watchdog_state_file: Optional[Path] = None
+    control_socket: Optional[Path] = None
 
 
 # ---------------------------------------------------------------------------
@@ -323,6 +355,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--watchdog-confidence-flatten-threshold", type=float, default=0.55, help="Confidence below this moves the watchdog to flatten_only.")
     parser.add_argument("--clear-disabled-ticker", default="", help="Remove one ticker from the watchdog disable list and exit.")
     parser.add_argument("--clear-all-disabled-tickers", action="store_true", help="Clear the full watchdog disable list and exit.")
+    parser.add_argument("--runtime-dir", default="", help="Directory for launcher status and the local control socket.")
     return parser.parse_args()
 
 
@@ -612,6 +645,7 @@ def build_child_command(
     watchdog_state_file: Optional[Path],
     watchdog_state_refresh_seconds: float,
     watchdog_extreme_stale_seconds: float,
+    control_socket: Optional[Path] = None,
 ) -> List[str]:
     command: List[str] = [
         python_executable,
@@ -646,6 +680,8 @@ def build_child_command(
             "--watchdog-extreme-stale-seconds",
             str(watchdog_extreme_stale_seconds),
         ])
+    if control_socket is not None:
+        command.extend(["--control-socket", str(control_socket)])
 
     return command
 
@@ -719,6 +755,7 @@ def spawn_single_bot(
     watchdog_poll_interval_seconds: float,
     watchdog_confidence_reduction_threshold: float,
     watchdog_confidence_flatten_threshold: float,
+    control_socket: Optional[Path] = None,
 ) -> Optional[ChildProcess]:
     if dry_run:
         return None
@@ -739,6 +776,7 @@ def spawn_single_bot(
         watchdog_state_file=watchdog_state_file,
         watchdog_state_refresh_seconds=watchdog_state_refresh_seconds,
         watchdog_extreme_stale_seconds=watchdog_extreme_stale_seconds,
+        control_socket=control_socket,
     )
 
     child_environment = dict(os.environ)
@@ -812,6 +850,7 @@ def spawn_single_bot(
         watchdog_log_path=watchdog_log_path,
         watchdog_log_handle=watchdog_log_handle,
         watchdog_state_file=watchdog_state_file,
+        control_socket=control_socket,
     )
 
 
@@ -838,6 +877,7 @@ def spawn_bots(
     watchdog_poll_interval_seconds: float,
     watchdog_confidence_reduction_threshold: float,
     watchdog_confidence_flatten_threshold: float,
+    control_socket_directory: Optional[Path] = None,
 ) -> List[ChildProcess]:
     print_launch_plan(picks)
 
@@ -912,6 +952,11 @@ def spawn_bots(
             watchdog_poll_interval_seconds=watchdog_poll_interval_seconds,
             watchdog_confidence_reduction_threshold=watchdog_confidence_reduction_threshold,
             watchdog_confidence_flatten_threshold=watchdog_confidence_flatten_threshold,
+            control_socket=(
+                control_socket_directory / f"{safe_ticker_filename(pick.ticker)}.sock"
+                if control_socket_directory is not None
+                else None
+            ),
         )
         if child is not None:
             child_processes.append(child)
@@ -1189,16 +1234,159 @@ def monitor_and_refresh(
     watchdog_poll_interval_seconds: float,
     watchdog_confidence_reduction_threshold: float,
     watchdog_confidence_flatten_threshold: float,
+    runtime_dir: Path,
 ) -> int:
-    if not children:
-        return 0
-
     print("\nBots running. Press Ctrl+C to stop them all.")
     next_refresh_at = (time.time() + refresh_interval_seconds) if refresh_interval_seconds > 0 else None
     last_known_position_units_by_ticker: Dict[str, int] = {}
+    started_at_ms = int(time.time() * 1000)
+    control_requests: "queue.Queue[ControlRequest]" = queue.Queue()
+    shutdown_requested = threading.Event()
+    status_lock = threading.Lock()
+    latest_status: Dict[str, object] = {}
+    status_path = runtime_dir / "launcher_status.json"
+    socket_path = runtime_dir / "launcher.sock"
+    pending_action: Optional[Dict[str, object]] = None
+    last_error: Optional[str] = None
+    refresh_requests: List[ControlRequest] = []
+
+    def build_status(lifecycle: str = "running") -> Dict[str, object]:
+        bot_rows: List[Dict[str, object]] = []
+        watchdog_modes: Dict[str, int] = {}
+        for child in list(children):
+            watchdog = load_json_file(child.watchdog_state_file) if child.watchdog_state_file else {}
+            mode = str(watchdog.get("mode") or "unknown")
+            watchdog_modes[mode] = watchdog_modes.get(mode, 0) + 1
+            bot_rows.append({
+                "ticker": child.ticker,
+                "title": child.pick.title,
+                "slotIndex": child.slot_index,
+                "pid": child.process.pid,
+                "watchdogPid": child.watchdog_process.pid if child.watchdog_process else None,
+                "botRunning": child.process.poll() is None,
+                "watchdogRunning": child.watchdog_process.poll() is None if child.watchdog_process else False,
+                "yesBudgetCents": child.pick.yes_budget_cents,
+                "noBudgetCents": child.pick.no_budget_cents,
+                "logPath": str(child.log_path),
+                "watchdogLogPath": str(child.watchdog_log_path) if child.watchdog_log_path else None,
+                "watchdogMode": mode,
+                "watchdogConfidence": watchdog.get("confidence"),
+                "watchdogReason": watchdog.get("reason"),
+                "watchdogUpdatedAtMs": watchdog.get("runner_updated_at_ms") or watchdog.get("generated_at_ms"),
+            })
+        disabled = load_disable_list(watchdog_disable_file)
+        now_ms = int(time.time() * 1000)
+        return {
+            "schemaVersion": STATUS_SCHEMA_VERSION,
+            "generatedAt": now_ms,
+            "launcher": {
+                "pid": os.getpid(),
+                "environment": "demo" if use_demo else "production",
+                "lifecycle": lifecycle,
+                "startedAt": started_at_ms,
+                "heartbeatAt": now_ms,
+                "nextRefreshAt": int(next_refresh_at * 1000) if next_refresh_at is not None else None,
+                "lastError": last_error,
+                "pendingAction": pending_action,
+            },
+            "counts": {
+                "activeBots": sum(1 for item in bot_rows if item["botRunning"]),
+                "configuredBots": len(bot_rows),
+                "disabledTickers": len(disabled),
+                "watchdogModes": watchdog_modes,
+            },
+            "bots": bot_rows,
+            "disabled": disabled,
+        }
+
+    def publish_status(lifecycle: str = "running") -> Dict[str, object]:
+        nonlocal latest_status
+        snapshot = build_status(lifecycle)
+        with status_lock:
+            latest_status = snapshot
+        atomic_write_json(status_path, snapshot)
+        return snapshot
+
+    def status_provider() -> Dict[str, object]:
+        with status_lock:
+            return dict(latest_status)
+
+    def request_shutdown(signum: int, _frame: object) -> None:
+        print(f"\nReceived signal {signum}; stopping bots gracefully...")
+        shutdown_requested.set()
+
+    previous_sigint = signal.getsignal(signal.SIGINT)
+    previous_sigterm = signal.getsignal(signal.SIGTERM)
+    signal.signal(signal.SIGINT, request_shutdown)
+    signal.signal(signal.SIGTERM, request_shutdown)
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    publish_status("starting")
+    control_server = ControlServer(socket_path, control_requests, status_provider)
+    control_server.start()
+    publish_status("running")
 
     try:
-        while True:
+        while not shutdown_requested.is_set():
+            while True:
+                try:
+                    control = control_requests.get_nowait()
+                except queue.Empty:
+                    break
+                pending_action = {
+                    "requestId": control.request_id,
+                    "action": control.action,
+                    "ticker": control.ticker,
+                    "receivedAt": control.received_at_ms,
+                }
+                try:
+                    known_tickers = {child.ticker for child in children}
+                    try:
+                        known_tickers.update(
+                            pick.ticker for pick in load_screen_picks(
+                                screen_file_path=screener_output_path,
+                                ticker_column=ticker_column,
+                                title_column=title_column,
+                                yes_budget_cents=yes_budget_cents,
+                                no_budget_cents=no_budget_cents,
+                                yes_budget_column=yes_budget_column,
+                                no_budget_column=no_budget_column,
+                                max_bots=0,
+                            )
+                        )
+                    except Exception:
+                        pass
+                    known_tickers.update(load_disable_list(watchdog_disable_file).keys())
+                    if control.ticker and control.ticker not in known_tickers:
+                        raise ValueError(f"unknown ticker: {control.ticker}")
+                    if control.action == "disable_ticker":
+                        assert control.ticker is not None
+                        disable_ticker(watchdog_disable_file, control.ticker, "operator_ui")
+                        matches = [child for child in children if child.ticker == control.ticker]
+                        stop_children(matches)
+                        for child in matches:
+                            if child in children:
+                                children.remove(child)
+                        control.result = {"ok": True, "result": {"ticker": control.ticker, "disabled": True, "inventoryRetained": True}}
+                        control.done.set()
+                        pending_action = None
+                    elif control.action == "enable_ticker":
+                        assert control.ticker is not None
+                        removed = clear_disabled_ticker(watchdog_disable_file, control.ticker)
+                        next_refresh_at = time.time()
+                        refresh_requests.append(control)
+                        control.result = {"ok": True, "result": {"ticker": control.ticker, "disabled": False, "wasDisabled": removed}}
+                    elif control.action == "refresh":
+                        next_refresh_at = time.time()
+                        refresh_requests.append(control)
+                    else:
+                        raise ValueError(f"unsupported action: {control.action}")
+                except Exception as exc:
+                    last_error = str(exc)
+                    control.result = {"ok": False, "code": "control_failed", "message": str(exc)}
+                    control.done.set()
+                    pending_action = None
+                publish_status()
+
             # Print and drop dead children between refreshes.
             for child in list(children):
                 return_code = child.process.poll()
@@ -1211,6 +1399,7 @@ def monitor_and_refresh(
                     except Exception:
                         pass
                 print(f"[WARN] {child.ticker} exited with code {return_code} | log={child.log_path}")
+                last_error = f"{child.ticker} exited with code {return_code}"
                 if int(return_code) in WATCHDOG_EXIT_CODES:
                     disable_ticker(watchdog_disable_file, child.ticker, f"watchdog_exit_{int(return_code)}", exit_code=int(return_code))
                     print(f"[WATCHDOG] permanently disabled {child.ticker} after exit code {int(return_code)}")
@@ -1292,18 +1481,42 @@ def monitor_and_refresh(
                             watchdog_confidence_flatten_threshold=watchdog_confidence_flatten_threshold,
                         )
                     )
-                next_refresh_at = time.time() + refresh_interval_seconds
+                next_refresh_at = (time.time() + refresh_interval_seconds) if refresh_interval_seconds > 0 else None
+                for control in refresh_requests:
+                    if not control.result:
+                        control.result = {"ok": True, "result": {"refreshed": True, "activeBots": len(children)}}
+                    else:
+                        result = dict(control.result.get("result") or {})
+                        result.update({"refreshed": True, "activeBots": len(children)})
+                        control.result["result"] = result
+                    control.done.set()
+                refresh_requests.clear()
+                pending_action = None
 
             if not children and next_refresh_at is None:
                 print("All bots exited.")
                 return 0
 
-            time.sleep(poll_seconds)
+            publish_status()
+            shutdown_requested.wait(min(poll_seconds, 2.0))
 
     except KeyboardInterrupt:
-        print("\nStopping bots...")
+        shutdown_requested.set()
+    except Exception as exc:
+        last_error = str(exc)
+        raise
+    finally:
+        control_server.stop()
+        for control in refresh_requests:
+            control.result = {"ok": False, "code": "launcher_stopping", "message": "launcher stopped before the command completed"}
+            control.done.set()
+        publish_status("stopping")
         stop_children(children)
-        return 0
+        children.clear()
+        publish_status("stopped")
+        signal.signal(signal.SIGINT, previous_sigint)
+        signal.signal(signal.SIGTERM, previous_sigterm)
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -1338,7 +1551,7 @@ def main() -> int:
     watchdog_profiler_script_path = (
         Path(arguments.watchdog_profiler_script).expanduser().resolve()
         if arguments.watchdog_profiler_script
-        else bot_script_path.parent.resolve() / "market_risk_rofile.py"
+        else bot_script_path.parent.resolve() / "market_risk_profiler.py"
     )
     watchdog_state_dir = (
         Path(arguments.watchdog_state_dir).expanduser().resolve()
@@ -1349,6 +1562,11 @@ def main() -> int:
         Path(arguments.watchdog_disable_file).expanduser().resolve()
         if arguments.watchdog_disable_file
         else bot_script_path.parent.resolve() / "watchdog_disable_list.json"
+    )
+    runtime_dir = (
+        Path(arguments.runtime_dir).expanduser().resolve()
+        if arguments.runtime_dir
+        else bot_script_path.parent.resolve() / "runtime"
     )
 
     if not bot_script_path.exists():
@@ -1407,96 +1625,16 @@ def main() -> int:
             print(f"ERROR: private key file not found: {Path(private_key_path).expanduser()}")
             return 2
 
-    if arguments.run_screener_on_start:
-        if screener_script_path is None:
-            print("ERROR: --run-screener-on-start requires --screener-script")
-            return 2
-        print("Running screener before initial launch...")
-        run_screener_once(screener_script_path, screener_output_path)
+    from launcher import Launcher
 
-    if not screener_output_path.exists():
-        print(f"ERROR: screen file not found: {screener_output_path}")
-        return 2
-
-    try:
-        launch_picks = load_screen_picks(
-            screen_file_path=screener_output_path,
-            ticker_column=arguments.ticker_column,
-            title_column=arguments.title_column,
-            yes_budget_cents=arguments.yes_budget_cents,
-            no_budget_cents=arguments.no_budget_cents,
-            yes_budget_column=arguments.yes_budget_column,
-            no_budget_column=arguments.no_budget_column,
-            max_bots=max_bots,
-        )
-    except ValueError as exc:
-        print(f"ERROR: {exc}")
-        return 2
-
-    if not launch_picks:
-        print("No tickers found to launch.")
-        return 0
-
-    children = spawn_bots(
-        picks=launch_picks,
-        bot_script_path=bot_script_path,
-        logs_directory=logs_directory,
-        api_key_id=api_key_id,
-        private_key_path=private_key_path,
-        use_demo=arguments.use_demo,
-        dry_run=arguments.dry_run,
-        subaccount=arguments.subaccount,
-        launch_delay_seconds=arguments.launch_delay_seconds,
-        pass_credentials_via_cli=arguments.pass_credentials_via_cli,
-        watchdog_runner_script_path=watchdog_runner_script_path,
-        watchdog_profiler_script_path=watchdog_profiler_script_path,
-        watchdog_state_dir=watchdog_state_dir,
-        watchdog_disable_file=watchdog_disable_file,
-        watchdog_interval_seconds=arguments.watchdog_interval_seconds,
-        watchdog_state_refresh_seconds=arguments.watchdog_state_refresh_seconds,
-        watchdog_extreme_stale_seconds=arguments.watchdog_extreme_stale_seconds,
-        watchdog_sample_seconds=arguments.watchdog_sample_seconds,
-        watchdog_poll_interval_seconds=arguments.watchdog_poll_interval_seconds,
-        watchdog_confidence_reduction_threshold=arguments.watchdog_confidence_reduction_threshold,
-        watchdog_confidence_flatten_threshold=arguments.watchdog_confidence_flatten_threshold,
+    return asyncio.run(
+        Launcher(
+            arguments,
+            api_key_id=api_key_id,
+            private_key_path=private_key_path,
+        ).run()
     )
 
-    return monitor_and_refresh(
-        children,
-        screen_file_path=screen_file_path,
-        screener_script_path=screener_script_path,
-        screener_output_path=screener_output_path,
-        bot_script_path=bot_script_path,
-        logs_directory=logs_directory,
-        api_key_id=api_key_id,
-        private_key_path=private_key_path,
-        use_demo=arguments.use_demo,
-        dry_run=arguments.dry_run,
-        subaccount=arguments.subaccount,
-        launch_delay_seconds=arguments.launch_delay_seconds,
-        pass_credentials_via_cli=arguments.pass_credentials_via_cli,
-        ticker_column=arguments.ticker_column,
-        title_column=arguments.title_column,
-        yes_budget_cents=arguments.yes_budget_cents,
-        no_budget_cents=arguments.no_budget_cents,
-        yes_budget_column=arguments.yes_budget_column,
-        no_budget_column=arguments.no_budget_column,
-        max_bots=max_bots,
-        refresh_interval_seconds=arguments.refresh_interval_seconds,
-        poll_seconds=arguments.poll_seconds,
-        minimum_carryover_value_cents=arguments.minimum_carryover_value_cents,
-        watchdog_runner_script_path=watchdog_runner_script_path,
-        watchdog_profiler_script_path=watchdog_profiler_script_path,
-        watchdog_state_dir=watchdog_state_dir,
-        watchdog_disable_file=watchdog_disable_file,
-        watchdog_interval_seconds=arguments.watchdog_interval_seconds,
-        watchdog_state_refresh_seconds=arguments.watchdog_state_refresh_seconds,
-        watchdog_extreme_stale_seconds=arguments.watchdog_extreme_stale_seconds,
-        watchdog_sample_seconds=arguments.watchdog_sample_seconds,
-        watchdog_poll_interval_seconds=arguments.watchdog_poll_interval_seconds,
-        watchdog_confidence_reduction_threshold=arguments.watchdog_confidence_reduction_threshold,
-        watchdog_confidence_flatten_threshold=arguments.watchdog_confidence_flatten_threshold,
-    )
 
 
 if __name__ == "__main__":
