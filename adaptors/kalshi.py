@@ -338,6 +338,11 @@ class KalshiApiClient(BaseClient):
         )
         self._closed = False
 
+    def _record_stream_activity(self, event: str, *, event_type: Optional[str] = None) -> None:
+        monitor = getattr(self.websocket_client, "activity", None)
+        if monitor is not None:
+            monitor.record_stream(event, event_type=event_type)
+
     def sign_message(self, message_bytes: bytes) -> str:
         self._require_authentication()
         signature = self.private_key.sign(
@@ -385,23 +390,29 @@ class KalshiApiClient(BaseClient):
             return OrderNotFoundError(str(exc))
         return ClientError(str(exc))
 
-    def _get(self, path: str, *, params: Optional[dict] = None) -> dict:
+    def _get(self, path: str, *, params: Optional[dict] = None, operation: str = "get") -> dict:
         try:
-            return self.http_client.get(path, headers=self._headers("GET", path), params=params)
+            return self.http_client.get(
+                path, headers=self._headers("GET", path), params=params, operation=operation
+            )
         except HTTPClientError as exc:
             raise self._map_error(exc) from exc
 
     def _post(self, path: str, body: dict, *, action: str, params: Optional[dict] = None) -> dict:
         self._write_limiter.acquire(action)
         try:
-            return self.http_client.post(path, headers=self._headers("POST", path), body=body, params=params)
+            return self.http_client.post(
+                path, headers=self._headers("POST", path), body=body, params=params, operation=action
+            )
         except HTTPClientError as exc:
             raise self._map_error(exc, action=action) from exc
 
     def _delete(self, path: str, *, action: str, params: Optional[dict] = None) -> dict:
         self._write_limiter.acquire(action)
         try:
-            return self.http_client.delete(path, headers=self._headers("DELETE", path), params=params)
+            return self.http_client.delete(
+                path, headers=self._headers("DELETE", path), params=params, operation=action
+            )
         except HTTPClientError as exc:
             raise self._map_error(exc, action=action) from exc
 
@@ -471,7 +482,7 @@ class KalshiApiClient(BaseClient):
         )
 
     def get_market(self, market_id: str) -> Market:
-        response = self._get(f"{self.api_prefix}/markets/{market_id}")
+        response = self._get(f"{self.api_prefix}/markets/{market_id}", operation="get_market")
         return self._market(response["market"], market_id)
 
     def list_markets(self, query: MarketQuery) -> List[Market]:
@@ -486,7 +497,7 @@ class KalshiApiClient(BaseClient):
             if cursor:
                 params["cursor"] = cursor
             params.update({str(key): value for key, value in query.venue_filters.items() if value not in (None, "")})
-            response = self._get(f"{self.api_prefix}/markets", params=params)
+            response = self._get(f"{self.api_prefix}/markets", params=params, operation="list_markets")
             for payload in response.get("markets") or []:
                 markets.append(self._market(payload, str(payload.get("ticker") or "")))
                 if max_results > 0 and len(markets) >= max_results:
@@ -497,7 +508,9 @@ class KalshiApiClient(BaseClient):
         return markets
 
     def get_market_quote(self, market_id: str) -> MarketQuote:
-        response = self._get(f"{self.api_prefix}/markets/{market_id}")["market"]
+        response = self._get(
+            f"{self.api_prefix}/markets/{market_id}", operation="get_market_quote"
+        )["market"]
         return MarketQuote(
             market_id=market_id,
             yes_bid_units=_optional_price(response, "yes_bid_dollars", "yes_bid"),
@@ -509,6 +522,7 @@ class KalshiApiClient(BaseClient):
         response = self._get(
             f"{self.api_prefix}/portfolio/positions",
             params={"ticker": market_id, "subaccount": self.config.subaccount_number, "limit": 1},
+            operation="get_positions",
         )
         positions = []
         for item in response.get("market_positions") or []:
@@ -529,7 +543,9 @@ class KalshiApiClient(BaseClient):
             }
             if cursor:
                 params["cursor"] = cursor
-            response = self._get(f"{self.api_prefix}/portfolio/orders", params=params)
+            response = self._get(
+                f"{self.api_prefix}/portfolio/orders", params=params, operation="get_resting_orders"
+            )
             orders.extend(self._order(item) for item in response.get("orders") or [])
             cursor = str(response.get("cursor") or response.get("next_cursor") or "")
             if not cursor:
@@ -611,13 +627,20 @@ class KalshiApiClient(BaseClient):
 
     def get_order_queue_position(self, order_id: str) -> QueuePosition:
         self._require_authentication()
-        response = self._get(f"{self.api_prefix}/portfolio/orders/{order_id}/queue_position")
+        response = self._get(
+            f"{self.api_prefix}/portfolio/orders/{order_id}/queue_position",
+            operation="get_order_queue_position",
+        )
         candidate = response.get("order") if isinstance(response.get("order"), dict) else response
         value = _optional_count(candidate, "queue_position_fp", "queue_position")
         return QueuePosition(order_id, value)
 
     def get_series(self, series_id: str) -> Series:
-        item = self._get(f"{self.api_prefix}/series/{series_id}", params={"include_volume": True})["series"]
+        item = self._get(
+            f"{self.api_prefix}/series/{series_id}",
+            params={"include_volume": True},
+            operation="get_series",
+        )["series"]
         return Series(
             series_id=str(item.get("ticker") or item.get("series_ticker") or series_id),
             fee_type=str(item.get("fee_type") or ""),
@@ -628,6 +651,7 @@ class KalshiApiClient(BaseClient):
         response = self._get(
             f"{self.api_prefix}/series/fee_changes",
             params={"series_ticker": series_id, "show_historical": bool(show_historical)},
+            operation="get_series_fee_changes",
         )
         return [
             SeriesFeeChange(
@@ -643,6 +667,7 @@ class KalshiApiClient(BaseClient):
         response = self._get(
             f"{self.api_prefix}/incentive_programs",
             params={"status": status, "type": incentive_type, "limit": max(1, min(int(limit), 10_000))},
+            operation="get_incentive_programs",
         )
         return [
             IncentiveProgram(
@@ -764,13 +789,18 @@ class KalshiApiClient(BaseClient):
         self._require_authentication()
         self._closed = False
         backoff = 1
+        connected_once = False
         while not self._closed:
             try:
+                if connected_once:
+                    self._record_stream_activity("reconnects")
                 await self.websocket_client.subscribe(
                     self._subscriptions(market_id, include_position_updates), headers=self.websocket_headers()
                 )
+                connected_once = True
                 backoff = 1
                 expected_sequence: Optional[int] = None
+                self._record_stream_activity("event", event_type="reset")
                 yield StreamReset(market_id)
                 LOGGER.info("WS_CONNECTED_AND_SUBSCRIBED")
                 async for raw_message in self.websocket_client:
@@ -782,14 +812,19 @@ class KalshiApiClient(BaseClient):
                         expected_sequence = event.sequence
                     elif isinstance(event, OrderBookDelta) and event.sequence is not None:
                         if expected_sequence is not None and event.sequence != expected_sequence + 1:
+                            self._record_stream_activity("sequenceResets")
                             LOGGER.info("ORDERBOOK_SEQUENCE_GAP | previous_sequence=%s new_sequence=%s", expected_sequence, event.sequence)
                             break
                         expected_sequence = event.sequence
                     if event is not None:
+                        self._record_stream_activity(
+                            "event", event_type=type(event).__name__
+                        )
                         yield event
             except Exception as exc:
                 if self._closed:
                     return
+                self._record_stream_activity("adapterErrors")
                 LOGGER.info("WS_DISCONNECT | error=%s reconnect_backoff_seconds=%s", exc, backoff)
                 await asyncio.sleep(backoff)
                 backoff = min(30, backoff * 2)

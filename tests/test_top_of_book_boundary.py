@@ -80,3 +80,25 @@ def test_market_event_loop_has_no_websocket_dependency():
     assert bot.net_position_units == 125
     asyncio.run(bot.request_shutdown(0))
     assert client.closed
+
+
+def test_monitoring_snapshot_tracks_process_session_separately_from_starting_inventory():
+    bot, _ = make_bot()
+    bot.load_startup_position()
+    bot.session_yes_quantity_units = 100
+    bot.session_no_quantity_units = 100
+    bot.session_yes_cost_units = 4_000 * 100
+    bot.session_no_cost_units = 5_000 * 100
+    bot.session_fee_units = 10
+    bot.session_fill_count = 2
+    bot.book_yes = {4_000: 100}
+    bot.book_no = {5_000: 100}
+    bot.book_ready = True
+    bot.last_market_event_timestamp_ms = bot.started_at_ms
+
+    status = bot.status_snapshot()
+    monitoring = status["monitoring"]
+    assert monitoring["portfolio"]["startingPositionUnits"] == 250
+    assert monitoring["pnl"]["sessionPositionUnits"] == 0
+    assert monitoring["pnl"]["realizedCents"] == 9.9
+    assert monitoring["market"]["priceSource"] == "book_mid"

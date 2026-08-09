@@ -2,6 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PYTHON_BIN="${KALSHI_PYTHON_BIN:-$ROOT/.venv/bin/python}"
 
 # ---- EDIT THESE VALUES IF NEEDED ----
 export KALSHI_API_KEY_ID="${KALSHI_API_KEY_ID:-}"  # set in your environment
@@ -39,9 +40,9 @@ WATCHDOG_CONFIDENCE_FLATTEN_THRESHOLD=0.55
 #   the top ~25 ranked markets just consume CPU/API quota without producing fills.
 # - Budgets at 500c/side stay - raising budget without raising fills only amplifies
 #   adverse-selection losses (Brent T97.50 markout is 9.7c/5s = toxic).
-MAX_BOTS=100
-YES_BUDGET_CENTS=500
-NO_BUDGET_CENTS=900
+MAX_BOTS=50
+YES_BUDGET_CENTS=100
+NO_BUDGET_CENTS=100
 USE_DEMO=0
 DRY_RUN=0
 SUBACCOUNT=""
@@ -73,6 +74,12 @@ fi
 
 if [[ ! -f "$WATCHDOG_PROFILER_SCRIPT" ]]; then
   echo "ERROR: watchdog profiler script not found: $WATCHDOG_PROFILER_SCRIPT"
+  exit 2
+fi
+
+if [[ ! -x "$PYTHON_BIN" ]]; then
+  echo "ERROR: Python interpreter not found or not executable: $PYTHON_BIN"
+  echo "Set KALSHI_PYTHON_BIN or create the project virtual environment at $ROOT/.venv."
   exit 2
 fi
 
@@ -125,4 +132,4 @@ if [[ -n "$SUBACCOUNT" ]]; then
   ARGS+=(--subaccount "$SUBACCOUNT")
 fi
 
-python3 "$LAUNCHER_SCRIPT" "${ARGS[@]}"
+exec "$PYTHON_BIN" "$LAUNCHER_SCRIPT" "${ARGS[@]}"

@@ -232,6 +232,38 @@ class OperationsStore:
             "warnings": warnings,
         }
 
+    def monitoring(self) -> Dict[str, Any]:
+        status = self.status()
+        data = status["data"]
+        warnings: List[str] = []
+        if status["source"].get("stale"):
+            warnings.append("launcher monitoring snapshot is stale or unavailable")
+        clients = data.get("clients") if isinstance(data.get("clients"), list) else []
+        return {
+            "generatedAt": now_ms(),
+            "schemaVersion": data.get("schemaVersion"),
+            "source": status["source"],
+            "manager": data.get("manager") or {},
+            "clients": clients,
+            "screener": data.get("screener") or {},
+            "warnings": warnings,
+        }
+
+    def client_monitoring(self, market_id: str) -> Dict[str, Any]:
+        self.require_ticker(market_id)
+        snapshot = self.monitoring()
+        client = next(
+            (item for item in snapshot["clients"] if item.get("marketId") == market_id),
+            None,
+        )
+        if client is None:
+            raise KeyError(market_id)
+        return {
+            "generatedAt": snapshot["generatedAt"],
+            "source": snapshot["source"],
+            "client": client,
+        }
+
     def tail_log(self, ticker: str, source: str, lines: int = 200) -> List[str]:
         path = self.log_path(ticker, source)
         try:
@@ -259,6 +291,21 @@ class OperationsStore:
         output = (completed.stdout or completed.stderr or "").strip()
         if action != "is-active" and completed.returncode != 0:
             raise RuntimeError(output or f"systemctl returned {completed.returncode}")
+        if action == "start":
+            # Type=simple can acknowledge before Python imports finish. Require
+            # the service to survive the common immediate-crash window.
+            deadline = time.monotonic() + 1.0
+            while time.monotonic() < deadline:
+                check = subprocess.run(
+                    ["systemctl", "--user", "is-active", self.settings.service_name],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False,
+                )
+                if (check.stdout or "").strip() != "active":
+                    raise RuntimeError("service exited during startup; inspect its systemd logs")
+                time.sleep(0.2)
         if action != "is-active":
             check = subprocess.run(["systemctl", "--user", "is-active", self.settings.service_name], capture_output=True, text=True, timeout=10, check=False)
             active = (check.stdout or "").strip() == "active"

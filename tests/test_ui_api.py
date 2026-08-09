@@ -22,7 +22,14 @@ def fixture_store(root: Path) -> OperationsStore:
         writer = csv.DictWriter(handle, fieldnames=["Rank", "Ticker", "SearchText", "Best EV(c)"])
         writer.writeheader(); writer.writerow({"Rank": "1", "Ticker": "TEST-1", "SearchText": "Test market", "Best EV(c)": "2.5"})
     (root / "watchdog_state" / "TEST-1.json").write_text(json.dumps({"mode": "normal", "confidence": .9}))
-    (root / "runtime" / "launcher_status.json").write_text(json.dumps({"launcher": {"lifecycle": "running", "heartbeatAt": 9999999999999}, "bots": [], "counts": {}}))
+    (root / "runtime" / "launcher_status.json").write_text(json.dumps({
+        "schemaVersion": 2,
+        "launcher": {"lifecycle": "running", "heartbeatAt": 9999999999999},
+        "bots": [], "counts": {},
+        "manager": {"running": True, "botsRunning": 1, "pnl": {"totalCents": 12.5}},
+        "clients": [{"marketId": "TEST-1", "title": "Test market", "apiActivity": {"rest": {"total": 4}}}],
+        "screener": {"running": False, "generationId": 3, "picks": [{"marketId": "TEST-1"}]},
+    }))
     return OperationsStore(Settings(root, root / "runtime", root / "logs", root / "watchdog_state", "test.service"))
 
 
@@ -54,3 +61,17 @@ async def test_invalid_ticker_uses_error_envelope():
         assert response.status_code == 404
         assert response.json()["code"] == "not_found"
         assert response.json()["requestId"]
+
+
+@pytest.mark.anyio
+async def test_monitoring_contract_and_client_detail():
+    with tempfile.TemporaryDirectory() as temporary:
+        app_module.store = fixture_store(Path(temporary))
+        headers = {"x-internal-token": "test-token"}
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app_module.app), base_url="http://test") as client:
+            snapshot = await client.get("/api/v1/monitoring", headers=headers)
+            detail = await client.get("/api/v1/monitoring/clients/TEST-1", headers=headers)
+        assert snapshot.status_code == 200
+        assert snapshot.json()["manager"]["botsRunning"] == 1
+        assert snapshot.json()["screener"]["generationId"] == 3
+        assert detail.json()["client"]["apiActivity"]["rest"]["total"] == 4

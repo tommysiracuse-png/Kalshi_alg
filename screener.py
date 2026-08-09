@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 import tempfile
 import time
@@ -22,6 +23,14 @@ def _iso_from_ms(value: Optional[int]) -> str:
     if value is None:
         return ""
     return datetime.fromtimestamp(value / 1000.0, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _monitor_rank(value: object) -> Optional[int]:
+    try:
+        number = float(value)
+        return int(number) if math.isfinite(number) else None
+    except (TypeError, ValueError):
+        return None
 
 
 def market_to_screen_payload(market: Market) -> Dict[str, object]:
@@ -107,9 +116,69 @@ class Screener:
         self.events: "asyncio.Queue[ScreenerEvent]" = asyncio.Queue()
         self._latest_update: Optional[ScreenerUpdate] = None
         self._generation = 0
+        self._running = False
+        self._current_reason: Optional[str] = None
+        self._current_started_at_ms: Optional[int] = None
+        self._last_started_at_ms: Optional[int] = None
+        self._last_completed_at_ms: Optional[int] = None
+        self._last_duration_ms: Optional[int] = None
+        self._last_success_at_ms: Optional[int] = None
+        self._last_error: Optional[str] = None
 
     def get_latest_picks(self) -> tuple[ScreenerPick, ...]:
         return self._latest_update.picks if self._latest_update is not None else ()
+
+    def accept_snapshot(self, update: ScreenerUpdate) -> None:
+        """Seed monitoring from an already validated launcher/CSV generation."""
+        self._latest_update = update
+        self._generation = max(self._generation, update.generation_id)
+
+    def status_snapshot(self) -> Dict[str, object]:
+        now = int(time.time() * 1000)
+        update = self._latest_update
+        try:
+            api_activity = self.client.activity_snapshot()
+        except Exception:
+            api_activity = {"rest": {}, "stream": {}}
+        picks = [
+            {
+                "marketId": pick.market_id,
+                "title": pick.title,
+                "yesBudgetCents": pick.yes_budget_cents,
+                "noBudgetCents": pick.no_budget_cents,
+                "selectionReason": pick.selection_reason,
+                "rank": _monitor_rank(pick.ranking.get("Rank") if hasattr(pick.ranking, "get") else None),
+            }
+            for pick in self.get_latest_picks()
+        ]
+        return {
+            "running": self._running,
+            "currentReason": self._current_reason,
+            "currentStartedAtMs": self._current_started_at_ms,
+            "currentDurationMs": (
+                max(0, now - self._current_started_at_ms)
+                if self._running and self._current_started_at_ms is not None
+                else None
+            ),
+            "lastStartedAtMs": self._last_started_at_ms,
+            "lastCompletedAtMs": self._last_completed_at_ms,
+            "lastDurationMs": self._last_duration_ms,
+            "lastSuccessAtMs": self._last_success_at_ms,
+            "lastError": self._last_error,
+            "generationId": update.generation_id if update else None,
+            "generatedAtMs": update.generated_at_ms if update else None,
+            "reason": update.reason if update else None,
+            "picks": picks,
+            "changes": {
+                "added": list(update.added) if update else [],
+                "kept": list(update.kept) if update else [],
+                "changed": list(update.changed) if update else [],
+                "removed": list(update.removed) if update else [],
+                "inventoryCarried": list(update.inventory_carried) if update else [],
+                "inventoryUnknown": list(update.inventory_unknown) if update else [],
+            },
+            "apiActivity": api_activity,
+        }
 
     def _atomic_export(self, frame: pd.DataFrame) -> None:
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -230,12 +299,29 @@ class Screener:
         *,
         reason: str = "scheduled",
     ) -> Optional[ScreenerUpdate]:
+        started_at_ms = int(time.time() * 1000)
+        self._running = True
+        self._current_reason = reason
+        self._current_started_at_ms = started_at_ms
+        self._last_started_at_ms = started_at_ms
         try:
             update = await asyncio.to_thread(self._refresh_sync, dict(current_picks), reason)
+            completed_at_ms = int(time.time() * 1000)
+            self._last_success_at_ms = completed_at_ms
+            self._last_error = None
             await self.events.put(ScreenerEvent(True, reason, update.generated_at_ms, update=update))
             return update
         except Exception as exc:
+            completed_at_ms = int(time.time() * 1000)
+            self._last_error = str(exc)
             await self.events.put(
-                ScreenerEvent(False, reason, int(time.time() * 1000), error=str(exc))
+                ScreenerEvent(False, reason, completed_at_ms, error=str(exc))
             )
             return None
+        finally:
+            completed_at_ms = int(time.time() * 1000)
+            self._last_completed_at_ms = completed_at_ms
+            self._last_duration_ms = max(0, completed_at_ms - started_at_ms)
+            self._running = False
+            self._current_reason = None
+            self._current_started_at_ms = None

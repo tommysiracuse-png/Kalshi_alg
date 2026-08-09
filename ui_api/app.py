@@ -76,6 +76,16 @@ async def pnl(window: Literal["1h", "24h", "7d", "all"] = "all", _: str = Depend
     return {"generatedAt": now_ms(), **store.pnl(window)}
 
 
+@app.get("/api/v1/monitoring")
+async def monitoring(_: str = Depends(authorize)) -> dict:
+    return store.monitoring()
+
+
+@app.get("/api/v1/monitoring/clients/{market_id}")
+async def client_monitoring(market_id: str, _: str = Depends(authorize)) -> dict:
+    return store.client_monitoring(market_id)
+
+
 @app.get("/api/v1/audit")
 async def audit(limit: int = Query(100, ge=1, le=500), _: str = Depends(authorize)) -> dict:
     return {"generatedAt": now_ms(), "items": store.audit.list(limit)}
@@ -93,6 +103,8 @@ async def event_stream() -> AsyncIterator[str]:
         event_id += 1
         payload = store.overview()
         yield f"id: {event_id}\nevent: overview\ndata: {json.dumps(payload, separators=(',', ':'))}\n\n"
+        monitoring_payload = store.monitoring()
+        yield f"id: {event_id}\nevent: monitoring\ndata: {json.dumps(monitoring_payload, separators=(',', ':'))}\n\n"
         await asyncio.sleep(2)
 
 

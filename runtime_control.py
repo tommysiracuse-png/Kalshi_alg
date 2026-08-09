@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 
-STATUS_SCHEMA_VERSION = 1
+STATUS_SCHEMA_VERSION = 2
 ALLOWED_ACTIONS = {"status", "refresh", "disable_ticker", "enable_ticker"}
 
 

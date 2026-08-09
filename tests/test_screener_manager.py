@@ -61,6 +61,11 @@ def test_screener_diff_inventory_fail_safe_csv_and_last_good(tmp_path, monkeypat
     failed = asyncio.run(screener.refresh(update.pick_by_market_id, reason="failure"))
     assert failed is None
     assert {item.market_id for item in screener.get_latest_picks()} == {"NEW", "UNKNOWN"}
+    status = screener.status_snapshot()
+    assert status["running"] is False
+    assert status["lastDurationMs"] is not None
+    assert status["lastError"] == "bad refresh"
+    assert {item["marketId"] for item in status["picks"]} == {"NEW", "UNKNOWN"}
 
 
 def manager_config(tmp_path):
@@ -120,6 +125,44 @@ def test_manager_restart_limit_is_bounded(tmp_path):
         assert event.event_type == "restart_exhausted"
 
     asyncio.run(scenario())
+
+
+def test_manager_aggregates_client_portfolio_pnl_and_api_activity(tmp_path):
+    class RunningProcess:
+        pid = 77
+
+        def poll(self):
+            return None
+
+    manager = BotManager(manager_config(tmp_path))
+    selected = pick("MKT")
+    child = ChildProcess(
+        ticker="MKT",
+        process=RunningProcess(),
+        log_path=tmp_path / "bot.log",
+        log_handle=io.StringIO(),
+        slot_index=0,
+        pick=selected,
+    )
+    managed = ManagedBot(selected, child, socket_healthy=True)
+    managed.last_status = {
+        "lifecycle": "running",
+        "lastMarketEventAtMs": int(time.time() * 1000),
+        "monitoring": {
+            "portfolio": {"currentPositionUnits": 250, "updatedAtMs": int(time.time() * 1000)},
+            "pnl": {"fills": 2, "feesCents": 1.0, "realizedCents": 3.0, "unrealizedCents": 2.0, "totalCents": 5.0},
+            "apiActivity": {"rest": {"total": 7, "errors": 1, "byOperation": {"get_positions": 2}}, "stream": {"message": 9}},
+        },
+    }
+    manager.bots["MKT"] = managed
+    manager._desired["MKT"] = selected
+
+    snapshot = manager.status_snapshot()
+    assert snapshot["monitoring"]["portfolio"]["netPositionUnits"] == 250
+    assert snapshot["monitoring"]["portfolio"]["unknownMarkets"] == 0
+    assert snapshot["monitoring"]["pnl"]["totalCents"] == 5.0
+    assert snapshot["monitoring"]["apiActivity"]["rest"]["total"] == 7
+    assert snapshot["clients"][0]["marketId"] == "MKT"
 
 
 def test_manager_shutdown_escalates_after_socket_is_unavailable(tmp_path):

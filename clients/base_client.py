@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import AsyncIterator, List
+from typing import AsyncIterator, Dict, List
 
 from .http_client import HTTPClient
 from .models import (
@@ -79,3 +79,13 @@ class BaseClient(ABC):
 
     async def close(self) -> None:
         await self.websocket_client.close()
+
+    def activity_snapshot(self) -> Dict[str, object]:
+        http = self.http_client.activity_snapshot() if hasattr(self.http_client, "activity_snapshot") else {"startedAtMs": 0, "rest": {}}
+        websocket = self.websocket_client.activity_snapshot() if hasattr(self.websocket_client, "activity_snapshot") else {"startedAtMs": 0, "stream": {}}
+        starts = [int(value) for value in (http.get("startedAtMs"), websocket.get("startedAtMs")) if value]
+        return {
+            "startedAtMs": min(starts) if starts else 0,
+            "rest": http.get("rest", {}),
+            "stream": websocket.get("stream", {}),
+        }

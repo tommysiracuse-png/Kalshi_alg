@@ -2008,6 +2008,7 @@ class TopOfBookBot:
         self.last_market_state_log_ms = 0
 
         self.net_position_units = 0
+        self.last_position_update_at_ms: Optional[int] = None
 
         self.orders: Dict[str, ManagedOrderState] = {
             "yes": ManagedOrderState(side="yes"),
@@ -2019,6 +2020,20 @@ class TopOfBookBot:
         self.watchdog_state: Optional[WatchdogState] = None
         self.watchdog_state_mtime_ns: Optional[int] = None
         self.started_at_ms = now_ms()
+        self.starting_position_units = 0
+        self.session_yes_quantity_units = 0
+        self.session_no_quantity_units = 0
+        self.session_yes_cost_units = 0
+        self.session_no_cost_units = 0
+        self.session_fee_units = 0
+        self.session_fill_count = 0
+        self.recent_fill_activity: Deque[Dict[str, object]] = deque(maxlen=20)
+        self.order_activity: Dict[str, Dict[str, int]] = {
+            action: {"attempts": 0, "successes": 0, "errors": 0}
+            for action in ("create", "amend", "decrease", "cancel")
+        }
+        self.last_order_activity_at_ms: Optional[int] = None
+        self.recent_order_activity: Deque[Dict[str, object]] = deque(maxlen=20)
         self.watchdog_last_mode_logged: Optional[str] = None
         self.watchdog_shutdown_in_progress = False
         self.shutdown_requested = False
@@ -2043,11 +2058,93 @@ class TopOfBookBot:
         positions = self.api_client.get_positions(self.settings.market_ticker)
         if not positions:
             self.net_position_units = 0
+            self.starting_position_units = 0
+            self.last_position_update_at_ms = now_ms()
             log_event("STARTUP_POSITION", contracts="0.00")
             return
 
         self.net_position_units = int(positions[0].position_units)
+        self.starting_position_units = self.net_position_units
+        self.last_position_update_at_ms = now_ms()
         log_event("STARTUP_POSITION", contracts=format_count_fp(self.net_position_units))
+
+    def record_order_activity(
+        self,
+        action: str,
+        outcome: str,
+        *,
+        side: Optional[str] = None,
+        order_id: Optional[str] = None,
+        error: Optional[str] = None,
+    ) -> None:
+        if action not in self.order_activity:
+            return
+        timestamp = now_ms()
+        if outcome == "attempt":
+            self.order_activity[action]["attempts"] += 1
+        elif outcome == "success":
+            self.order_activity[action]["successes"] += 1
+        else:
+            self.order_activity[action]["errors"] += 1
+        self.last_order_activity_at_ms = timestamp
+        self.recent_order_activity.append(
+            {
+                "timestampMs": timestamp,
+                "action": action,
+                "outcome": outcome,
+                "side": side,
+                "orderId": order_id,
+                "error": error[:200] if error else None,
+            }
+        )
+
+    def current_market_price(self) -> Tuple[Optional[int], str, Optional[int]]:
+        if self.ticker_state is not None and self.ticker_state.price_units is not None:
+            return self.ticker_state.price_units, "ticker", self.ticker_state.ts_ms
+        if self.recent_trades:
+            trade = self.recent_trades[-1]
+            return trade.yes_price_units, "trade", trade.ts_ms
+        yes_bid = self.best_bid("yes")
+        no_bid = self.best_bid("no")
+        if yes_bid is not None and no_bid is not None:
+            return int(round((yes_bid + PRICE_SCALE - no_bid) / 2.0)), "book_mid", self.last_market_event_timestamp_ms or None
+        return None, "unavailable", None
+
+    def session_pnl_snapshot(self) -> Dict[str, object]:
+        yes_qty = self.session_yes_quantity_units
+        no_qty = self.session_no_quantity_units
+        matched_units = min(yes_qty, no_qty)
+        average_yes = self.session_yes_cost_units / yes_qty if yes_qty else 0.0
+        average_no = self.session_no_cost_units / no_qty if no_qty else 0.0
+        fees_cents = self.session_fee_units / PRICE_UNITS_PER_CENT
+        realized_cents = (
+            (matched_units / COUNT_SCALE)
+            * (PRICE_SCALE - average_yes - average_no)
+            / PRICE_UNITS_PER_CENT
+            - fees_cents
+        )
+        mark_units, mark_source, mark_at_ms = self.current_market_price()
+        session_position = yes_qty - no_qty
+        unrealized_cents = 0.0
+        if mark_units is not None and session_position > 0 and yes_qty:
+            unrealized_cents = (session_position / COUNT_SCALE) * (mark_units - average_yes) / PRICE_UNITS_PER_CENT
+        elif mark_units is not None and session_position < 0 and no_qty:
+            unrealized_cents = (
+                abs(session_position) / COUNT_SCALE
+                * ((PRICE_SCALE - mark_units) - average_no)
+                / PRICE_UNITS_PER_CENT
+            )
+        return {
+            "fills": self.session_fill_count,
+            "feesCents": round(fees_cents, 4),
+            "realizedCents": round(realized_cents, 4),
+            "unrealizedCents": round(unrealized_cents, 4),
+            "totalCents": round(realized_cents + unrealized_cents, 4),
+            "sessionPositionUnits": session_position,
+            "markPriceUnits": mark_units,
+            "markSource": mark_source,
+            "markAtMs": mark_at_ms,
+        }
 
     def cancel_owned_resting_quotes_on_startup(self) -> None:
         if not self.settings.cancel_strategy_quotes_on_startup:
@@ -2066,10 +2163,13 @@ class TopOfBookBot:
                 continue
 
             try:
+                self.record_order_activity("cancel", "attempt", order_id=order_id)
                 self.api_client.cancel_order(order_id=order_id)
+                self.record_order_activity("cancel", "success", order_id=order_id)
                 canceled_count += 1
                 log_event("STARTUP_CANCELLED_OWN_ORDER", order_id=order_id, client_order_id=client_order_id)
             except Exception as exc:
+                self.record_order_activity("cancel", "error", order_id=order_id, error=str(exc))
                 if is_order_not_found_error(exc):
                     continue
                 raise
@@ -3360,9 +3460,12 @@ class TopOfBookBot:
         )
 
         try:
+            self.record_order_activity("cancel", "attempt", side=side, order_id=order_id)
             await asyncio.to_thread(self.api_client.cancel_order, order_id=order_id)
+            self.record_order_activity("cancel", "success", side=side, order_id=order_id)
             log_event("CANCEL_REQUESTED", side=side, reason=reason, order_id=order_id)
         except Exception as exc:
+            self.record_order_activity("cancel", "error", side=side, order_id=order_id, error=str(exc))
             if is_order_not_found_error(exc):
                 log_event("CANCEL_SKIPPED_ORDER_MISSING", side=side, reason=reason, order_id=order_id)
             elif is_rate_limit_error(exc):
@@ -3418,10 +3521,12 @@ class TopOfBookBot:
                 ):
                     return
 
+            order_action = "create" if not state.has_active_resting_order else "amend"
             try:
                 if not state.has_active_resting_order:
                     new_client_order_id = f"{self.settings.primary_client_order_prefix}:{side}:{uuid.uuid4().hex[:16]}"
                     expiration_ts = self.expiration_timestamp_for_side(side)
+                    self.record_order_activity("create", "attempt", side=side)
                     response = await asyncio.to_thread(
                         self.api_client.create_order,
                         CreateOrderRequest(
@@ -3445,6 +3550,7 @@ class TopOfBookBot:
                     state.status = "resting"
                     state.last_queue_position_units = self.displayed_size_units_at_price(side, attempt_price_units)
                     state.expiration_time_ms = response.expiration_time_ms
+                    self.record_order_activity("create", "success", side=side, order_id=state.order_id)
                     log_event(
                         "CREATE_OK",
                         side=side,
@@ -3459,6 +3565,7 @@ class TopOfBookBot:
                     continue
 
                 updated_client_order_id = f"{self.settings.primary_client_order_prefix}:{side}:{uuid.uuid4().hex[:16]}"
+                self.record_order_activity("amend", "attempt", side=side, order_id=state.order_id)
                 response = await asyncio.to_thread(
                     self.api_client.amend_order,
                     AmendOrderRequest(
@@ -3482,6 +3589,7 @@ class TopOfBookBot:
                 if price_changed or state.last_queue_position_units is None:
                     state.last_queue_position_units = self.displayed_size_units_at_price(side, attempt_price_units)
                 state.expiration_time_ms = response.expiration_time_ms
+                self.record_order_activity("amend", "success", side=side, order_id=state.order_id)
                 log_event(
                     "AMEND_OK",
                     side=side,
@@ -3492,6 +3600,9 @@ class TopOfBookBot:
                 return
 
             except Exception as exc:
+                self.record_order_activity(
+                    order_action, "error", side=side, order_id=state.order_id, error=str(exc)
+                )
                 if is_missing_or_non_resting_amend_target(exc):
                     log_event("STALE_ORDER_RECOVER", side=side, order_id=state.order_id)
                     state.clear_active_order(preserve_quote_cycle=False)
@@ -3614,6 +3725,7 @@ class TopOfBookBot:
         if position.market_id != self.settings.market_ticker:
             return
         self.net_position_units = int(position.position_units)
+        self.last_position_update_at_ms = now_ms()
 
     def handle_ticker_update(self, ticker: TickerUpdate) -> None:
         if ticker.market_id != self.settings.market_ticker:
@@ -3770,6 +3882,7 @@ class TopOfBookBot:
         else:
             self.net_position_units = int(self.net_position_units + count_units if side == "yes" else self.net_position_units - count_units)
         inventory_after_units = int(self.net_position_units)
+        self.last_position_update_at_ms = fill_timestamp_ms
 
         state = self.orders[side]
         state.last_positive_fill_timestamp_ms = fill_timestamp_ms
@@ -3778,6 +3891,29 @@ class TopOfBookBot:
             fill_timestamp_ms + self.settings.same_side_reentry_cooldown_ms,
         )
         self.last_fill_timestamp_ms = fill_timestamp_ms
+
+        self.session_fill_count += 1
+        if side == "yes":
+            self.session_yes_quantity_units += count_units
+            if price_units is not None:
+                self.session_yes_cost_units += price_units * count_units
+        else:
+            self.session_no_quantity_units += count_units
+            if price_units is not None:
+                self.session_no_cost_units += price_units * count_units
+        if fee_units is not None:
+            self.session_fee_units += fee_units
+        self.recent_fill_activity.append(
+            {
+                "timestampMs": fill_timestamp_ms,
+                "side": side,
+                "priceUnits": price_units,
+                "quantityUnits": count_units,
+                "feeUnits": fee_units,
+                "orderId": order_id,
+                "tradeId": trade_id,
+            }
+        )
 
         if fee_units is not None and price_units is not None:
             self.fee_model.record_fill_fee(price_units=price_units, count_units=count_units, fee_units=fee_units)
@@ -3969,9 +4105,11 @@ class TopOfBookBot:
         positions = self.api_client.get_positions(self.settings.market_ticker)
         if not positions:
             self.net_position_units = 0
+            self.last_position_update_at_ms = now_ms()
             return 0
 
         self.net_position_units = int(positions[0].position_units)
+        self.last_position_update_at_ms = now_ms()
         return self.net_position_units
 
     def maybe_load_watchdog_state(self) -> Optional[WatchdogState]:
@@ -4042,7 +4180,9 @@ class TopOfBookBot:
 
         exit_count_units = abs(net_position_units)
         client_order_id = f"wd:{held_side}:{uuid.uuid4().hex[:16]}"
-        response = await asyncio.to_thread(
+        self.record_order_activity("create", "attempt", side=held_side)
+        try:
+            response = await asyncio.to_thread(
             self.api_client.create_order,
             CreateOrderRequest(
                 market_id=self.settings.market_ticker,
@@ -4057,7 +4197,11 @@ class TopOfBookBot:
                 time_in_force="immediate_or_cancel",
                 cancel_order_on_pause=False,
             ),
-        )
+            )
+        except Exception as exc:
+            self.record_order_activity("create", "error", side=held_side, error=str(exc))
+            raise
+        self.record_order_activity("create", "success", side=held_side, order_id=response.order_id)
         log_event(
             "WATCHDOG_EXIT_ORDER",
             side=held_side,
@@ -4200,6 +4344,20 @@ class TopOfBookBot:
                 self.requote_event.set()
 
     def status_snapshot(self) -> Dict[str, object]:
+        price_units, price_source, price_at_ms = self.current_market_price()
+        try:
+            api_activity = self.api_client.activity_snapshot()
+        except Exception:
+            api_activity = {"rest": {}, "stream": {}}
+        active_orders = {
+            side: {
+                "orderId": state.order_id,
+                "status": state.status,
+                "priceUnits": state.price_units,
+                "remainingCountUnits": state.remaining_count_units,
+            }
+            for side, state in self.orders.items()
+        }
         return {
             "marketId": self.settings.market_ticker,
             "pid": os.getpid(),
@@ -4208,14 +4366,39 @@ class TopOfBookBot:
             "bookReady": self.book_ready,
             "lastFillAtMs": self.last_fill_timestamp_ms or None,
             "lastMarketEventAtMs": self.last_market_event_timestamp_ms or None,
-            "orders": {
-                side: {
-                    "orderId": state.order_id,
-                    "status": state.status,
-                    "priceUnits": state.price_units,
-                    "remainingCountUnits": state.remaining_count_units,
-                }
-                for side, state in self.orders.items()
+            "orders": active_orders,
+            "monitoring": {
+                "schemaVersion": 1,
+                "runtime": {
+                    "startedAtMs": self.started_at_ms,
+                    "runningForMs": max(0, now_ms() - self.started_at_ms),
+                },
+                "market": {
+                    "marketId": self.market.ticker,
+                    "title": self.market.title,
+                    "priceUnits": price_units,
+                    "priceSource": price_source,
+                    "priceAtMs": price_at_ms,
+                },
+                "portfolio": {
+                    "startingPositionUnits": self.starting_position_units,
+                    "currentPositionUnits": self.net_position_units,
+                    "updatedAtMs": self.last_position_update_at_ms,
+                },
+                "pnl": self.session_pnl_snapshot(),
+                "fills": {
+                    "count": self.session_fill_count,
+                    "quantityUnits": self.session_yes_quantity_units + self.session_no_quantity_units,
+                    "lastFillAtMs": self.last_fill_timestamp_ms or None,
+                    "recent": list(self.recent_fill_activity),
+                },
+                "orderActivity": {
+                    "byAction": self.order_activity,
+                    "lastActivityAtMs": self.last_order_activity_at_ms,
+                    "active": active_orders,
+                    "recent": list(self.recent_order_activity),
+                },
+                "apiActivity": api_activity,
             },
         }
 

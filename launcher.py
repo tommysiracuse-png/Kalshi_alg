@@ -133,6 +133,15 @@ class Launcher:
         disabled = load_disable_list(self.watchdog_disable_file)
         counts = dict(manager_status["counts"])
         counts["disabledTickers"] = len(disabled)
+        manager_monitoring = dict(manager_status.get("monitoring") or {})
+        manager_monitoring.update(
+            {
+                "running": lifecycle in {"starting", "running"},
+                "lifecycle": lifecycle,
+                "startedAtMs": self.started_at_ms,
+                "runningForMs": max(0, now_ms - self.started_at_ms),
+            }
+        )
         return {
             "schemaVersion": STATUS_SCHEMA_VERSION,
             "generatedAt": now_ms,
@@ -148,6 +157,9 @@ class Launcher:
             },
             "counts": counts,
             "bots": manager_status["bots"],
+            "manager": manager_monitoring,
+            "clients": manager_status.get("clients", []),
+            "screener": self.screener.status_snapshot(),
             "disabled": disabled,
         }
 
@@ -198,10 +210,20 @@ class Launcher:
             changed=(),
             removed=(),
         )
+        self.screener.accept_snapshot(update)
         await self.manager.apply_update(update)
 
     async def refresh(self, reason: str) -> bool:
-        update = await self.screener.refresh(self.manager.current_picks, reason=reason)
+        refresh_task = asyncio.create_task(
+            self.screener.refresh(self.manager.current_picks, reason=reason)
+        )
+        while not refresh_task.done():
+            self.publish_status("running")
+            try:
+                await asyncio.wait_for(asyncio.shield(refresh_task), timeout=0.5)
+            except asyncio.TimeoutError:
+                pass
+        update = await refresh_task
         event = await self.screener.events.get()
         if update is None:
             self.last_error = event.error or "screener refresh failed"

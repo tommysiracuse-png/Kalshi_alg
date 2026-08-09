@@ -62,6 +62,20 @@ def test_http_client_raises_structured_error():
     assert caught.value.path == "/orders"
     assert caught.value.status_code == 429
     assert caught.value.response_text == "rate limited"
+    activity = client.activity_snapshot()["rest"]
+    assert activity["total"] == 1
+    assert activity["errors"] == 1
+    assert activity["byStatus"] == {"429": 1}
+
+
+def test_http_activity_uses_logical_operations_without_request_data():
+    client = HTTPClient("https://example.test", session=FakeSession())
+    client.get("/markets/SECRET", headers={"Authorization": "secret"}, operation="get_market")
+    activity = client.activity_snapshot()
+    assert activity["rest"]["byOperation"] == {"get_market": 1}
+    assert activity["rest"]["requestsLast60s"] == 1
+    assert "SECRET" not in str(activity)
+    assert "Authorization" not in str(activity)
 
 
 class FakeConnection:
@@ -115,6 +129,11 @@ def test_websocket_subscribe_iterate_and_close():
         assert received == ["first", "second"]
         assert calls[0][1]["additional_headers"] == {"Authorization": "value"}
         assert connection.closed and context.exited
+        activity = client.activity_snapshot()["stream"]
+        assert activity["connections"] == 1
+        assert activity["subscriptionsSent"] == 2
+        assert activity["message"] == 2
+        assert activity["messagesLast60s"] == 2
 
     asyncio.run(scenario())
 

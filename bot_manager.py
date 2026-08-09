@@ -27,6 +27,19 @@ from lip_launcher import (
 from runtime_control import send_bot_command
 
 
+def _merge_counts(target: Dict[str, object], source: Dict[str, object]) -> None:
+    for key, value in source.items():
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            if key.endswith("AtMs"):
+                target[key] = max(float(target.get(key, 0) or 0), float(value))
+            elif key != "averageLatencyMs":
+                target[key] = target.get(key, 0) + value  # type: ignore[operator]
+        elif isinstance(value, dict):
+            child = target.setdefault(key, {})
+            if isinstance(child, dict):
+                _merge_counts(child, value)
+
+
 @dataclass(frozen=True)
 class BotManagerConfig:
     bot_script_path: Path
@@ -288,14 +301,21 @@ class BotManager:
 
     def status_snapshot(self) -> Dict[str, object]:
         rows = []
+        clients = []
         watchdog_modes: Dict[str, int] = {}
+        portfolio_items = []
+        pnl_totals: Dict[str, object] = {
+            "fills": 0, "feesCents": 0.0, "realizedCents": 0.0,
+            "unrealizedCents": 0.0, "totalCents": 0.0,
+        }
+        api_totals: Dict[str, object] = {"rest": {}, "stream": {}}
+        current_ms = int(time.time() * 1000)
         for managed in self.bots.values():
             child = managed.child
             watchdog = load_json_file(child.watchdog_state_file) if child.watchdog_state_file else {}
             mode = str(watchdog.get("mode") or "unknown")
             watchdog_modes[mode] = watchdog_modes.get(mode, 0) + 1
-            rows.append(
-                {
+            row = {
                     "ticker": child.ticker,
                     "title": managed.pick.title,
                     "slotIndex": child.slot_index,
@@ -316,9 +336,91 @@ class BotManager:
                     "restartCount": len(managed.restart_times),
                     "botStatus": dict(managed.last_status),
                 }
+            rows.append(row)
+            bot_status = managed.last_status
+            monitoring = bot_status.get("monitoring") if isinstance(bot_status, dict) else None
+            monitoring = monitoring if isinstance(monitoring, dict) else {}
+            portfolio = monitoring.get("portfolio") if isinstance(monitoring.get("portfolio"), dict) else {}
+            pnl = monitoring.get("pnl") if isinstance(monitoring.get("pnl"), dict) else {}
+            api = monitoring.get("apiActivity") if isinstance(monitoring.get("apiActivity"), dict) else {}
+            last_event_at = bot_status.get("lastMarketEventAtMs") if isinstance(bot_status, dict) else None
+            fresh = (
+                managed.socket_healthy
+                and isinstance(last_event_at, (int, float))
+                and current_ms - int(last_event_at) <= 15_000
             )
+            position_units = portfolio.get("currentPositionUnits")
+            portfolio_items.append(
+                {
+                    "marketId": child.ticker,
+                    "title": managed.pick.title,
+                    "positionUnits": position_units,
+                    "updatedAtMs": portfolio.get("updatedAtMs"),
+                    "stale": not fresh,
+                    "available": position_units is not None,
+                }
+            )
+            for key in pnl_totals:
+                value = pnl.get(key)
+                if isinstance(value, (int, float)):
+                    pnl_totals[key] = pnl_totals[key] + value  # type: ignore[operator]
+            _merge_counts(
+                api_totals,
+                {
+                    "rest": api.get("rest", {}),
+                    "stream": api.get("stream", {}),
+                },
+            )
+            clients.append(
+                {
+                    "marketId": child.ticker,
+                    "title": managed.pick.title,
+                    "pid": child.process.pid,
+                    "lifecycle": bot_status.get("lifecycle") or ("running" if row["botRunning"] else "stopped"),
+                    "socketHealthy": managed.socket_healthy,
+                    "restartCount": len(managed.restart_times),
+                    "watchdog": {
+                        "running": row["watchdogRunning"],
+                        "mode": mode,
+                        "confidence": row["watchdogConfidence"],
+                        "reason": row["watchdogReason"],
+                        "updatedAtMs": row["watchdogUpdatedAtMs"],
+                    },
+                    **monitoring,
+                }
+            )
+        gross_units = sum(
+            abs(int(item["positionUnits"]))
+            for item in portfolio_items
+            if isinstance(item.get("positionUnits"), (int, float))
+        )
+        net_units = sum(
+            int(item["positionUnits"])
+            for item in portfolio_items
+            if isinstance(item.get("positionUnits"), (int, float))
+        )
+        monitoring_snapshot = {
+            "running": True,
+            "botsRunning": sum(1 for row in rows if row["botRunning"]),
+            "portfolio": {
+                "items": portfolio_items,
+                "grossPositionUnits": gross_units,
+                "netPositionUnits": net_units,
+                "unknownMarkets": sum(1 for item in portfolio_items if not item["available"]),
+                "staleMarkets": sum(1 for item in portfolio_items if item["stale"]),
+            },
+            "pnl": {key: round(value, 4) if isinstance(value, float) else value for key, value in pnl_totals.items()},
+            "apiActivity": api_totals,
+        }
+        rest_totals = api_totals.get("rest")
+        if isinstance(rest_totals, dict):
+            total = rest_totals.get("total")
+            latency = rest_totals.get("totalLatencyMs")
+            rest_totals["averageLatencyMs"] = round(float(latency or 0) / float(total), 3) if total else 0.0
         return {
             "bots": rows,
+            "clients": clients,
+            "monitoring": monitoring_snapshot,
             "counts": {
                 "activeBots": sum(1 for row in rows if row["botRunning"]),
                 "configuredBots": len(self._desired),

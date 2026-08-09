@@ -3,6 +3,8 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from ui_api.config import Settings
 from ui_api.store import OperationsStore
@@ -39,6 +41,15 @@ class OperationsStoreTests(unittest.TestCase):
         (self.root / "watchdog_state" / "TEST-1.json").write_text("{")
         market = self.store.markets()[0]
         self.assertEqual(market["watchdogMode"], "unknown")
+
+    def test_start_control_rejects_service_that_exits_immediately(self):
+        results = [
+            SimpleNamespace(returncode=0, stdout="", stderr=""),
+            SimpleNamespace(returncode=3, stdout="failed\n", stderr=""),
+        ]
+        with patch("ui_api.store.subprocess.run", side_effect=results):
+            with self.assertRaisesRegex(RuntimeError, "exited during startup"):
+                self.store.systemd("start")
 
 
 if __name__ == "__main__":
