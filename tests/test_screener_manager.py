@@ -1,13 +1,15 @@
 import asyncio
 import io
+import signal
 import time
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from bot_manager import BotManager, BotManagerConfig, ManagedBot
-from clients.models import MarketQuote, Position
+from clients.models import AccountOrder, MarketQuote, Position
 from fleet_models import ScreenerPick, ScreenerUpdate
 from lip_launcher import ChildProcess
 
@@ -208,5 +210,104 @@ def test_manager_shutdown_escalates_after_socket_is_unavailable(tmp_path):
         assert process.signals
         assert process.terminated
         assert "MKT" not in manager.bots
+
+    asyncio.run(scenario())
+
+
+def test_manager_account_cleanup_cancels_bot_orders_and_preserves_manual_orders(tmp_path):
+    class CleanupClient:
+        def __init__(self):
+            self.orders = [
+                AccountOrder("bot-1", "MKT", client_order_id="mm:yes:1", status="resting"),
+                AccountOrder("bot-2", "OTHER", client_order_id="tob:no:2", status="resting"),
+                AccountOrder("manual", "MKT", client_order_id="operator-order", status="resting"),
+            ]
+            self.canceled = []
+
+        def list_account_orders(self, query):
+            return [
+                order for order in self.orders
+                if not query.market_id or order.market_id == query.market_id
+            ]
+
+        def cancel_order(self, *, order_id):
+            self.canceled.append(order_id)
+            self.orders = [order for order in self.orders if order.order_id != order_id]
+
+    client = CleanupClient()
+    config = replace(manager_config(tmp_path), dry_run=False, shutdown_cleanup_delay_seconds=0)
+    manager = BotManager(config, cleanup_client=client)
+
+    canceled = manager._cancel_and_verify_owned_orders_sync()
+
+    assert canceled == 2
+    assert client.canceled == ["bot-1", "bot-2"]
+    assert [order.order_id for order in client.orders] == ["manual"]
+
+
+def test_fleet_shutdown_freezes_every_bot_before_account_cleanup(tmp_path):
+    timeline = []
+
+    class Process:
+        def __init__(self, pid):
+            self.pid = pid
+            self.running = True
+
+        def poll(self):
+            return None if self.running else 0
+
+        def send_signal(self, value):
+            timeline.append(("signal", self.pid, value))
+
+        def terminate(self):
+            timeline.append(("terminate", self.pid))
+            self.running = False
+
+        def kill(self):
+            self.running = False
+
+    class CleanupClient:
+        def __init__(self):
+            self.orders = [
+                AccountOrder("one", "ONE", client_order_id="mm:yes:1", status="resting"),
+                AccountOrder("two", "TWO", client_order_id="mm:no:2", status="resting"),
+            ]
+
+        def list_account_orders(self, query):
+            timeline.append(("list",))
+            return list(self.orders)
+
+        def cancel_order(self, *, order_id):
+            timeline.append(("cancel", order_id))
+            self.orders = [order for order in self.orders if order.order_id != order_id]
+
+    async def scenario():
+        config = replace(manager_config(tmp_path), dry_run=False, shutdown_cleanup_delay_seconds=0)
+        manager = BotManager(config, cleanup_client=CleanupClient())
+        for index, market_id in enumerate(("ONE", "TWO"), start=1):
+            selected = pick(market_id)
+            child = ChildProcess(
+                ticker=market_id,
+                process=Process(index),
+                log_path=tmp_path / f"{market_id}.log",
+                log_handle=io.StringIO(),
+                slot_index=index,
+                pick=selected,
+            )
+            manager.bots[market_id] = ManagedBot(selected, child)
+
+        async def wait_process(process, timeout):
+            return process.poll() is not None
+
+        manager._wait_process = wait_process
+        await manager.stop_all()
+
+        first_cancel = next(index for index, item in enumerate(timeline) if item[0] == "cancel")
+        frozen_pids = {
+            item[1] for item in timeline[:first_cancel]
+            if item[0] == "signal" and item[2] == signal.SIGSTOP
+        }
+        assert frozen_pids == {1, 2}
+        assert not manager.bots
 
     asyncio.run(scenario())

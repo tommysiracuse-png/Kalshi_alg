@@ -19,15 +19,20 @@ class FakeClient:
     def __init__(self):
         self.canceled = []
         self.closed = False
+        self.resting = [
+            Order("owned", "MKT", "yes", "mm:owned", "resting"),
+            Order("other", "MKT", "yes", "manual", "resting"),
+        ]
 
     def get_positions(self, market_id):
         return [Position(market_id, 250)]
 
     def get_resting_orders(self, market_id):
-        return [Order("owned", market_id, "yes", "mm:owned", "resting"), Order("other", market_id, "yes", "manual", "resting")]
+        return list(self.resting)
 
     def cancel_order(self, *, order_id):
         self.canceled.append(order_id)
+        self.resting = [order for order in self.resting if order.order_id != order_id]
         return Order(order_id)
 
     def get_market_quote(self, market_id):
@@ -80,6 +85,17 @@ def test_market_event_loop_has_no_websocket_dependency():
     assert bot.net_position_units == 125
     asyncio.run(bot.request_shutdown(0))
     assert client.closed
+
+
+def test_shutdown_cancels_and_verifies_only_bot_owned_orders():
+    bot, client = make_bot()
+    result = asyncio.run(bot.request_shutdown(0))
+
+    assert result["ordersVerifiedAbsent"] is True
+    assert result["ordersCanceled"] == 1
+    assert client.canceled == ["owned"]
+    assert [order.order_id for order in client.resting] == ["other"]
+    assert client.closed is True
 
 
 def test_monitoring_snapshot_tracks_process_session_separately_from_starting_inventory():

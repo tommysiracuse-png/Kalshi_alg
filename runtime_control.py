@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 
-STATUS_SCHEMA_VERSION = 2
+STATUS_SCHEMA_VERSION = 3
 ALLOWED_ACTIONS = {"status", "refresh", "disable_ticker", "enable_ticker"}
 
 
@@ -32,7 +32,7 @@ class BotControlServer:
         self,
         socket_path: Path,
         status_provider: Callable[[], Dict[str, Any]],
-        shutdown_handler: Callable[[], Awaitable[None]],
+        shutdown_handler: Callable[[], Awaitable[Optional[Dict[str, Any]]]],
     ) -> None:
         self.socket_path = socket_path
         self.status_provider = status_provider
@@ -75,8 +75,8 @@ class BotControlServer:
                 response = {"ok": True, "request_id": request_id, "result": self.status_provider()}
             elif action == "shutdown":
                 if self._shutdown_result is None:
-                    await self.shutdown_handler()
-                    self._shutdown_result = {"shutdownRequested": True}
+                    result = await self.shutdown_handler()
+                    self._shutdown_result = dict(result or {"shutdownRequested": True})
                 response = {"ok": True, "request_id": request_id, "result": self._shutdown_result}
             else:
                 raise ValueError(f"unsupported action: {action}")

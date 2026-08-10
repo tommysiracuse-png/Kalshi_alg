@@ -46,6 +46,30 @@ class MarketQuery:
 
 
 @dataclass(frozen=True)
+class AccountPositionQuery:
+    nonzero_only: bool = True
+    page_size: int = 1_000
+
+
+@dataclass(frozen=True)
+class AccountOrderQuery:
+    status: str = ""
+    market_id: str = ""
+    min_created_at_ms: Optional[int] = None
+    max_created_at_ms: Optional[int] = None
+    page_size: int = 1_000
+
+
+@dataclass(frozen=True)
+class AccountFillQuery:
+    market_id: str = ""
+    order_id: str = ""
+    min_created_at_ms: Optional[int] = None
+    max_created_at_ms: Optional[int] = None
+    page_size: int = 1_000
+
+
+@dataclass(frozen=True)
 class Market:
     market_id: str
     title: str = ""
@@ -70,6 +94,7 @@ class Market:
     open_interest_units: Optional[int] = None
     expected_expiration_time_ms: Optional[int] = None
     expiration_time_ms: Optional[int] = None
+    market_url: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -86,6 +111,38 @@ class Position:
 
 
 @dataclass(frozen=True)
+class AccountBalance:
+    available_cash_units: int
+    portfolio_value_units: int
+    updated_at_ms: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class RateLimitBucket:
+    refill_rate: int = 0
+    bucket_capacity: int = 0
+
+
+@dataclass(frozen=True)
+class AccountLimits:
+    usage_tier: str
+    read: RateLimitBucket = field(default_factory=RateLimitBucket)
+    write: RateLimitBucket = field(default_factory=RateLimitBucket)
+
+
+@dataclass(frozen=True)
+class AccountPosition:
+    market_id: str
+    position_units: int
+    total_traded_units: Optional[int] = None
+    market_exposure_units: Optional[int] = None
+    realized_pnl_units: Optional[int] = None
+    fees_paid_units: Optional[int] = None
+    resting_order_count: int = 0
+    updated_at_ms: Optional[int] = None
+
+
+@dataclass(frozen=True)
 class Order:
     order_id: str
     market_id: str = ""
@@ -96,6 +153,38 @@ class Order:
     fill_count_units: int = 0
     remaining_count_units: int = 0
     expiration_time_ms: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class AccountOrder:
+    order_id: str
+    market_id: str
+    side: Optional[Side] = None
+    client_order_id: str = ""
+    status: str = ""
+    price_units: Optional[int] = None
+    fill_count_units: int = 0
+    remaining_count_units: int = 0
+    initial_count_units: int = 0
+    fill_cost_units: int = 0
+    fees_units: int = 0
+    created_at_ms: Optional[int] = None
+    updated_at_ms: Optional[int] = None
+    expiration_time_ms: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class AccountFill:
+    fill_id: str
+    trade_id: str
+    order_id: str
+    market_id: str
+    side: Optional[Side]
+    count_units: int
+    price_units: Optional[int]
+    fee_units: int = 0
+    created_at_ms: Optional[int] = None
+    is_taker: bool = False
 
 
 @dataclass(frozen=True)

@@ -10,7 +10,10 @@ EnvironmentFile=%h/.config/kalshi-alg/bot.env
 ExecStart=%h/Kalshi_alg/run_lip.sh
 KillSignal=SIGINT
 KillMode=mixed
-TimeoutStopSec=20
+# Account-wide shutdown cancels and re-queries resting bot orders before exit.
+# Leave enough time for venue throttling/retries; systemd must not SIGKILL the
+# manager in the middle of that safety-critical cleanup.
+TimeoutStopSec=120
 Restart=no
 
 [Install]

@@ -29,6 +29,7 @@ def fixture_store(root: Path) -> OperationsStore:
         "manager": {"running": True, "botsRunning": 1, "pnl": {"totalCents": 12.5}},
         "clients": [{"marketId": "TEST-1", "title": "Test market", "apiActivity": {"rest": {"total": 4}}}],
         "screener": {"running": False, "generationId": 3, "picks": [{"marketId": "TEST-1"}]},
+        "portfolio": {"available": True, "stale": False, "summary": {"availableCashUnits": 125000}, "positions": [], "orders": {"summary": {"openOrderCount": 0}, "items": []}, "warnings": []},
     }))
     return OperationsStore(Settings(root, root / "runtime", root / "logs", root / "watchdog_state", "test.service"))
 
@@ -75,3 +76,15 @@ async def test_monitoring_contract_and_client_detail():
         assert snapshot.json()["manager"]["botsRunning"] == 1
         assert snapshot.json()["screener"]["generationId"] == 3
         assert detail.json()["client"]["apiActivity"]["rest"]["total"] == 4
+
+
+@pytest.mark.anyio
+async def test_portfolio_contract_is_authenticated_and_uses_launcher_snapshot():
+    with tempfile.TemporaryDirectory() as temporary:
+        app_module.store = fixture_store(Path(temporary))
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app_module.app), base_url="http://test") as client:
+            unauthorized = await client.get("/api/v1/portfolio")
+            response = await client.get("/api/v1/portfolio", headers={"x-internal-token": "test-token"})
+        assert unauthorized.status_code == 401
+        assert response.status_code == 200
+        assert response.json()["summary"]["availableCashUnits"] == 125000

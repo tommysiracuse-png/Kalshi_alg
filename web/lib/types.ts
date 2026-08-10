@@ -34,3 +34,27 @@ export type Monitoring = {
   clients: ClientMonitoring[];
   screener: { running?: boolean; currentReason?: string; currentStartedAtMs?: number; currentDurationMs?: number; lastStartedAtMs?: number; lastCompletedAtMs?: number; lastDurationMs?: number; lastSuccessAtMs?: number; lastError?: string; generationId?: number; generatedAtMs?: number; reason?: string; picks?: Array<{ marketId: string; title: string; yesBudgetCents: number; noBudgetCents: number; selectionReason: string; rank?: number }>; changes?: Record<string, string[]>; apiActivity?: ApiActivity };
 };
+
+export type PortfolioPosition = {
+  marketId: string; ticker: string; title: string; marketUrl?: string | null; side: "yes" | "no";
+  contractsUnits: number; lastPriceUnits?: number | null; bidPriceUnits?: number | null; askPriceUnits?: number | null; midPriceUnits?: number | null;
+  costBasisUnits?: number | null; averageCostPriceUnits?: number | null; realizedPnlUnits?: number | null; feesUnits?: number | null;
+  unrealizedPnlUnits?: number | null; unrealizedReturnBps?: number | null; totalPnlUnits?: number | null; totalReturnBps?: number | null;
+  marketUnrealizedPnlUnits?: number | null; marketUnrealizedReturnBps?: number | null; marketTotalPnlUnits?: number | null; marketTotalReturnBps?: number | null;
+  totalTradedUnits?: number | null; openOrderCount: number; updatedAtMs?: number | null;
+};
+export type PortfolioOrder = {
+  orderId: string; marketId: string; ticker: string; title: string; marketUrl?: string | null; side?: "yes" | "no" | null;
+  remainingContractsUnits: number; initialContractsUnits: number; filledContractsUnits: number;
+  averageFillPriceUnits?: number | null; orderPriceUnits?: number | null; bidPriceUnits?: number | null; askPriceUnits?: number | null;
+  midPriceUnits?: number | null; lastPriceUnits?: number | null; openMarketValueUnits?: number | null;
+  createdAtMs?: number | null; lastFillAtMs?: number | null; firstFillTimeMs?: number | null; status: string;
+};
+export type AccountPortfolio = {
+  generatedAt: number; schemaVersion?: number; available?: boolean; stale?: boolean; generatedAtMs?: number | null; lastSuccessAtMs?: number | null;
+  running?: boolean; currentStartedAtMs?: number | null; currentDurationMs?: number | null; lastCompletedAtMs?: number | null; lastError?: string | null;
+  subaccountNumber?: number; historyWindowMs?: number; source: SourceState; warnings: string[]; apiActivity?: ApiActivity;
+  summary: { availableCashUnits?: number | null; portfolioValueUnits?: number | null; balanceUpdatedAtMs?: number | null; unrealizedPnlUnits?: number | null; unrealizedReturnBps?: number | null; positionCount?: number; apiTier?: string | null; readRateLimit?: { refillRate: number; bucketCapacity: number } | null; writeRateLimit?: { refillRate: number; bucketCapacity: number } | null };
+  positions: PortfolioPosition[];
+  orders: { summary: { openOrderCount?: number; lastOrderAtMs?: number | null; lastFillAtMs?: number | null; openMarketValueUnits?: number | null; averageFirstFillTimeMs?: number | null; filledOrderSampleSize?: number }; items: PortfolioOrder[] };
+};

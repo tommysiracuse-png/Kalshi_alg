@@ -101,6 +101,32 @@ class OperationsStore:
         heartbeat = ((status.get("launcher") or {}).get("heartbeatAt"))
         if isinstance(heartbeat, (int, float)):
             source["stale"] = now_ms() - int(heartbeat) > 10_000
+        launcher = status.get("launcher") if isinstance(status.get("launcher"), dict) else {}
+        if source.get("stale") and launcher.get("lifecycle") == "stopping":
+            try:
+                completed = subprocess.run(
+                    ["systemctl", "--user", "is-active", self.settings.service_name],
+                    capture_output=True,
+                    text=True,
+                    timeout=3,
+                    check=False,
+                )
+                service_state = (completed.stdout or completed.stderr or "").strip()
+                source["serviceState"] = service_state
+                if service_state in {"inactive", "failed"}:
+                    status = dict(status)
+                    status["launcher"] = {**launcher, "lifecycle": "stopped"}
+                    counts = status.get("counts") if isinstance(status.get("counts"), dict) else {}
+                    status["counts"] = {**counts, "activeBots": 0}
+                    status["bots"] = [
+                        {**item, "botRunning": False, "watchdogRunning": False}
+                        for item in status.get("bots", [])
+                        if isinstance(item, dict)
+                    ]
+                    manager = status.get("manager") if isinstance(status.get("manager"), dict) else {}
+                    status["manager"] = {**manager, "running": False, "lifecycle": "stopped"}
+            except (OSError, subprocess.SubprocessError):
+                pass
         return {"data": status, "source": source}
 
     def screener(self) -> tuple[List[Dict[str, Any]], Dict[str, Any], List[str]]:
@@ -247,6 +273,20 @@ class OperationsStore:
             "clients": clients,
             "screener": data.get("screener") or {},
             "warnings": warnings,
+        }
+
+    def portfolio(self) -> Dict[str, Any]:
+        status = self.status()
+        data = status["data"]
+        portfolio = data.get("portfolio") if isinstance(data.get("portfolio"), dict) else {}
+        warnings = list(portfolio.get("warnings") or [])
+        if status["source"].get("stale"):
+            warnings.append("launcher portfolio snapshot is stale or unavailable")
+        return {
+            "generatedAt": now_ms(),
+            "source": status["source"],
+            **portfolio,
+            "warnings": list(dict.fromkeys(warnings)),
         }
 
     def client_monitoring(self, market_id: str) -> Dict[str, Any]:

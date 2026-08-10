@@ -86,6 +86,11 @@ async def client_monitoring(market_id: str, _: str = Depends(authorize)) -> dict
     return store.client_monitoring(market_id)
 
 
+@app.get("/api/v1/portfolio")
+async def portfolio(_: str = Depends(authorize)) -> dict:
+    return store.portfolio()
+
+
 @app.get("/api/v1/audit")
 async def audit(limit: int = Query(100, ge=1, le=500), _: str = Depends(authorize)) -> dict:
     return {"generatedAt": now_ms(), "items": store.audit.list(limit)}
@@ -105,6 +110,8 @@ async def event_stream() -> AsyncIterator[str]:
         yield f"id: {event_id}\nevent: overview\ndata: {json.dumps(payload, separators=(',', ':'))}\n\n"
         monitoring_payload = store.monitoring()
         yield f"id: {event_id}\nevent: monitoring\ndata: {json.dumps(monitoring_payload, separators=(',', ':'))}\n\n"
+        portfolio_payload = store.portfolio()
+        yield f"id: {event_id}\nevent: portfolio\ndata: {json.dumps(portfolio_payload, separators=(',', ':'))}\n\n"
         await asyncio.sleep(2)
 
 

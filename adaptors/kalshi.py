@@ -22,6 +22,14 @@ from cryptography.hazmat.primitives.asymmetric import padding
 from clients.base_client import BaseClient
 from clients.http_client import HTTPClient, HTTPClientError
 from clients.models import (
+    AccountBalance,
+    AccountFill,
+    AccountFillQuery,
+    AccountLimits,
+    AccountOrder,
+    AccountOrderQuery,
+    AccountPosition,
+    AccountPositionQuery,
     AmendOrderRequest,
     AmendTargetUnavailableError,
     ClientError,
@@ -44,6 +52,7 @@ from clients.models import (
     PublicTrade,
     QueuePosition,
     RateLimitError,
+    RateLimitBucket,
     Series,
     SeriesFeeChange,
     StreamReset,
@@ -78,6 +87,12 @@ def _optional_timestamp_ms(value: object) -> Optional[int]:
     if value in (None, ""):
         return None
     text = str(value).strip()
+    try:
+        numeric = float(text)
+        if numeric >= 0:
+            return int(numeric if numeric >= 10_000_000_000 else numeric * 1000)
+    except ValueError:
+        pass
     if text.endswith("Z"):
         text = text[:-1] + "+00:00"
     try:
@@ -100,7 +115,8 @@ def _optional_price(payload: dict, fixed_field: str, legacy_field: str) -> Optio
     if payload.get(fixed_field) not in (None, ""):
         return _price_units_from_dollars(payload[fixed_field])
     if payload.get(legacy_field) not in (None, ""):
-        return int(payload[legacy_field]) * PRICE_UNITS_PER_CENT
+        scaled = Decimal(str(payload[legacy_field])) * PRICE_UNITS_PER_CENT
+        return int(scaled.to_integral_value(rounding=ROUND_HALF_UP))
     return None
 
 
@@ -108,8 +124,36 @@ def _optional_count(payload: dict, fixed_field: str, legacy_field: str) -> Optio
     if payload.get(fixed_field) not in (None, ""):
         return _count_units_from_fp(payload[fixed_field])
     if payload.get(legacy_field) not in (None, ""):
-        return int(payload[legacy_field]) * COUNT_SCALE
+        scaled = Decimal(str(payload[legacy_field])) * COUNT_SCALE
+        return int(scaled.to_integral_value(rounding=ROUND_HALF_UP))
     return None
+
+
+def _optional_money(payload: dict, fixed_field: str, legacy_field: str = "") -> Optional[int]:
+    if payload.get(fixed_field) not in (None, ""):
+        return _price_units_from_dollars(payload[fixed_field])
+    if legacy_field and payload.get(legacy_field) not in (None, ""):
+        scaled = Decimal(str(payload[legacy_field])) * PRICE_UNITS_PER_CENT
+        return int(scaled.to_integral_value(rounding=ROUND_HALF_UP))
+    return None
+
+
+def _outcome_side(payload: dict, fallback: Optional[str] = None) -> Optional[str]:
+    outcome = str(payload.get("outcome_side") or "").lower()
+    if outcome in {"yes", "no"}:
+        return outcome
+    book_side = str(payload.get("book_side") or "").lower()
+    if book_side in {"bid", "ask"}:
+        return "yes" if book_side == "bid" else "no"
+    action = str(payload.get("action") or "").lower()
+    legacy_side = str(payload.get("side") or "").lower()
+    if action in {"buy", "sell"} and legacy_side in {"yes", "no"}:
+        if (action, legacy_side) in {("buy", "yes"), ("sell", "no")}:
+            return "yes"
+        return "no"
+    if legacy_side in {"yes", "no"}:
+        return legacy_side
+    return fallback if fallback in {"yes", "no"} else None
 
 
 def _format_price(price_units: int) -> str:
@@ -433,11 +477,12 @@ class KalshiApiClient(BaseClient):
             if close_time is not None:
                 break
         market_id = str(payload.get("ticker") or fallback_id)
+        series_id = str(payload.get("series_ticker") or payload.get("series") or payload.get("series_name") or market_id)
         return Market(
             market_id=market_id,
             title=str(payload.get("title") or ""),
             status=str(payload.get("status") or ""),
-            series_id=str(payload.get("series_ticker") or payload.get("series") or payload.get("series_name") or market_id),
+            series_id=series_id,
             event_id=str(payload.get("event_ticker") or payload.get("event") or payload.get("event_name") or market_id),
             close_time_ms=close_time,
             price_level_structure=str(payload.get("price_level_structure") or ""),
@@ -457,13 +502,12 @@ class KalshiApiClient(BaseClient):
             open_interest_units=_optional_count(payload, "open_interest_fp", "open_interest"),
             expected_expiration_time_ms=_optional_timestamp_ms(payload.get("expected_expiration_time")),
             expiration_time_ms=_optional_timestamp_ms(payload.get("expiration_time")),
+            market_url=f"https://kalshi.com/markets/{series_id.lower()}" if series_id else None,
         )
 
     @staticmethod
     def _order(payload: dict, *, fallback_id: str = "", side: Optional[str] = None) -> Order:
-        resolved_side = str(payload.get("side") or side or "")
-        if resolved_side not in {"yes", "no"}:
-            resolved_side = side or ""
+        resolved_side = _outcome_side(payload, side)
         price = None
         if resolved_side == "yes":
             price = _optional_price(payload, "yes_price_dollars", "yes_price")
@@ -479,6 +523,62 @@ class KalshiApiClient(BaseClient):
             fill_count_units=int(_optional_count(payload, "fill_count_fp", "fill_count") or 0),
             remaining_count_units=int(_optional_count(payload, "remaining_count_fp", "remaining_count") or 0),
             expiration_time_ms=_optional_timestamp_ms(payload.get("expiration_time")),
+        )
+
+    @staticmethod
+    def _account_order(payload: dict) -> AccountOrder:
+        resolved_side = _outcome_side(payload)
+        price = None
+        if resolved_side == "yes":
+            price = _optional_price(payload, "yes_price_dollars", "yes_price")
+        elif resolved_side == "no":
+            price = _optional_price(payload, "no_price_dollars", "no_price")
+        if price is None:
+            price = _optional_price(payload, "price_dollars", "price")
+        return AccountOrder(
+            order_id=str(payload.get("order_id") or ""),
+            market_id=str(payload.get("ticker") or payload.get("market_ticker") or ""),
+            side=resolved_side if resolved_side in {"yes", "no"} else None,
+            client_order_id=str(payload.get("client_order_id") or ""),
+            status=str(payload.get("status") or ""),
+            price_units=price,
+            fill_count_units=int(_optional_count(payload, "fill_count_fp", "fill_count") or 0),
+            remaining_count_units=int(_optional_count(payload, "remaining_count_fp", "remaining_count") or 0),
+            initial_count_units=int(_optional_count(payload, "initial_count_fp", "initial_count") or 0),
+            fill_cost_units=int(
+                (_optional_money(payload, "taker_fill_cost_dollars", "taker_fill_cost") or 0)
+                + (_optional_money(payload, "maker_fill_cost_dollars", "maker_fill_cost") or 0)
+            ),
+            fees_units=int(
+                (_optional_money(payload, "taker_fees_dollars", "taker_fees") or 0)
+                + (_optional_money(payload, "maker_fees_dollars", "maker_fees") or 0)
+            ),
+            created_at_ms=_optional_timestamp_ms(payload.get("created_time")),
+            updated_at_ms=_optional_timestamp_ms(payload.get("last_update_time")),
+            expiration_time_ms=_optional_timestamp_ms(payload.get("expiration_time")),
+        )
+
+    @staticmethod
+    def _account_fill(payload: dict) -> AccountFill:
+        resolved_side = _outcome_side(payload)
+        price = None
+        if resolved_side == "yes":
+            price = _optional_price(payload, "yes_price_dollars", "yes_price")
+        elif resolved_side == "no":
+            price = _optional_price(payload, "no_price_dollars", "no_price")
+        if price is None:
+            price = _optional_price(payload, "price_dollars", "price")
+        return AccountFill(
+            fill_id=str(payload.get("fill_id") or payload.get("trade_id") or ""),
+            trade_id=str(payload.get("trade_id") or ""),
+            order_id=str(payload.get("order_id") or ""),
+            market_id=str(payload.get("ticker") or payload.get("market_ticker") or ""),
+            side=resolved_side if resolved_side in {"yes", "no"} else None,
+            count_units=int(_optional_count(payload, "count_fp", "count") or 0),
+            price_units=price,
+            fee_units=int(_optional_money(payload, "fee_cost", "fee") or 0),
+            created_at_ms=_optional_timestamp_ms(payload.get("created_time") or payload.get("ts")),
+            is_taker=bool(payload.get("is_taker")),
         )
 
     def get_market(self, market_id: str) -> Market:
@@ -517,6 +617,123 @@ class KalshiApiClient(BaseClient):
             no_bid_units=_optional_price(response, "no_bid_dollars", "no_bid"),
         )
 
+    def get_account_balance(self) -> AccountBalance:
+        self._require_authentication()
+        response = self._get(
+            f"{self.api_prefix}/portfolio/balance",
+            params={"subaccount": self.config.subaccount_number},
+            operation="get_account_balance",
+        )
+        available = _optional_money(response, "balance_dollars", "balance")
+        portfolio = _optional_money(response, "portfolio_value_dollars", "portfolio_value")
+        if available is None or portfolio is None:
+            raise ClientError("Kalshi balance response omitted required balance fields")
+        return AccountBalance(
+            available_cash_units=int(available),
+            portfolio_value_units=int(portfolio),
+            updated_at_ms=_optional_timestamp_ms(response.get("updated_ts")),
+        )
+
+    def get_account_limits(self) -> AccountLimits:
+        self._require_authentication()
+        response = self._get(f"{self.api_prefix}/account/limits", operation="get_account_limits")
+
+        def bucket(name: str) -> RateLimitBucket:
+            value = response.get(name) if isinstance(response.get(name), dict) else {}
+            return RateLimitBucket(
+                refill_rate=int(value.get("refill_rate") or 0),
+                bucket_capacity=int(value.get("bucket_capacity") or 0),
+            )
+
+        return AccountLimits(str(response.get("usage_tier") or "unknown"), bucket("read"), bucket("write"))
+
+    def list_account_positions(self, query: AccountPositionQuery = AccountPositionQuery()) -> List[AccountPosition]:
+        self._require_authentication()
+        positions: List[AccountPosition] = []
+        cursor = ""
+        while True:
+            params = {
+                "limit": max(1, min(int(query.page_size), 1_000)),
+                "subaccount": self.config.subaccount_number,
+            }
+            if query.nonzero_only:
+                params["count_filter"] = "position"
+            if cursor:
+                params["cursor"] = cursor
+            response = self._get(
+                f"{self.api_prefix}/portfolio/positions", params=params, operation="list_account_positions"
+            )
+            for item in response.get("market_positions") or []:
+                positions.append(
+                    AccountPosition(
+                        market_id=str(item.get("ticker") or item.get("market_ticker") or ""),
+                        position_units=int(_optional_count(item, "position_fp", "position") or 0),
+                        total_traded_units=_optional_money(item, "total_traded_dollars", "total_traded"),
+                        market_exposure_units=_optional_money(item, "market_exposure_dollars", "market_exposure"),
+                        realized_pnl_units=_optional_money(item, "realized_pnl_dollars", "realized_pnl"),
+                        fees_paid_units=_optional_money(item, "fees_paid_dollars", "fees_paid"),
+                        resting_order_count=int(item.get("resting_orders_count") or 0),
+                        updated_at_ms=_optional_timestamp_ms(item.get("last_updated_ts")),
+                    )
+                )
+            cursor = str(response.get("cursor") or response.get("next_cursor") or "")
+            if not cursor:
+                return positions
+
+    def list_account_orders(self, query: AccountOrderQuery = AccountOrderQuery()) -> List[AccountOrder]:
+        self._require_authentication()
+        orders: List[AccountOrder] = []
+        cursor = ""
+        while True:
+            params = {
+                "limit": max(1, min(int(query.page_size), 1_000)),
+                "subaccount": self.config.subaccount_number,
+            }
+            if query.status:
+                params["status"] = query.status
+            if query.market_id:
+                params["ticker"] = query.market_id
+            if query.min_created_at_ms is not None:
+                params["min_ts"] = int(query.min_created_at_ms // 1000)
+            if query.max_created_at_ms is not None:
+                params["max_ts"] = int(query.max_created_at_ms // 1000)
+            if cursor:
+                params["cursor"] = cursor
+            response = self._get(
+                f"{self.api_prefix}/portfolio/orders", params=params, operation="list_account_orders"
+            )
+            orders.extend(self._account_order(item) for item in response.get("orders") or [])
+            cursor = str(response.get("cursor") or response.get("next_cursor") or "")
+            if not cursor:
+                return orders
+
+    def list_account_fills(self, query: AccountFillQuery = AccountFillQuery()) -> List[AccountFill]:
+        self._require_authentication()
+        fills: List[AccountFill] = []
+        cursor = ""
+        while True:
+            params = {
+                "limit": max(1, min(int(query.page_size), 1_000)),
+                "subaccount": self.config.subaccount_number,
+            }
+            if query.market_id:
+                params["ticker"] = query.market_id
+            if query.order_id:
+                params["order_id"] = query.order_id
+            if query.min_created_at_ms is not None:
+                params["min_ts"] = int(query.min_created_at_ms // 1000)
+            if query.max_created_at_ms is not None:
+                params["max_ts"] = int(query.max_created_at_ms // 1000)
+            if cursor:
+                params["cursor"] = cursor
+            response = self._get(
+                f"{self.api_prefix}/portfolio/fills", params=params, operation="list_account_fills"
+            )
+            fills.extend(self._account_fill(item) for item in response.get("fills") or [])
+            cursor = str(response.get("cursor") or response.get("next_cursor") or "")
+            if not cursor:
+                return fills
+
     def get_positions(self, market_id: str) -> List[Position]:
         self._require_authentication()
         response = self._get(
@@ -524,32 +741,30 @@ class KalshiApiClient(BaseClient):
             params={"ticker": market_id, "subaccount": self.config.subaccount_number, "limit": 1},
             operation="get_positions",
         )
-        positions = []
-        for item in response.get("market_positions") or []:
-            position_units = _optional_count(item, "position_fp", "position")
-            positions.append(Position(str(item.get("ticker") or item.get("market_ticker") or market_id), int(position_units or 0)))
-        return positions
+        return [
+            Position(
+                str(item.get("ticker") or item.get("market_ticker") or market_id),
+                int(_optional_count(item, "position_fp", "position") or 0),
+            )
+            for item in response.get("market_positions") or []
+        ]
 
     def get_resting_orders(self, market_id: str) -> List[Order]:
-        self._require_authentication()
-        orders: List[Order] = []
-        cursor = ""
-        while True:
-            params = {
-                "ticker": market_id,
-                "status": "resting",
-                "subaccount": self.config.subaccount_number,
-                "limit": 200,
-            }
-            if cursor:
-                params["cursor"] = cursor
-            response = self._get(
-                f"{self.api_prefix}/portfolio/orders", params=params, operation="get_resting_orders"
+        account_orders = self.list_account_orders(AccountOrderQuery(status="resting", market_id=market_id, page_size=200))
+        return [
+            Order(
+                order_id=item.order_id,
+                market_id=item.market_id,
+                side=item.side,
+                client_order_id=item.client_order_id,
+                status=item.status,
+                price_units=item.price_units,
+                fill_count_units=item.fill_count_units,
+                remaining_count_units=item.remaining_count_units,
+                expiration_time_ms=item.expiration_time_ms,
             )
-            orders.extend(self._order(item) for item in response.get("orders") or [])
-            cursor = str(response.get("cursor") or response.get("next_cursor") or "")
-            if not cursor:
-                return orders
+            for item in account_orders
+        ]
 
     def create_order(self, request: CreateOrderRequest) -> Order:
         self._require_authentication()

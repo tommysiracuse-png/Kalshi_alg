@@ -7,6 +7,14 @@ from typing import AsyncIterator, Dict, List
 
 from .http_client import HTTPClient
 from .models import (
+    AccountBalance,
+    AccountFill,
+    AccountFillQuery,
+    AccountLimits,
+    AccountOrder,
+    AccountOrderQuery,
+    AccountPosition,
+    AccountPositionQuery,
     AmendOrderRequest,
     CreateOrderRequest,
     IncentiveProgram,
@@ -41,6 +49,21 @@ class BaseClient(ABC):
 
     @abstractmethod
     def get_market_quote(self, market_id: str) -> MarketQuote: ...
+
+    @abstractmethod
+    def get_account_balance(self) -> AccountBalance: ...
+
+    @abstractmethod
+    def get_account_limits(self) -> AccountLimits: ...
+
+    @abstractmethod
+    def list_account_positions(self, query: AccountPositionQuery = AccountPositionQuery()) -> List[AccountPosition]: ...
+
+    @abstractmethod
+    def list_account_orders(self, query: AccountOrderQuery = AccountOrderQuery()) -> List[AccountOrder]: ...
+
+    @abstractmethod
+    def list_account_fills(self, query: AccountFillQuery = AccountFillQuery()) -> List[AccountFill]: ...
 
     @abstractmethod
     def get_positions(self, market_id: str) -> List[Position]: ...

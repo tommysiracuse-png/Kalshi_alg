@@ -8,8 +8,6 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
   if (request.method !== "GET") {
     const origin = request.headers.get("origin");
     if (!origin || origin !== request.nextUrl.origin) return NextResponse.json({ code: "invalid_origin", message: "Same-origin request required" }, { status: 403 });
-    const authenticatedAt = Number((session as typeof session & { authenticatedAt?: number }).authenticatedAt ?? 0);
-    if (Date.now() - authenticatedAt > 15 * 60 * 1000) return NextResponse.json({ code: "reauth_required", message: "Sign in again before using controls" }, { status: 403 });
   }
   const { path } = await context.params;
   const target = new URL(`/${path.join("/")}`, apiBase());

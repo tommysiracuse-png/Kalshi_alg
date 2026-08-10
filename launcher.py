@@ -25,6 +25,7 @@ from lip_launcher import (
 )
 from runtime_control import ControlRequest, ControlServer, STATUS_SCHEMA_VERSION
 from screener import Screener
+from portfolio_monitor import PortfolioMonitor, PortfolioMonitorConfig
 
 
 class Launcher:
@@ -74,6 +75,11 @@ class Launcher:
             subaccount_number=int(arguments.subaccount or 0),
         )
         self.client = KalshiApiClient(client_config)
+        self.portfolio_client = KalshiApiClient(client_config)
+        self.portfolio = PortfolioMonitor(
+            self.portfolio_client,
+            PortfolioMonitorConfig(subaccount_number=int(arguments.subaccount or 0)),
+        )
         screener_args = build_screener_parser().parse_args([])
         screener_args.output = str(self.screen_path)
         screener_settings = build_screener_settings(screener_args)
@@ -114,7 +120,8 @@ class Launcher:
                 watchdog_poll_interval_seconds=arguments.watchdog_poll_interval_seconds,
                 watchdog_confidence_reduction_threshold=arguments.watchdog_confidence_reduction_threshold,
                 watchdog_confidence_flatten_threshold=arguments.watchdog_confidence_flatten_threshold,
-            )
+            ),
+            cleanup_client=self.client if api_key_id and private_key_path else None,
         )
         self.control_requests: "queue.Queue[ControlRequest]" = queue.Queue()
         self.shutdown_requested = asyncio.Event()
@@ -126,6 +133,7 @@ class Launcher:
         self.status_lock = threading.Lock()
         self.status_path = self.runtime_dir / "launcher_status.json"
         self.socket_path = self.runtime_dir / "launcher.sock"
+        self._portfolio_task: Optional["asyncio.Task[bool]"] = None
 
     def status_snapshot(self, lifecycle: str = "running") -> Dict[str, object]:
         manager_status = self.manager.status_snapshot()
@@ -160,6 +168,7 @@ class Launcher:
             "manager": manager_monitoring,
             "clients": manager_status.get("clients", []),
             "screener": self.screener.status_snapshot(),
+            "portfolio": self.portfolio.status_snapshot(),
             "disabled": disabled,
         }
 
@@ -306,6 +315,7 @@ class Launcher:
             except NotImplementedError:
                 pass
         try:
+            self._portfolio_task = asyncio.create_task(self.portfolio.refresh())
             if self.arguments.run_screener_on_start:
                 await self.refresh("startup")
             else:
@@ -316,6 +326,8 @@ class Launcher:
                     else None
                 )
             if self.arguments.dry_run:
+                await self._portfolio_task
+                self.publish_status("running")
                 return 0
             self.publish_status("running")
             while not self.shutdown_requested.is_set():
@@ -326,6 +338,14 @@ class Launcher:
                         break
                     await self._handle_control(request)
                 await self.manager.monitor_once()
+                if self._portfolio_task is not None and self._portfolio_task.done():
+                    try:
+                        self._portfolio_task.result()
+                    except Exception as exc:
+                        self.last_error = str(exc)
+                    self._portfolio_task = None
+                if self._portfolio_task is None and self.portfolio.due():
+                    self._portfolio_task = asyncio.create_task(self.portfolio.refresh())
                 if self.next_refresh_at is not None and time.time() >= self.next_refresh_at:
                     await self.refresh("scheduled")
                 while not self.manager.events.empty():
@@ -351,10 +371,24 @@ class Launcher:
                     "message": "launcher stopped before the command completed",
                 }
                 pending.done.set()
-            await self.manager.stop_all()
-            await self.client.close()
-            control_server.stop()
-            self.publish_status("stopped")
-            for sig in installed_signals:
-                loop.remove_signal_handler(sig)
+            shutdown_error: Optional[Exception] = None
+            try:
+                await self.manager.stop_all()
+            except Exception as exc:
+                shutdown_error = exc
+                self.last_error = str(exc)
+            finally:
+                if self._portfolio_task is not None:
+                    try:
+                        await self._portfolio_task
+                    except Exception:
+                        pass
+                await self.client.close()
+                await self.portfolio_client.close()
+                control_server.stop()
+                self.publish_status("shutdown_failed" if shutdown_error else "stopped")
+                for sig in installed_signals:
+                    loop.remove_signal_handler(sig)
+            if shutdown_error is not None:
+                raise shutdown_error
         return 0

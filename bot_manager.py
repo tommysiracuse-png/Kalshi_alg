@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Deque, Dict, Optional
 
+from clients.base_client import BaseClient
+from clients.models import AccountOrderQuery, OrderNotFoundError
 from fleet_models import BotManagerEvent, ScreenerPick, ScreenerUpdate
 from lip_launcher import (
     WATCHDOG_EXIT_CODES,
@@ -65,6 +67,8 @@ class BotManagerConfig:
     watchdog_confidence_flatten_threshold: float = 0.55
     restart_limit: int = 3
     restart_window_seconds: float = 600.0
+    shutdown_cleanup_attempts: int = 8
+    shutdown_cleanup_delay_seconds: float = 0.5
 
 
 @dataclass
@@ -78,8 +82,11 @@ class ManagedBot:
 
 
 class BotManager:
-    def __init__(self, config: BotManagerConfig) -> None:
+    BOT_ORDER_PREFIXES = ("mm:", "tob:", "wd:")
+
+    def __init__(self, config: BotManagerConfig, cleanup_client: Optional[BaseClient] = None) -> None:
         self.config = config
+        self.cleanup_client = cleanup_client
         self.bots: Dict[str, ManagedBot] = {}
         self.events: "asyncio.Queue[BotManagerEvent]" = asyncio.Queue()
         self._desired: Dict[str, ScreenerPick] = {}
@@ -159,6 +166,55 @@ class BotManager:
         except (subprocess.TimeoutExpired, AttributeError):
             return getattr(process, "poll")() is not None
 
+    @classmethod
+    def _is_bot_order(cls, client_order_id: str) -> bool:
+        return bool(client_order_id) and client_order_id.startswith(cls.BOT_ORDER_PREFIXES)
+
+    def _cancel_and_verify_owned_orders_sync(self, market_id: str = "") -> int:
+        """Cancel bot-tagged resting orders and verify they no longer exist.
+
+        This is deliberately account-backed rather than based on a child's
+        cached state, and is the manager fallback when a child socket is absent
+        or a process dies during shutdown.
+        """
+        if self.cleanup_client is None or self.config.dry_run:
+            return 0
+
+        canceled_ids: set[str] = set()
+        last_error: Optional[Exception] = None
+        attempts = max(1, int(self.config.shutdown_cleanup_attempts))
+        for attempt in range(attempts):
+            try:
+                orders = self.cleanup_client.list_account_orders(
+                    AccountOrderQuery(status="resting", market_id=market_id, page_size=1_000)
+                )
+                owned = [order for order in orders if order.order_id and self._is_bot_order(order.client_order_id)]
+                if not owned:
+                    return len(canceled_ids)
+                for order in owned:
+                    try:
+                        self.cleanup_client.cancel_order(order_id=order.order_id)
+                        canceled_ids.add(order.order_id)
+                    except OrderNotFoundError:
+                        canceled_ids.add(order.order_id)
+                last_error = None
+            except Exception as exc:
+                last_error = exc
+
+            if attempt + 1 < attempts:
+                time.sleep(min(4.0, self.config.shutdown_cleanup_delay_seconds * (2 ** attempt)))
+
+        scope = market_id or "the account"
+        detail = f": {last_error}" if last_error is not None else ""
+        raise RuntimeError(f"could not verify cancellation of all bot-owned orders for {scope}{detail}")
+
+    async def _cancel_and_verify_owned_orders(self, market_id: str = "") -> int:
+        if self.cleanup_client is None or self.config.dry_run:
+            return 0
+        # Shutdown is intentionally serialized around this authoritative REST
+        # sweep; no launcher work should race it or start new bots.
+        return self._cancel_and_verify_owned_orders_sync(market_id)
+
     async def stop_bot(self, market_id: str, *, reason: str = "reconcile", remove_desired: bool = True) -> None:
         managed = self.bots.get(market_id)
         if remove_desired:
@@ -169,14 +225,16 @@ class BotManager:
         socket_path = managed.child.control_socket
         if socket_path is not None and socket_path.exists():
             try:
-                await asyncio.to_thread(
+                response = await asyncio.to_thread(
                     send_bot_command,
                     socket_path,
                     {"request_id": f"shutdown-{uuid.uuid4().hex}", "action": "shutdown"},
-                    2.0,
+                    15.0,
                 )
-            except Exception:
-                pass
+                if not response.get("ok"):
+                    await self._emit("shutdown_socket_error", market_id, response=response)
+            except Exception as exc:
+                await self._emit("shutdown_socket_error", market_id, error=str(exc))
         exited = await self._wait_process(managed.child.process, 5.0)
         if not exited:
             try:
@@ -192,6 +250,13 @@ class BotManager:
             await self._wait_process(managed.child.process, 1.0)
         if managed.child.watchdog_process is not None:
             self._signal_process(managed.child.watchdog_process, "terminate")
+
+        cleanup_error: Optional[Exception] = None
+        canceled = 0
+        try:
+            canceled = await self._cancel_and_verify_owned_orders(market_id)
+        except Exception as exc:
+            cleanup_error = exc
         close_child_log(managed.child)
         if socket_path is not None:
             try:
@@ -199,12 +264,132 @@ class BotManager:
             except FileNotFoundError:
                 pass
         self.bots.pop(market_id, None)
-        await self._emit("stopped", market_id, reason=reason)
+        if cleanup_error is not None:
+            await self._emit("shutdown_cleanup_failed", market_id, reason=reason, error=str(cleanup_error))
+            raise cleanup_error
+        await self._emit("stopped", market_id, reason=reason, canceled_orders=canceled, orders_verified_absent=True)
 
     async def stop_all(self, *, reason: str = "launcher_shutdown") -> None:
         self._desired.clear()
+
+        # Fleet shutdown is intentionally different from incremental removal.
+        # Stopping dozens of children serially made the UI/systemd stop exceed
+        # its timeout before later bots were reached. Freeze every order source
+        # first, perform one authoritative account cleanup, and only then retire
+        # the processes.
+        if self.cleanup_client is not None and not self.config.dry_run:
+            managed_bots = list(self.bots.items())
+            for market_id, managed in managed_bots:
+                managed.stopping = True
+                if managed.child.process.poll() is None:
+                    try:
+                        managed.child.process.send_signal(signal.SIGSTOP)
+                    except Exception as exc:
+                        await self._emit("shutdown_quiesce_failed", market_id, error=str(exc))
+                        self._signal_process(managed.child.process, "terminate")
+                if managed.child.watchdog_process is not None:
+                    self._signal_process(managed.child.watchdog_process, "terminate")
+                await self._emit("shutdown_quiesced", market_id, reason=reason)
+
+            cleanup_error: Optional[Exception] = None
+            canceled = 0
+            try:
+                canceled += await self._cancel_and_verify_owned_orders()
+            except Exception as exc:
+                cleanup_error = exc
+                await self._emit("shutdown_cleanup_failed", "*", reason=reason, error=str(exc))
+
+            # Frozen processes cannot place another order. Resume only so they
+            # can receive termination; do not invoke their per-market REST
+            # cleanup again after the account-wide verification.
+            for _, managed in managed_bots:
+                process = managed.child.process
+                if process.poll() is None:
+                    try:
+                        process.send_signal(signal.SIGCONT)
+                    except Exception:
+                        pass
+                    self._signal_process(process, "terminate")
+
+            exit_results = await asyncio.gather(
+                *(self._wait_process(managed.child.process, 5.0) for _, managed in managed_bots)
+            )
+            kill_targets = [
+                managed
+                for (_, managed), exited in zip(managed_bots, exit_results)
+                if not exited
+            ]
+            for managed in kill_targets:
+                self._signal_process(managed.child.process, "kill")
+            if kill_targets:
+                await asyncio.gather(
+                    *(self._wait_process(managed.child.process, 1.0) for managed in kill_targets)
+                )
+
+            if cleanup_error is None:
+                try:
+                    canceled += await self._cancel_and_verify_owned_orders()
+                except Exception as exc:
+                    cleanup_error = exc
+                    await self._emit("shutdown_cleanup_failed", "*", reason=reason, error=str(exc))
+
+            for market_id, managed in managed_bots:
+                close_child_log(managed.child)
+                socket_path = managed.child.control_socket
+                if socket_path is not None:
+                    try:
+                        socket_path.unlink()
+                    except FileNotFoundError:
+                        pass
+                self.bots.pop(market_id, None)
+                if cleanup_error is None:
+                    await self._emit(
+                        "stopped",
+                        market_id,
+                        reason=reason,
+                        canceled_orders=canceled,
+                        orders_verified_absent=True,
+                    )
+
+            if cleanup_error is not None:
+                raise RuntimeError(f"launcher shutdown order cleanup failed: {cleanup_error}")
+            await self._emit(
+                "fleet_shutdown_cleanup_verified",
+                "*",
+                canceled_orders=canceled,
+                orders_verified_absent=True,
+            )
+            return
+
+        failures: list[str] = []
         for market_id in list(self.bots):
-            await self.stop_bot(market_id, reason=reason, remove_desired=False)
+            try:
+                await self.stop_bot(market_id, reason=reason, remove_desired=False)
+            except Exception as exc:
+                failures.append(f"{market_id}: {exc}")
+
+        # Final account-wide sweep also catches stale orders from a bot that
+        # exited before it entered this manager's current process registry.
+        account_verified = False
+        try:
+            canceled = await self._cancel_and_verify_owned_orders()
+            account_verified = True
+            await self._emit(
+                "fleet_shutdown_cleanup_verified",
+                "*",
+                canceled_orders=canceled,
+                orders_verified_absent=True,
+            )
+        except Exception as exc:
+            failures.append(f"account: {exc}")
+            await self._emit("shutdown_cleanup_failed", "*", reason=reason, error=str(exc))
+
+        if account_verified:
+            # The final account query is authoritative and supersedes any
+            # transient per-market verification failure.
+            failures = [item for item in failures if item.startswith("account:")]
+        if failures:
+            raise RuntimeError("launcher shutdown order cleanup failed: " + "; ".join(failures))
 
     async def apply_update(self, update: ScreenerUpdate) -> None:
         if update.generation_id != self._generation:

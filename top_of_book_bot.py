@@ -345,7 +345,7 @@ class BotSettings:
     # exposed the bot to oversized YES adverse-selection blasts. 50 is the
     # tail-risk bound now that the bucket-pessimism toxicity (below) handles
     # YES-side adverse selection structurally.
-    maximum_contracts_per_order: int = 50
+    maximum_contracts_per_order: int = 5
     budget_fee_buffer_cents: int = 2
     allow_fractional_order_entry_when_supported: bool = False
     refill_resting_size_after_partial_fill: bool = False
@@ -2017,6 +2017,7 @@ class TopOfBookBot:
 
         self.requote_event = asyncio.Event()
         self.requote_lock = asyncio.Lock()
+        self.shutdown_lock = asyncio.Lock()
         self.watchdog_state: Optional[WatchdogState] = None
         self.watchdog_state_mtime_ns: Optional[int] = None
         self.started_at_ms = now_ms()
@@ -2038,6 +2039,9 @@ class TopOfBookBot:
         self.watchdog_shutdown_in_progress = False
         self.shutdown_requested = False
         self.shutdown_exit_code: Optional[int] = None
+        self.shutdown_orders_verified = False
+        self.shutdown_canceled_order_count = 0
+        self.shutdown_cancel_error: Optional[str] = None
         self.background_tasks: List[asyncio.Task] = []
         self.instance_expiration_jitter_seconds = (
             random.randint(0, self.settings.expiration_jitter_seconds)
@@ -2052,7 +2056,12 @@ class TopOfBookBot:
     def is_strategy_client_order_id(self, client_order_id: str) -> bool:
         if not client_order_id:
             return False
-        return client_order_id.startswith(self.settings.legacy_client_order_prefixes)
+        # ``wd:`` orders are immediate-or-cancel, but include them in cleanup so
+        # every order created by this process is covered if venue behavior ever
+        # leaves one resting.
+        return client_order_id.startswith(
+            (*self.settings.legacy_client_order_prefixes, f"{self.settings.primary_client_order_prefix}:", "wd:")
+        )
 
     def load_startup_position(self) -> None:
         positions = self.api_client.get_positions(self.settings.market_ticker)
@@ -2150,32 +2159,72 @@ class TopOfBookBot:
         if not self.settings.cancel_strategy_quotes_on_startup:
             return
 
-        resting_orders = self.api_client.get_resting_orders(self.settings.market_ticker)
+        self.cancel_owned_resting_quotes(reason="startup", verify=False)
+
+    def cancel_owned_resting_quotes(
+        self,
+        *,
+        reason: str,
+        verify: bool = True,
+        max_attempts: int = 5,
+    ) -> int:
+        """Cancel only bot-owned orders and optionally verify venue absence.
+
+        Shutdown uses REST as the source of truth instead of the in-memory order
+        state, which may be stale when a websocket disconnects or the process is
+        stopped during an order update.
+        """
+        if bool(getattr(self.api_client, "dry_run", False)):
+            log_event("ORDER_CLEANUP_SKIPPED_DRY_RUN", reason=reason)
+            return 0
+
         canceled_count = 0
+        attempts = max(1, int(max_attempts)) if verify else 1
+        for attempt in range(attempts):
+            resting_orders = self.api_client.get_resting_orders(self.settings.market_ticker)
+            owned_orders = [
+                order
+                for order in resting_orders
+                if order.order_id and self.is_strategy_client_order_id(order.client_order_id)
+            ]
+            if not owned_orders:
+                log_event("ORDER_CLEANUP_VERIFIED", reason=reason, canceled_orders=canceled_count)
+                return canceled_count
 
-        for order in resting_orders:
-            client_order_id = order.client_order_id
-            if not self.is_strategy_client_order_id(client_order_id):
-                continue
+            for order in owned_orders:
+                try:
+                    self.record_order_activity("cancel", "attempt", order_id=order.order_id)
+                    self.api_client.cancel_order(order_id=order.order_id)
+                    self.record_order_activity("cancel", "success", order_id=order.order_id)
+                    canceled_count += 1
+                    log_event(
+                        "CANCELLED_OWN_ORDER",
+                        reason=reason,
+                        order_id=order.order_id,
+                        client_order_id=order.client_order_id,
+                    )
+                except Exception as exc:
+                    self.record_order_activity("cancel", "error", order_id=order.order_id, error=str(exc))
+                    if not is_order_not_found_error(exc):
+                        raise
 
-            order_id = order.order_id
-            if not order_id:
-                continue
+            if not verify:
+                return canceled_count
+            if attempt + 1 < attempts:
+                time.sleep(min(2.0, 0.25 * (2 ** attempt)))
 
-            try:
-                self.record_order_activity("cancel", "attempt", order_id=order_id)
-                self.api_client.cancel_order(order_id=order_id)
-                self.record_order_activity("cancel", "success", order_id=order_id)
-                canceled_count += 1
-                log_event("STARTUP_CANCELLED_OWN_ORDER", order_id=order_id, client_order_id=client_order_id)
-            except Exception as exc:
-                self.record_order_activity("cancel", "error", order_id=order_id, error=str(exc))
-                if is_order_not_found_error(exc):
-                    continue
-                raise
-
-        if canceled_count:
-            log_event("STARTUP_CANCEL_SUMMARY", canceled_orders=canceled_count)
+        remaining = self.api_client.get_resting_orders(self.settings.market_ticker)
+        remaining_ids = [
+            order.order_id
+            for order in remaining
+            if order.order_id and self.is_strategy_client_order_id(order.client_order_id)
+        ]
+        if remaining_ids:
+            raise RuntimeError(
+                f"shutdown could not verify cancellation of {len(remaining_ids)} bot-owned "
+                f"orders for {self.settings.market_ticker}: {remaining_ids}"
+            )
+        return canceled_count
 
     # -------------------------
     # Orderbook helpers
@@ -4040,6 +4089,9 @@ class TopOfBookBot:
             await self.requote_event.wait()
             self.requote_event.clear()
 
+            if self.shutdown_requested:
+                return
+
             if not self.book_ready:
                 continue
 
@@ -4050,6 +4102,8 @@ class TopOfBookBot:
                 )
 
             async with self.requote_lock:
+                if self.shutdown_requested:
+                    return
                 desired_yes_units, desired_no_units = self.desired_quote_prices()
                 try:
                     await self.ensure_side_quote("yes", desired_yes_units)
@@ -4156,11 +4210,34 @@ class TopOfBookBot:
 
         return state
 
-    async def request_shutdown(self, exit_code: int) -> None:
+    async def _complete_shutdown(self) -> Dict[str, object]:
+        async with self.shutdown_lock:
+            if not self.shutdown_orders_verified:
+                try:
+                    async with self.requote_lock:
+                        canceled = self.cancel_owned_resting_quotes(
+                            reason="shutdown",
+                            verify=True,
+                        )
+                    self.shutdown_canceled_order_count += canceled
+                    self.shutdown_orders_verified = True
+                    self.shutdown_cancel_error = None
+                except Exception as exc:
+                    self.shutdown_cancel_error = str(exc)
+                    log_event("SHUTDOWN_CANCEL_ERROR", error=str(exc))
+                    raise
+            await self.api_client.close()
+        return {
+            "shutdownRequested": True,
+            "ordersCanceled": self.shutdown_canceled_order_count,
+            "ordersVerifiedAbsent": self.shutdown_orders_verified,
+        }
+
+    async def request_shutdown(self, exit_code: int) -> Dict[str, object]:
         self.shutdown_requested = True
         self.shutdown_exit_code = int(exit_code)
         self.requote_event.set()
-        await self.api_client.close()
+        return await self._complete_shutdown()
 
     async def emergency_cancel_all_quotes(self, *, reason: str) -> None:
         await self.cancel_side_quote("yes", reason=reason, reset_quote_cycle=True)
@@ -4436,11 +4513,16 @@ class TopOfBookBot:
         try:
             await self.market_event_main()
         finally:
-            await self.api_client.close()
             for task in self.background_tasks:
                 task.cancel()
             if self.background_tasks:
                 await asyncio.gather(*self.background_tasks, return_exceptions=True)
+            # Covers socket shutdown, SIGINT, stream termination, and exceptions.
+            # Cleanup must precede transport close so REST cancellation remains
+            # available even when the websocket is what caused the exit.
+            self.shutdown_requested = True
+            self.requote_event.set()
+            await self._complete_shutdown()
 
         if self.shutdown_exit_code is not None:
             raise SystemExit(self.shutdown_exit_code)

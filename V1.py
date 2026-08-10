@@ -58,10 +58,8 @@ def main() -> None:
             net_position_contracts=format_count_fp(bot.net_position_units),
             reason="SIGINT",
         )
-        try:
-            bot.cancel_owned_resting_quotes_on_startup()
-        except Exception as exc:
-            log_event("SHUTDOWN_CANCEL_ERROR", error=str(exc))
+        # ``TopOfBookBot.run`` performs cancellation in its universal finally
+        # path.  This handler only preserves the existing shutdown log line.
 
 
 if __name__ == "__main__":

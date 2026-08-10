@@ -6,6 +6,8 @@ import pytest
 from adaptors.kalshi import KalshiApiClient, KalshiClientConfig
 from clients.http_client import HTTPClientError
 from clients.models import (
+    AccountFillQuery,
+    AccountOrderQuery,
     CreateOrderRequest,
     OrderBookDelta,
     OrderBookSnapshot,
@@ -92,7 +94,16 @@ def test_market_position_and_order_payloads_are_normalized():
             }
         },
         {"market_positions": [{"ticker": "MKT", "position_fp": "2.50"}]},
-        {"order": {"order_id": "order-1", "client_order_id": "client-1", "expiration_time": "2026-01-02T03:04:05Z"}},
+        {
+            "order": {
+                "order_id": "order-1",
+                "client_order_id": "client-1",
+                "fill_count": "0.00",
+                "remaining_count": "1.50",
+                "no_price": "25.00",
+                "expiration_time": "2026-01-02T03:04:05Z",
+            }
+        },
     ]
     client = make_client(http=http)
 
@@ -105,6 +116,9 @@ def test_market_position_and_order_payloads_are_normalized():
     assert market.price_ranges[0].step_units == 100
     assert positions[0].position_units == 250
     assert order.order_id == "order-1"
+    assert order.fill_count_units == 0
+    assert order.remaining_count_units == 150
+    assert order.price_units == 2_500
     body = http.calls[2][2]["body"]
     assert body["side"] == "ask"
     assert body["price"] == "0.7500"
@@ -197,3 +211,42 @@ def test_public_only_client_can_discover_markets_without_credentials():
     markets = client.list_markets(MarketQuery(max_results=1))
     assert markets[0].market_id == "PUBLIC"
     assert "KALSHI-ACCESS-KEY" not in http.calls[0][2]["headers"]
+
+
+def test_account_endpoints_paginate_and_normalize_fixed_point_fields():
+    http = FakeHTTP()
+    http.responses = [
+        {"balance_dollars": "12.3400", "portfolio_value": 456, "updated_ts": 10},
+        {"usage_tier": "expert", "read": {"refill_rate": 30, "bucket_capacity": 60}, "write": {"refill_rate": 10, "bucket_capacity": 20}},
+        {"market_positions": [{"ticker": "MKT", "position_fp": "-2.50", "total_traded_dollars": "4.0000", "market_exposure_dollars": "1.5000", "realized_pnl_dollars": "0.2500", "fees_paid_dollars": "0.0100", "resting_orders_count": 2}], "cursor": "p2"},
+        {"market_positions": [], "cursor": ""},
+        {"orders": [{"order_id": "o1", "ticker": "MKT", "outcome_side": "no", "no_price_dollars": "0.6000", "fill_count_fp": "1.00", "remaining_count_fp": "2.50", "initial_count_fp": "3.50", "maker_fill_cost_dollars": "0.6000", "created_time": "2026-08-09T12:00:00Z"}], "cursor": ""},
+        {"fills": [{"fill_id": "f1", "order_id": "o1", "ticker": "MKT", "book_side": "ask", "count_fp": "1.00", "no_price_dollars": "0.6000", "fee_cost": "0.0100", "ts": 20}], "cursor": ""},
+    ]
+    client = make_client(http=http, subaccount_number=3)
+    balance = client.get_account_balance()
+    limits = client.get_account_limits()
+    positions = client.list_account_positions()
+    orders = client.list_account_orders(AccountOrderQuery(status="resting", min_created_at_ms=1_000))
+    fills = client.list_account_fills(AccountFillQuery(min_created_at_ms=2_000))
+
+    assert balance.available_cash_units == 123_400
+    assert balance.portfolio_value_units == 45_600
+    assert limits.usage_tier == "expert"
+    assert positions[0].position_units == -250
+    assert positions[0].market_exposure_units == 15_000
+    assert orders[0].side == "no"
+    assert orders[0].price_units == 6_000
+    assert orders[0].remaining_count_units == 250
+    assert fills[0].side == "no"
+    assert fills[0].fee_units == 100
+    assert all(call[2].get("params", {}).get("subaccount") == 3 for call in http.calls if "/portfolio/" in call[1])
+    assert http.calls[4][2]["params"]["min_ts"] == 1
+    assert http.calls[5][2]["params"]["min_ts"] == 2
+
+
+def test_account_direction_accepts_legacy_action_and_side():
+    order = KalshiApiClient._account_order({
+        "order_id": "legacy", "action": "sell", "side": "yes", "yes_price_dollars": "0.3000"
+    })
+    assert order.side == "no"
