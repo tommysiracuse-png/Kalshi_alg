@@ -4,6 +4,7 @@ from clients.models import (
     MarketQuote,
     Order,
     OrderBookSnapshot,
+    OrderUpdate,
     Position,
     PositionUpdate,
     StreamReset,
@@ -118,3 +119,42 @@ def test_monitoring_snapshot_tracks_process_session_separately_from_starting_inv
     assert monitoring["pnl"]["sessionPositionUnits"] == 0
     assert monitoring["pnl"]["realizedCents"] == 9.9
     assert monitoring["market"]["priceSource"] == "book_mid"
+
+
+def test_projected_position_cap_clamps_risk_increasing_quotes():
+    bot, _ = make_bot()
+    bot.net_position_units = 600  # Long 6 with a hard limit of 10.
+
+    assert bot.projected_position_capacity_units("yes") == 400
+    assert bot.desired_remaining_units("yes", 1_000, 0) == 400
+    # A NO order reduces the long position and may still use the per-order cap.
+    assert bot.desired_remaining_units("no", 1_000, 0) == 500
+
+    bot.net_position_units = 1_000
+    assert bot.desired_remaining_units("yes", 1_000, 0) == 0
+
+
+def test_projected_position_cap_never_rounds_past_limit():
+    bot, _ = make_bot()
+    bot.net_position_units = 950
+
+    # Whole-contract entry cannot add one contract without projecting to 10.5.
+    assert bot.projected_position_capacity_units("yes") == 0
+    assert bot.desired_remaining_units("yes", 1_000, 0) == 0
+
+    # Risk-reducing orders remain available even when already beyond the cap.
+    bot.net_position_units = -1_100
+    assert bot.desired_remaining_units("yes", 1_000, 0) == 500
+    assert bot.desired_remaining_units("no", 1_000, 0) == 0
+
+
+def test_client_order_id_prevents_cross_side_state_corruption():
+    bot, _ = make_bot()
+
+    bot.handle_user_order_update(
+        OrderUpdate("MKT", "yes", "no-order", "mm:no:123", "resting", remaining_count_units=100)
+    )
+
+    assert bot.orders["yes"].order_id is None
+    assert bot.orders["no"].order_id == "no-order"
+    assert bot.known_strategy_order_sides["no-order"] == "no"

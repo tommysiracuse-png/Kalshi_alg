@@ -29,13 +29,18 @@ from portfolio_monitor import PortfolioMonitor, PortfolioMonitorConfig
 
 
 class Launcher:
-    def __init__(self, arguments, *, api_key_id: Optional[str], private_key_path: Optional[str]) -> None:
+    def __init__(self, arguments, *, api_key_id: Optional[str], private_key_path: Optional[str], session_store=None, session_run=None) -> None:
         self.arguments = arguments
+        self.session_store = session_store
+        self.session_run = session_run
+        self.session_configuration = session_run["configuration"] if session_run else None
+        self.run_id = session_run["id"] if session_run else None
+        self.run_artifact_path = Path(session_run["artifactPath"]) if session_run else None
         self.api_key_id = api_key_id
         self.private_key_path = private_key_path
         self.bot_script_path = Path(arguments.bot_script).expanduser().resolve()
         self.screen_path = Path(arguments.screener_output or arguments.screen_file).expanduser().resolve()
-        self.logs_directory = (
+        self.logs_directory = self.run_artifact_path / "logs" if self.run_artifact_path else (
             Path(arguments.logs_dir).expanduser().resolve()
             if arguments.logs_dir
             else self.bot_script_path.parent / "logs"
@@ -45,7 +50,7 @@ class Launcher:
             if arguments.runtime_dir
             else self.bot_script_path.parent / "runtime"
         )
-        self.watchdog_state_dir = (
+        self.watchdog_state_dir = self.run_artifact_path / "watchdog" if self.run_artifact_path else (
             Path(arguments.watchdog_state_dir).expanduser().resolve()
             if arguments.watchdog_state_dir
             else self.bot_script_path.parent / "watchdog_state"
@@ -120,12 +125,14 @@ class Launcher:
                 watchdog_poll_interval_seconds=arguments.watchdog_poll_interval_seconds,
                 watchdog_confidence_reduction_threshold=arguments.watchdog_confidence_reduction_threshold,
                 watchdog_confidence_flatten_threshold=arguments.watchdog_confidence_flatten_threshold,
+                session_configuration=self.session_configuration,
+                bot_artifacts_root=(self.run_artifact_path / "markets") if self.run_artifact_path else None,
             ),
             cleanup_client=self.client if api_key_id and private_key_path else None,
         )
         self.control_requests: "queue.Queue[ControlRequest]" = queue.Queue()
         self.shutdown_requested = asyncio.Event()
-        self.started_at_ms = int(time.time() * 1000)
+        self.started_at_ms = int((session_run or {}).get("startedAt") or time.time() * 1000)
         self.next_refresh_at: Optional[float] = None
         self.last_error: Optional[str] = None
         self.pending_action: Optional[Dict[str, object]] = None
@@ -134,6 +141,30 @@ class Launcher:
         self.status_path = self.runtime_dir / "launcher_status.json"
         self.socket_path = self.runtime_dir / "launcher.sock"
         self._portfolio_task: Optional["asyncio.Task[bool]"] = None
+        self._run_error: Optional[str] = None
+        self._last_metric_sample_ms = 0
+        self._metrics = None
+        if self.session_store is not None:
+            from session_store import RunMetricsAccumulator
+            self._metrics = RunMetricsAccumulator(self.started_at_ms)
+        self._append_run_log("launcher initialized")
+
+    def _append_run_log(self, message: str) -> None:
+        if self.run_artifact_path is None:
+            return
+        self.run_artifact_path.mkdir(parents=True, exist_ok=True)
+        with (self.run_artifact_path / "launcher.log").open("a", encoding="utf-8") as handle:
+            handle.write(f"{int(time.time() * 1000)} {message}\n")
+
+    def _save_screener_snapshot(self) -> None:
+        if self.run_artifact_path is None:
+            return
+        target = self.run_artifact_path / "screener"
+        target.mkdir(parents=True, exist_ok=True)
+        snapshot = self.screener.status_snapshot()
+        generated = int(snapshot.get("generatedAtMs") or time.time() * 1000)
+        atomic_write_json(target / "latest.json", snapshot)
+        atomic_write_json(target / f"{generated}.json", snapshot)
 
     def status_snapshot(self, lifecycle: str = "running") -> Dict[str, object]:
         manager_status = self.manager.status_snapshot()
@@ -150,7 +181,7 @@ class Launcher:
                 "runningForMs": max(0, now_ms - self.started_at_ms),
             }
         )
-        return {
+        result = {
             "schemaVersion": STATUS_SCHEMA_VERSION,
             "generatedAt": now_ms,
             "launcher": {
@@ -171,12 +202,27 @@ class Launcher:
             "portfolio": self.portfolio.status_snapshot(),
             "disabled": disabled,
         }
+        if self.session_run:
+            result["session"] = {
+                "id": self.session_run["sessionId"],
+                "name": self.session_run["sessionName"],
+                "configurationVersion": self.session_run["configurationVersion"],
+            }
+            result["run"] = {"id": self.run_id, "artifactPath": str(self.run_artifact_path)}
+        return result
 
     def publish_status(self, lifecycle: str = "running") -> Dict[str, object]:
         status = self.status_snapshot(lifecycle)
         with self.status_lock:
             self.latest_status = status
         atomic_write_json(self.status_path, status)
+        if self.session_store is not None and self.run_id and self._metrics is not None:
+            metrics = self._metrics.observe(status)
+            current = int(time.time() * 1000)
+            sample = current - self._last_metric_sample_ms >= 15_000
+            self.session_store.record_metrics(self.run_id, metrics, sample=sample)
+            if sample:
+                self._last_metric_sample_ms = current
         return status
 
     def _status_provider(self) -> Dict[str, object]:
@@ -220,20 +266,44 @@ class Launcher:
             removed=(),
         )
         self.screener.accept_snapshot(update)
+        if self.shutdown_requested.is_set():
+            return
         await self.manager.apply_update(update)
+        self._save_screener_snapshot()
+
+    async def _seed_fixed_ticker(self, ticker: str) -> None:
+        pick = ScreenerPick(
+            market_id=ticker,
+            title=ticker,
+            yes_budget_cents=int(self.arguments.yes_budget_cents),
+            no_budget_cents=int(self.arguments.no_budget_cents),
+            ranking={"Ticker": ticker, "SearchText": ticker},
+            selection_reason="fixed_session_ticker",
+        )
+        update = ScreenerUpdate(
+            generation_id=0,
+            generated_at_ms=int(time.time() * 1000),
+            reason="fixed_session_ticker",
+            picks=(pick,), added=(ticker,), kept=(), changed=(), removed=(),
+        )
+        self.screener.accept_snapshot(update)
+        await self.manager.apply_update(update)
+        self._save_screener_snapshot()
 
     async def refresh(self, reason: str) -> bool:
         refresh_task = asyncio.create_task(
             self.screener.refresh(self.manager.current_picks, reason=reason)
         )
         while not refresh_task.done():
-            self.publish_status("running")
+            self.publish_status("stopping" if self.shutdown_requested.is_set() else "running")
             try:
                 await asyncio.wait_for(asyncio.shield(refresh_task), timeout=0.5)
             except asyncio.TimeoutError:
                 pass
         update = await refresh_task
         event = await self.screener.events.get()
+        if self.shutdown_requested.is_set():
+            return False
         if update is None:
             self.last_error = event.error or "screener refresh failed"
             self.next_refresh_at = (
@@ -243,6 +313,7 @@ class Launcher:
             )
             return False
         await self.manager.apply_update(update)
+        self._save_screener_snapshot()
         self.last_error = None
         self.next_refresh_at = (
             time.time() + self.arguments.refresh_interval_seconds
@@ -310,13 +381,21 @@ class Launcher:
         installed_signals = []
         for sig in (signal.SIGINT, signal.SIGTERM):
             try:
-                loop.add_signal_handler(sig, self.shutdown_requested.set)
+                def request_shutdown() -> None:
+                    self.manager.begin_shutdown()
+                    self.shutdown_requested.set()
+
+                loop.add_signal_handler(sig, request_shutdown)
                 installed_signals.append(sig)
             except NotImplementedError:
                 pass
         try:
             self._portfolio_task = asyncio.create_task(self.portfolio.refresh())
-            if self.arguments.run_screener_on_start:
+            fixed_ticker = str(getattr(self.arguments, "fixed_ticker", "") or "").strip()
+            if fixed_ticker:
+                await self._seed_fixed_ticker(fixed_ticker)
+                self.next_refresh_at = None
+            elif self.arguments.run_screener_on_start:
                 await self.refresh("startup")
             else:
                 await self._seed_from_csv()
@@ -325,11 +404,16 @@ class Launcher:
                     if self.arguments.refresh_interval_seconds > 0
                     else None
                 )
+            if self.shutdown_requested.is_set():
+                return 0
             if self.arguments.dry_run:
                 await self._portfolio_task
                 self.publish_status("running")
                 return 0
             self.publish_status("running")
+            self._append_run_log("launcher running")
+            if self.session_store is not None and self.run_id:
+                self.session_store.mark_running(self.run_id)
             while not self.shutdown_requested.is_set():
                 while True:
                     try:
@@ -358,6 +442,10 @@ class Launcher:
                     )
                 except asyncio.TimeoutError:
                     pass
+        except Exception as exc:
+            self._run_error = str(exc)
+            self._append_run_log(f"launcher failed: {exc}")
+            raise
         finally:
             self.publish_status("stopping")
             while True:
@@ -383,10 +471,20 @@ class Launcher:
                         await self._portfolio_task
                     except Exception:
                         pass
+                    self._portfolio_task = None
+                if shutdown_error is None:
+                    # Replace the pre-stop portfolio cache so the final status
+                    # cannot keep showing orders that cleanup just removed.
+                    await self.portfolio.refresh()
                 await self.client.close()
                 await self.portfolio_client.close()
                 control_server.stop()
                 self.publish_status("shutdown_failed" if shutdown_error else "stopped")
+                if self.session_store is not None and self.run_id:
+                    final_metrics = self._metrics.observe(self.latest_status) if self._metrics is not None else None
+                    final_status = "shutdown_failed" if shutdown_error else "failed" if self._run_error else "stopped"
+                    self.session_store.finish_run(self.run_id, final_status, metrics=final_metrics, error=str(shutdown_error or self._run_error or "") or None)
+                    self._append_run_log(f"launcher finalized status={final_status}")
                 for sig in installed_signals:
                     loop.remove_signal_handler(sig)
             if shutdown_error is not None:

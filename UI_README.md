@@ -50,6 +50,9 @@ The operations UI is a loopback-only Next.js application backed by a loopback-on
 - `runtime/launcher_status.json` is the current atomic fleet snapshot.
 - `runtime/launcher.sock` accepts local launcher controls and is mode `0600`.
 - `runtime/ui_audit.sqlite3` stores control outcomes. Back it up while the API is stopped or with SQLite's online backup command.
+- `session_data/sessions.sqlite3` stores saved session metadata, immutable run records, and metric summaries. Run logs, configuration snapshots, and telemetry are under `session_data/artifacts/`.
+- Session configuration edits apply to the next run. The active run always retains the configuration version captured at startup.
+- Archived sessions keep their run history. No automatic retention or migration of legacy `logs/` and `telemetry/` data is performed.
 - Existing bot and watchdog logs remain under `logs/`. Use `logrotate` with `copytruncate`, daily rotation, 14 retained files, and compression if the host does not already manage them.
 - A stop or disable action cancels bot-owned resting quotes but deliberately retains inventory.
 

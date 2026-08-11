@@ -356,6 +356,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--clear-disabled-ticker", default="", help="Remove one ticker from the watchdog disable list and exit.")
     parser.add_argument("--clear-all-disabled-tickers", action="store_true", help="Clear the full watchdog disable list and exit.")
     parser.add_argument("--runtime-dir", default="", help="Directory for launcher status and the local control socket.")
+    parser.add_argument("--session-store", default="", help="Directory containing the saved-session SQLite store.")
+    parser.add_argument("--run-id", default="", help="Optional pending run prepared by the operations API.")
     return parser.parse_args()
 
 
@@ -646,6 +648,7 @@ def build_child_command(
     watchdog_state_refresh_seconds: float,
     watchdog_extreme_stale_seconds: float,
     control_socket: Optional[Path] = None,
+    settings_file: Optional[Path] = None,
 ) -> List[str]:
     command: List[str] = [
         python_executable,
@@ -657,6 +660,8 @@ def build_child_command(
         "--no-budget-cents",
         str(pick.no_budget_cents),
     ]
+    if settings_file is not None:
+        command.extend(["--settings-file", str(settings_file)])
 
     if use_demo:
         command.append("--use-demo")
@@ -756,12 +761,31 @@ def spawn_single_bot(
     watchdog_confidence_reduction_threshold: float,
     watchdog_confidence_flatten_threshold: float,
     control_socket: Optional[Path] = None,
+    session_configuration: Optional[Dict[str, object]] = None,
+    bot_artifacts_root: Optional[Path] = None,
 ) -> Optional[ChildProcess]:
     if dry_run:
         return None
 
     logs_directory.mkdir(parents=True, exist_ok=True)
     bot_working_directory = bot_script_path.parent.resolve()
+
+    settings_file: Optional[Path] = None
+    if session_configuration is not None and bot_artifacts_root is not None:
+        from session_config import bot_settings_payload
+        market_artifacts = bot_artifacts_root / safe_ticker_filename(pick.ticker)
+        market_artifacts.mkdir(parents=True, exist_ok=True)
+        settings_file = market_artifacts / "settings.json"
+        settings_payload = bot_settings_payload(
+            session_configuration,
+            market_ticker=pick.ticker,
+            yes_budget_cents=pick.yes_budget_cents,
+            no_budget_cents=pick.no_budget_cents,
+            watchdog_state_file=watchdog_state_file,
+            telemetry_sqlite_path=market_artifacts / "telemetry.sqlite3",
+            pnl_tracker_path=bot_artifacts_root.parent / "pnl_tracker.jsonl",
+        )
+        settings_file.write_text(json.dumps(settings_payload, indent=2) + "\n", encoding="utf-8")
 
     child_command = build_child_command(
         python_executable=sys.executable,
@@ -777,6 +801,7 @@ def spawn_single_bot(
         watchdog_state_refresh_seconds=watchdog_state_refresh_seconds,
         watchdog_extreme_stale_seconds=watchdog_extreme_stale_seconds,
         control_socket=control_socket,
+        settings_file=settings_file,
     )
 
     child_environment = dict(os.environ)
@@ -878,6 +903,8 @@ def spawn_bots(
     watchdog_confidence_reduction_threshold: float,
     watchdog_confidence_flatten_threshold: float,
     control_socket_directory: Optional[Path] = None,
+    session_configuration: Optional[Dict[str, object]] = None,
+    bot_artifacts_root: Optional[Path] = None,
 ) -> List[ChildProcess]:
     print_launch_plan(picks)
 
@@ -957,6 +984,8 @@ def spawn_bots(
                 if control_socket_directory is not None
                 else None
             ),
+            session_configuration=session_configuration,
+            bot_artifacts_root=bot_artifacts_root,
         )
         if child is not None:
             child_processes.append(child)
@@ -1526,6 +1555,15 @@ def monitor_and_refresh(
 def main() -> int:
     arguments = parse_args()
 
+    session_store = None
+    session_run = None
+    if arguments.session_store:
+        from session_config import apply_configuration_to_arguments
+        from session_store import SessionStore
+        session_store = SessionStore(Path(arguments.session_store))
+        session_run = session_store.claim_run(arguments.run_id or None)
+        apply_configuration_to_arguments(arguments, session_run["configuration"])
+
     screen_file_path = Path(arguments.screen_file).expanduser().resolve()
     bot_script_path = Path(arguments.bot_script).expanduser().resolve()
     logs_directory = (
@@ -1632,6 +1670,8 @@ def main() -> int:
             arguments,
             api_key_id=api_key_id,
             private_key_path=private_key_path,
+            session_store=session_store,
+            session_run=session_run,
         ).run()
     )
 

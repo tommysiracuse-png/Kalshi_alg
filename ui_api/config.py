@@ -12,6 +12,7 @@ class Settings:
     logs_dir: Path
     watchdog_dir: Path
     service_name: str
+    session_dir: Path | None = None
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -22,4 +23,5 @@ class Settings:
             logs_dir=Path(os.getenv("KALSHI_LOGS_DIR", workspace / "logs")).resolve(),
             watchdog_dir=Path(os.getenv("KALSHI_WATCHDOG_DIR", workspace / "watchdog_state")).resolve(),
             service_name=os.getenv("KALSHI_BOT_SERVICE", "kalshi-bot.service"),
+            session_dir=Path(os.getenv("KALSHI_SESSION_STORE", workspace / "session_data")).resolve(),
         )

@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from ui_api.config import Settings
 from ui_api.store import OperationsStore, now_ms
+from session_store import SessionConflictError
 
 
 settings = Settings.from_environment()
@@ -31,9 +32,9 @@ async def authorize(x_internal_token: Annotated[Optional[str], Header()] = None)
 @app.exception_handler(Exception)
 async def unhandled_exception(request: Request, exc: Exception) -> JSONResponse:
     request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
-    status = 404 if isinstance(exc, KeyError) else 400 if isinstance(exc, ValueError) else 500
+    status = 404 if isinstance(exc, KeyError) else 409 if isinstance(exc, SessionConflictError) else 400 if isinstance(exc, ValueError) else 500
     return JSONResponse(status_code=status, content={
-        "code": "not_found" if status == 404 else "invalid_request" if status == 400 else "internal_error",
+        "code": "not_found" if status == 404 else "conflict" if status == 409 else "invalid_request" if status == 400 else "internal_error",
         "message": str(exc), "requestId": request_id, "details": None,
     })
 
@@ -100,6 +101,88 @@ async def audit(limit: int = Query(100, ge=1, le=500), _: str = Depends(authoriz
 async def system(_: str = Depends(authorize)) -> dict:
     status = store.status()
     return {"generatedAt": now_ms(), "workspace": str(settings.workspace), "service": settings.service_name, "sources": {"launcher": status["source"]}}
+
+
+async def _json_body(request: Request) -> dict:
+    try:
+        body = await request.json()
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=422, detail="request body must be valid JSON") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="request body must be an object")
+    return body
+
+
+def _audit_session(action: str, target: str, operator: str, request_id: Optional[str]) -> str:
+    resolved = _request_id(request_id)
+    store.record_session_audit(resolved, action, target, operator)
+    return resolved
+
+
+@app.get("/api/v1/sessions")
+async def sessions(include_archived: bool = False, _: str = Depends(authorize)) -> dict:
+    return {"generatedAt": now_ms(), "items": store.sessions.list_sessions(include_archived=include_archived), "activeRun": store.sessions.active_run()}
+
+
+@app.post("/api/v1/sessions", status_code=201)
+async def create_session(request: Request, operator: str = Depends(authorize), x_request_id: Annotated[Optional[str], Header()] = None) -> dict:
+    try:
+        item = store.sessions.create_session(await _json_body(request))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    request_id = _audit_session("session_create", item["id"], operator, x_request_id)
+    return {"generatedAt": now_ms(), "requestId": request_id, "item": item}
+
+
+@app.get("/api/v1/sessions/{session_id}")
+async def session_detail(session_id: str, _: str = Depends(authorize)) -> dict:
+    return {"generatedAt": now_ms(), "item": store.sessions.get_session(session_id)}
+
+
+@app.put("/api/v1/sessions/{session_id}")
+async def update_session(session_id: str, request: Request, operator: str = Depends(authorize), x_request_id: Annotated[Optional[str], Header()] = None) -> dict:
+    try:
+        item = store.sessions.update_session(session_id, await _json_body(request))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    request_id = _audit_session("session_update", session_id, operator, x_request_id)
+    return {"generatedAt": now_ms(), "requestId": request_id, "item": item}
+
+
+@app.delete("/api/v1/sessions/{session_id}")
+async def archive_session(session_id: str, operator: str = Depends(authorize), x_request_id: Annotated[Optional[str], Header()] = None) -> dict:
+    item = store.sessions.archive_session(session_id)
+    request_id = _audit_session("session_archive", session_id, operator, x_request_id)
+    return {"generatedAt": now_ms(), "requestId": request_id, "item": item}
+
+
+@app.post("/api/v1/sessions/{session_id}/select")
+async def select_session(session_id: str, operator: str = Depends(authorize), x_request_id: Annotated[Optional[str], Header()] = None) -> dict:
+    item = store.sessions.select_session(session_id)
+    request_id = _audit_session("session_select", session_id, operator, x_request_id)
+    return {"generatedAt": now_ms(), "requestId": request_id, "item": item}
+
+
+@app.post("/api/v1/sessions/{session_id}/restore")
+async def restore_session(session_id: str, operator: str = Depends(authorize), x_request_id: Annotated[Optional[str], Header()] = None) -> dict:
+    item = store.sessions.restore_session(session_id)
+    request_id = _audit_session("session_restore", session_id, operator, x_request_id)
+    return {"generatedAt": now_ms(), "requestId": request_id, "item": item}
+
+
+@app.get("/api/v1/runs")
+async def runs(session_id: str = "", status: str = "", from_ms: Optional[int] = None, to_ms: Optional[int] = None, _: str = Depends(authorize)) -> dict:
+    return {"generatedAt": now_ms(), "items": store.sessions.list_runs(session_id=session_id, status=status, from_ms=from_ms, to_ms=to_ms)}
+
+
+@app.get("/api/v1/runs/{run_id}")
+async def run_detail(run_id: str, _: str = Depends(authorize)) -> dict:
+    return {"generatedAt": now_ms(), "item": store.sessions.get_run(run_id)}
+
+
+@app.get("/api/v1/metrics")
+async def historical_metrics(session_id: str = "", status: str = "", from_ms: Optional[int] = None, to_ms: Optional[int] = None, _: str = Depends(authorize)) -> dict:
+    return store.sessions.metrics(session_id=session_id, status=status, from_ms=from_ms, to_ms=to_ms)
 
 
 async def event_stream() -> AsyncIterator[str]:

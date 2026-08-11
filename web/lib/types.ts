@@ -1,4 +1,20 @@
 export type SourceState = { available: boolean; updatedAt: number | null; stale: boolean; error?: string };
+export type SessionConfiguration = {
+  schemaVersion: number;
+  execution: Record<string, boolean | number | string>;
+  launcher: Record<string, boolean | number | string>;
+  watchdog: Record<string, boolean | number | string>;
+  bot: Record<string, boolean | number | string | Array<number | string>>;
+};
+export type SavedSession = {
+  id: string; name: string; description: string; configuration: SessionConfiguration; version: number;
+  createdAt: number; updatedAt: number; archivedAt?: number | null; selected: boolean; runCount: number;
+};
+export type HistoricalRun = {
+  id: string; sessionId: string; sessionName: string; configurationVersion: number; configuration: SessionConfiguration;
+  status: string; createdAt: number; startedAt?: number | null; endedAt?: number | null; heartbeatAt?: number | null;
+  artifactPath: string; artifactBytes?: number; error?: string | null; metrics: Record<string, unknown>;
+};
 export type PnlTotals = { fills: number; feesCents: number; realizedCents: number; unrealizedCents: number; totalCents: number };
 export type BotState = { ticker: string; title: string; botRunning: boolean; watchdogRunning: boolean; watchdogMode: string; watchdogConfidence?: number; watchdogReason?: string; yesBudgetCents: number; noBudgetCents: number };
 export type Overview = {

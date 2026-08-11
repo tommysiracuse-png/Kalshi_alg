@@ -926,7 +926,7 @@ class KalshiApiClient(BaseClient):
                 return None
             return OrderBookDelta(event_market, sequence, side, price, count, _timestamp_ms(payload.get("ts")))
         if event_type == "user_order":
-            side = str(payload.get("side") or "")
+            side = _outcome_side(payload)
             if side not in {"yes", "no"} and "is_yes" in payload:
                 side = "yes" if bool(payload.get("is_yes")) else "no"
             if side not in {"yes", "no"}:

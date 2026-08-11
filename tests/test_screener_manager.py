@@ -309,5 +309,21 @@ def test_fleet_shutdown_freezes_every_bot_before_account_cleanup(tmp_path):
         }
         assert frozen_pids == {1, 2}
         assert not manager.bots
+        cleanup = manager.status_snapshot()["monitoring"]["shutdownCleanup"]
+        assert cleanup["state"] == "verified"
+        assert cleanup["ordersVerifiedAbsent"] is True
+        assert cleanup["canceledOrders"] == 2
+
+    asyncio.run(scenario())
+
+
+def test_manager_rejects_new_bots_after_shutdown_begins(tmp_path):
+    async def scenario():
+        manager = BotManager(manager_config(tmp_path))
+        manager.begin_shutdown()
+        manager._spawn_sync = lambda *args: (_ for _ in ()).throw(AssertionError("spawned"))
+        assert await manager.start_bot(pick("LATE")) is None
+        event = await manager.events.get()
+        assert event.event_type == "start_skipped_shutdown"
 
     asyncio.run(scenario())

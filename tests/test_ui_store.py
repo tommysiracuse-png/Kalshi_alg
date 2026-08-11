@@ -1,6 +1,7 @@
 import csv
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -50,6 +51,40 @@ class OperationsStoreTests(unittest.TestCase):
         with patch("ui_api.store.subprocess.run", side_effect=results):
             with self.assertRaisesRegex(RuntimeError, "exited during startup"):
                 self.store.systemd("start")
+
+    def test_stop_requires_current_verified_order_cleanup(self):
+        results = [
+            SimpleNamespace(returncode=0, stdout="active\n", stderr=""),
+            SimpleNamespace(returncode=0, stdout="", stderr=""),
+            SimpleNamespace(returncode=3, stdout="inactive\n", stderr=""),
+        ]
+        with patch("ui_api.store.subprocess.run", side_effect=results):
+            with self.assertRaisesRegex(RuntimeError, "order cancellation was not verified"):
+                self.store.systemd("stop")
+
+    def test_stop_returns_verified_cleanup_result(self):
+        completed_at = int(time.time() * 1000)
+        (self.root / "runtime" / "launcher_status.json").write_text(json.dumps({
+            "launcher": {"lifecycle": "stopped", "heartbeatAt": completed_at},
+            "manager": {"shutdownCleanup": {
+                "state": "verified",
+                "completedAtMs": completed_at,
+                "canceledOrders": 4,
+                "ordersVerifiedAbsent": True,
+                "error": None,
+            }},
+            "bots": [],
+            "counts": {},
+        }))
+        results = [
+            SimpleNamespace(returncode=0, stdout="active\n", stderr=""),
+            SimpleNamespace(returncode=0, stdout="", stderr=""),
+            SimpleNamespace(returncode=3, stdout="inactive\n", stderr=""),
+        ]
+        with patch("ui_api.store.subprocess.run", side_effect=results):
+            result = self.store.systemd("stop")
+        self.assertTrue(result["shutdownCleanup"]["ordersVerifiedAbsent"])
+        self.assertEqual(result["shutdownCleanup"]["canceledOrders"], 4)
 
 
 if __name__ == "__main__":

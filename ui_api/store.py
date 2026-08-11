@@ -13,6 +13,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from pnl_core import load_fills, summarize_pnl
 from runtime_control import read_json, send_control_command
 from ui_api.config import Settings
+from session_store import SessionConflictError, SessionStore
 
 
 def now_ms() -> int:
@@ -61,6 +62,7 @@ class OperationsStore:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.audit = AuditStore(settings.runtime_dir / "ui_audit.sqlite3")
+        self.sessions = SessionStore(settings.session_dir or settings.workspace / "session_data")
         self._position_cache: Dict[str, tuple[int, Dict[str, Any]]] = {}
 
     def position(self, ticker: str) -> Dict[str, Any]:
@@ -161,7 +163,9 @@ class OperationsStore:
     def watchdog(self, ticker: str, *, validate: bool = True) -> tuple[Dict[str, Any], Dict[str, Any]]:
         if validate:
             self.require_ticker(ticker)
-        path = self.settings.watchdog_dir / f"{ticker}.json"
+        active = self.sessions.active_run()
+        active_path = Path(active["artifactPath"]) / "watchdog" / f"{ticker}.json" if active else None
+        path = active_path if active_path is not None and active_path.exists() else self.settings.watchdog_dir / f"{ticker}.json"
         return read_json(path), freshness(path, stale_after_ms=120_000)
 
     def pnl(self, window: str = "all") -> Dict[str, Any]:
@@ -169,11 +173,25 @@ class OperationsStore:
         if window not in windows:
             raise ValueError("window must be one of 1h, 24h, 7d, all")
         duration = windows[window]
+        active = self.sessions.active_run()
+        active_path = Path(active["artifactPath"]) / "pnl_tracker.jsonl" if active else None
+        pnl_path = active_path if active_path is not None and active_path.exists() else self.settings.logs_dir / "pnl_tracker.jsonl"
         fills, warnings = load_fills(
-            self.settings.logs_dir / "pnl_tracker.jsonl",
+            pnl_path,
             since_ms=(now_ms() - duration) if duration else None,
         )
-        return {**summarize_pnl(fills), "window": window, "warnings": warnings, "source": freshness(self.settings.logs_dir / "pnl_tracker.jsonl", stale_after_ms=300_000)}
+        return {**summarize_pnl(fills), "window": window, "warnings": warnings, "source": freshness(pnl_path, stale_after_ms=300_000)}
+
+    def telemetry_path(self, ticker: str) -> Path:
+        active = self.sessions.active_run()
+        candidates = []
+        if active:
+            candidates.append(Path(active["artifactPath"]) / "markets" / ticker.replace("/", "_").replace("\\", "_") / "telemetry.sqlite3")
+        candidates.extend([
+            self.settings.workspace / "telemetry" / f"telemetry_{ticker}.sqlite3",
+            self.settings.workspace / f"telemetry_{ticker}.sqlite3",
+        ])
+        return next((path for path in candidates if path.exists()), candidates[-1])
 
     def markets(self, *, search: str = "", watchdog_mode: str = "", disabled: Optional[bool] = None, sort: str = "rank") -> List[Dict[str, Any]]:
         rows, source, warnings = self.screener()
@@ -214,7 +232,7 @@ class OperationsStore:
         allowed = {"fills", "quotes", "markouts", "market_state"}
         if table not in allowed:
             raise ValueError("unsupported telemetry table")
-        path = self.settings.workspace / f"telemetry_{ticker}.sqlite3"
+        path = self.telemetry_path(ticker)
         if not path.exists():
             return []
         uri = f"file:{path}?mode=ro"
@@ -234,7 +252,7 @@ class OperationsStore:
             "market": market or {"ticker": ticker, "title": ticker}, "watchdog": watchdog,
             "position": self.position(ticker),
             "telemetry": {table: self.telemetry(ticker, table) for table in ("fills", "quotes", "markouts", "market_state")},
-            "source": {"watchdog": watchdog_source, "telemetry": freshness(self.settings.workspace / f"telemetry_{ticker}.sqlite3", stale_after_ms=300_000)},
+            "source": {"watchdog": watchdog_source, "telemetry": freshness(self.telemetry_path(ticker), stale_after_ms=300_000)},
         }
 
     def overview(self) -> Dict[str, Any]:
@@ -317,16 +335,34 @@ class OperationsStore:
         if source not in {"bot", "watchdog"}:
             raise ValueError("source must be bot or watchdog")
         suffix = ".watchdog.log" if source == "watchdog" else ".log"
-        path = (self.settings.logs_dir / f"{ticker}{suffix}").resolve()
-        if path.parent != self.settings.logs_dir:
+        active = self.sessions.active_run()
+        active_path = (Path(active["artifactPath"]) / "logs" / f"{ticker}{suffix}").resolve() if active else None
+        path = active_path if active_path is not None and active_path.exists() else (self.settings.logs_dir / f"{ticker}{suffix}").resolve()
+        allowed_parent = (Path(active["artifactPath"]) / "logs").resolve() if active_path is not None and active_path.exists() else self.settings.logs_dir
+        if path.parent != allowed_parent:
             raise ValueError("invalid log path")
         return path
 
     def systemd(self, action: str) -> Dict[str, Any]:
         if action not in {"start", "stop", "is-active"}:
             raise ValueError("unsupported service action")
+        requested_at_ms = now_ms()
+        was_active = False
+        if action == "stop":
+            before = subprocess.run(
+                ["systemctl", "--user", "is-active", self.settings.service_name],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            was_active = (before.stdout or "").strip() == "active"
         completed = subprocess.run(
-            ["systemctl", "--user", action, self.settings.service_name], capture_output=True, text=True, timeout=30, check=False,
+            ["systemctl", "--user", action, self.settings.service_name],
+            capture_output=True,
+            text=True,
+            timeout=135 if action == "stop" else 30,
+            check=False,
         )
         output = (completed.stdout or completed.stderr or "").strip()
         if action != "is-active" and completed.returncode != 0:
@@ -354,14 +390,39 @@ class OperationsStore:
         expected = action != "stop"
         if action in {"start", "stop"} and active != expected:
             raise RuntimeError(f"service acknowledgement mismatch: active={active}")
-        return {"service": self.settings.service_name, "action": action, "active": active, "output": output}
+        result = {"service": self.settings.service_name, "action": action, "active": active, "output": output}
+        if action == "stop" and was_active:
+            status = self.status().get("data") or {}
+            manager = status.get("manager") if isinstance(status.get("manager"), dict) else {}
+            cleanup = manager.get("shutdownCleanup") if isinstance(manager.get("shutdownCleanup"), dict) else {}
+            completed_at = cleanup.get("completedAtMs")
+            verified = cleanup.get("ordersVerifiedAbsent") is True
+            current_attempt = isinstance(completed_at, (int, float)) and int(completed_at) >= requested_at_ms - 1_000
+            if not verified or not current_attempt:
+                detail = cleanup.get("error") or "the launcher did not publish a verified order-cleanup result"
+                raise RuntimeError(f"service stopped, but bot order cancellation was not verified: {detail}")
+            result["shutdownCleanup"] = cleanup
+        return result
 
     def control(self, action: str, *, ticker: Optional[str], operator: str, request_id: Optional[str]) -> Dict[str, Any]:
         request_id = request_id or str(uuid.uuid4())
         target = ticker or "fleet"
         try:
             if action in {"start", "stop"}:
-                result = self.systemd(action)
+                prepared_run = None
+                if action == "start":
+                    current = self.systemd("is-active")
+                    if current["active"]:
+                        raise SessionConflictError("the trading fleet is already running")
+                    prepared_run = self.sessions.prepare_run()
+                try:
+                    result = self.systemd(action)
+                except Exception as exc:
+                    if prepared_run is not None:
+                        self.sessions.fail_pending_run(prepared_run["id"], str(exc))
+                    raise
+                if prepared_run is not None:
+                    result["run"] = self.sessions.get_run(prepared_run["id"])
             else:
                 socket_action = {"refresh": "refresh", "disable": "disable_ticker", "enable": "enable_ticker"}[action]
                 if ticker:
@@ -386,6 +447,9 @@ class OperationsStore:
         except Exception as exc:
             self.audit.record(request_id, action, target, operator, "failed", str(exc))
             raise
+
+    def record_session_audit(self, request_id: str, action: str, target: str, operator: str) -> None:
+        self.audit.record(request_id, action, target, operator, "success", None)
 
 
 def _float_or_none(value: object) -> Optional[float]:

@@ -35,6 +35,7 @@ watchdog_disable_list.json.lock
 
 # Operations UI runtime and build artifacts
 runtime/
+session_data/
 web/node_modules/
 web/.next/
 web/coverage/

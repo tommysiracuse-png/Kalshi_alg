@@ -88,3 +88,20 @@ async def test_portfolio_contract_is_authenticated_and_uses_launcher_snapshot():
         assert unauthorized.status_code == 401
         assert response.status_code == 200
         assert response.json()["summary"]["availableCashUnits"] == 125000
+
+
+@pytest.mark.anyio
+async def test_session_crud_and_metrics_are_authenticated():
+    with tempfile.TemporaryDirectory() as temporary:
+        app_module.store = fixture_store(Path(temporary))
+        headers = {"x-internal-token": "test-token"}
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app_module.app), base_url="http://test") as client:
+            assert (await client.get("/api/v1/sessions")).status_code == 401
+            listing = await client.get("/api/v1/sessions", headers=headers)
+            default = listing.json()["items"][0]
+            created = await client.post("/api/v1/sessions", headers=headers, json={"name": "Test config", "configuration": default["configuration"]})
+            metrics = await client.get("/api/v1/metrics", headers=headers)
+        assert created.status_code == 201
+        assert created.json()["item"]["name"] == "Test config"
+        assert metrics.status_code == 200
+        assert metrics.json()["summary"]["timesRun"] == 0

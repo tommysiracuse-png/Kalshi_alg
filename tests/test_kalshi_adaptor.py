@@ -11,6 +11,7 @@ from clients.models import (
     CreateOrderRequest,
     OrderBookDelta,
     OrderBookSnapshot,
+    OrderUpdate,
     RateLimitError,
     StreamReset,
     MarketQuery,
@@ -149,6 +150,28 @@ def test_all_market_stream_messages_are_normalized():
         assert event is not None
         if expected_type is not object:
             assert isinstance(event, expected_type)
+
+
+def test_user_order_side_normalizes_legacy_sell_yes_to_no_outcome():
+    client = make_client()
+
+    event = client._event(
+        {
+            "type": "user_order",
+            "msg": {
+                "ticker": "MKT",
+                "side": "yes",
+                "action": "sell",
+                "order_id": "no-order",
+                "client_order_id": "mm:no:123",
+                "status": "resting",
+            },
+        },
+        "MKT",
+    )
+
+    assert isinstance(event, OrderUpdate)
+    assert event.side == "no"
 
 
 def test_sequence_gap_reconnects_and_resubscribes():

@@ -69,6 +69,8 @@ class BotManagerConfig:
     restart_window_seconds: float = 600.0
     shutdown_cleanup_attempts: int = 8
     shutdown_cleanup_delay_seconds: float = 0.5
+    session_configuration: Optional[Dict[str, object]] = None
+    bot_artifacts_root: Optional[Path] = None
 
 
 @dataclass
@@ -92,10 +94,23 @@ class BotManager:
         self._desired: Dict[str, ScreenerPick] = {}
         self._restart_history: Dict[str, Deque[float]] = {}
         self._generation = 0
+        self._shutdown_started = False
+        self._shutdown_cleanup: Dict[str, object] = {
+            "state": "idle",
+            "startedAtMs": None,
+            "completedAtMs": None,
+            "canceledOrders": 0,
+            "ordersVerifiedAbsent": False,
+            "error": None,
+        }
 
     @property
     def current_picks(self) -> Dict[str, ScreenerPick]:
         return dict(self._desired)
+
+    def begin_shutdown(self) -> None:
+        """Synchronously close the process-start gate as soon as a stop is requested."""
+        self._shutdown_started = True
 
     async def _emit(self, event_type: str, market_id: str, **detail: object) -> None:
         await self.events.put(
@@ -126,6 +141,8 @@ class BotManager:
             watchdog_confidence_reduction_threshold=self.config.watchdog_confidence_reduction_threshold,
             watchdog_confidence_flatten_threshold=self.config.watchdog_confidence_flatten_threshold,
             control_socket_directory=self.config.runtime_dir / "bots",
+            session_configuration=self.config.session_configuration,
+            bot_artifacts_root=self.config.bot_artifacts_root,
         )
         if not children:
             return None
@@ -134,12 +151,22 @@ class BotManager:
         return child
 
     async def start_bot(self, pick: ScreenerPick, *, restart: bool = False) -> Optional[ManagedBot]:
+        if self._shutdown_started:
+            await self._emit("start_skipped_shutdown", pick.market_id)
+            return None
         if pick.market_id in load_disable_list(self.config.watchdog_disable_file):
             await self._emit("start_skipped_disabled", pick.market_id)
             return None
         child = await asyncio.to_thread(self._spawn_sync, pick, len(self.bots))
         if child is None:
             await self._emit("dry_run", pick.market_id)
+            return None
+        if self._shutdown_started:
+            self._signal_process(child.process, "terminate")
+            if child.watchdog_process is not None:
+                self._signal_process(child.watchdog_process, "terminate")
+            close_child_log(child)
+            await self._emit("start_aborted_shutdown", pick.market_id)
             return None
         managed = ManagedBot(
             pick=pick,
@@ -270,6 +297,16 @@ class BotManager:
         await self._emit("stopped", market_id, reason=reason, canceled_orders=canceled, orders_verified_absent=True)
 
     async def stop_all(self, *, reason: str = "launcher_shutdown") -> None:
+        self.begin_shutdown()
+        started_at_ms = int(time.time() * 1000)
+        self._shutdown_cleanup = {
+            "state": "running",
+            "startedAtMs": started_at_ms,
+            "completedAtMs": None,
+            "canceledOrders": 0,
+            "ordersVerifiedAbsent": False,
+            "error": None,
+        }
         self._desired.clear()
 
         # Fleet shutdown is intentionally different from incremental removal.
@@ -352,7 +389,19 @@ class BotManager:
                     )
 
             if cleanup_error is not None:
+                self._shutdown_cleanup.update(
+                    state="failed",
+                    completedAtMs=int(time.time() * 1000),
+                    canceledOrders=canceled,
+                    error=str(cleanup_error),
+                )
                 raise RuntimeError(f"launcher shutdown order cleanup failed: {cleanup_error}")
+            self._shutdown_cleanup.update(
+                state="verified",
+                completedAtMs=int(time.time() * 1000),
+                canceledOrders=canceled,
+                ordersVerifiedAbsent=True,
+            )
             await self._emit(
                 "fleet_shutdown_cleanup_verified",
                 "*",
@@ -389,9 +438,25 @@ class BotManager:
             # transient per-market verification failure.
             failures = [item for item in failures if item.startswith("account:")]
         if failures:
-            raise RuntimeError("launcher shutdown order cleanup failed: " + "; ".join(failures))
+            error = "; ".join(failures)
+            self._shutdown_cleanup.update(
+                state="failed",
+                completedAtMs=int(time.time() * 1000),
+                canceledOrders=canceled if account_verified else 0,
+                error=error,
+            )
+            raise RuntimeError("launcher shutdown order cleanup failed: " + error)
+        self._shutdown_cleanup.update(
+            state="verified",
+            completedAtMs=int(time.time() * 1000),
+            canceledOrders=canceled,
+            ordersVerifiedAbsent=True,
+        )
 
     async def apply_update(self, update: ScreenerUpdate) -> None:
+        if self._shutdown_started:
+            await self._emit("update_skipped_shutdown", "*", generation_id=update.generation_id)
+            return
         if update.generation_id != self._generation:
             for market_id in update.pick_by_market_id:
                 self._restart_history.setdefault(market_id, deque()).clear()
@@ -596,6 +661,7 @@ class BotManager:
             },
             "pnl": {key: round(value, 4) if isinstance(value, float) else value for key, value in pnl_totals.items()},
             "apiActivity": api_totals,
+            "shutdownCleanup": dict(self._shutdown_cleanup),
         }
         rest_totals = api_totals.get("rest")
         if isinstance(rest_totals, dict):

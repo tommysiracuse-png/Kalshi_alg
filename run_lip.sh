@@ -15,6 +15,7 @@ WATCHDOG_RUNNER_SCRIPT="$ROOT/market_watchdog_runner.py"
 WATCHDOG_PROFILER_SCRIPT="$ROOT/market_risk_profiler.py"
 WATCHDOG_STATE_DIR="$ROOT/watchdog_state"
 WATCHDOG_DISABLE_FILE="$ROOT/watchdog_disable_list.json"
+SESSION_STORE="${KALSHI_SESSION_STORE:-$ROOT/session_data}"
 WATCHDOG_INTERVAL_SECONDS=60
 WATCHDOG_STATE_REFRESH_SECONDS=3
 WATCHDOG_EXTREME_STALE_SECONDS=120
@@ -40,9 +41,12 @@ WATCHDOG_CONFIDENCE_FLATTEN_THRESHOLD=0.55
 #   the top ~25 ranked markets just consume CPU/API quota without producing fills.
 # - Budgets at 500c/side stay - raising budget without raising fills only amplifies
 #   adverse-selection losses (Brent T97.50 markout is 9.7c/5s = toxic).
-MAX_BOTS=50
+MAX_BOTS=40
 YES_BUDGET_CENTS=100
 NO_BUDGET_CENTS=100
+# Hard absolute position limit for each market after any resting quote fills.
+# This is separate from the per-order size limit (currently 5 contracts).
+export MAXIMUM_PROJECTED_CONTRACTS_PER_LINE="${MAXIMUM_PROJECTED_CONTRACTS_PER_LINE:-10}"
 USE_DEMO=0
 DRY_RUN=0
 SUBACCOUNT=""
@@ -118,6 +122,7 @@ ARGS=(
   --watchdog-poll-interval-seconds "$WATCHDOG_POLL_INTERVAL_SECONDS"
   --watchdog-confidence-reduction-threshold "$WATCHDOG_CONFIDENCE_REDUCTION_THRESHOLD"
   --watchdog-confidence-flatten-threshold "$WATCHDOG_CONFIDENCE_FLATTEN_THRESHOLD"
+  --session-store "$SESSION_STORE"
 )
 
 if [[ "$USE_DEMO" == "1" ]]; then

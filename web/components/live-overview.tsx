@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { Overview } from "@/lib/types";
+import type { Overview, SavedSession } from "@/lib/types";
 import { Money, StatusBadge, Time } from "./status";
 import { ControlPanel } from "./control-panel";
+import { OverviewSessionSelector } from "./overview-session-selector";
 
-export function LiveOverview({ initial }: { initial: Overview }) {
+export function LiveOverview({ initial, sessions, activeRun }: { initial: Overview; sessions: SavedSession[]; activeRun?: { id: string; sessionId: string; sessionName: string; status: string } | null }) {
   const [data, setData] = useState(initial);
   const [connected, setConnected] = useState(false);
   const failures = useRef(0);
@@ -32,6 +33,7 @@ export function LiveOverview({ initial }: { initial: Overview }) {
       <article><span>Open positions</span><strong>{data.positionSummary.markets}</strong><p>{data.positionSummary.grossContracts} gross · {data.positionSummary.netContracts > 0 ? "+" : ""}{data.positionSummary.netContracts} net contracts</p></article>
       <article><span>Disabled</span><strong>{data.marketCounts.disabled}</strong><p>Heartbeat <Time value={launcher.heartbeatAt} /></p></article>
     </section>
+    <OverviewSessionSelector initial={sessions} activeRun={activeRun} />
     <ControlPanel />
     <section className="grid-two">
       <article className="panel"><div className="panel-heading"><div><span className="eyebrow">RISK MODES</span><h2>Watchdogs</h2></div></div><div className="mode-list">{Object.entries(counts.watchdogModes ?? {}).map(([mode, count]) => <div key={mode}><StatusBadge value={mode} /><strong>{count}</strong></div>)}{Object.keys(counts.watchdogModes ?? {}).length === 0 && <p className="empty">No watchdog state available.</p>}</div></article>

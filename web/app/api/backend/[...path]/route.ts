@@ -1,13 +1,18 @@
 import { auth } from "@/auth";
 import { apiBase } from "@/lib/api";
+import { hasSameOrigin } from "@/lib/request-security";
 import { NextRequest, NextResponse } from "next/server";
 
 async function proxy(request: NextRequest, context: { params: Promise<{ path: string[] }> }) {
   const session = await auth();
   if (!session?.user) return NextResponse.json({ code: "unauthorized", message: "Sign in required" }, { status: 401 });
   if (request.method !== "GET") {
-    const origin = request.headers.get("origin");
-    if (!origin || origin !== request.nextUrl.origin) return NextResponse.json({ code: "invalid_origin", message: "Same-origin request required" }, { status: 403 });
+    const sameOrigin = hasSameOrigin(
+      request.headers.get("origin"),
+      request.headers.get("host"),
+      request.nextUrl.protocol,
+    );
+    if (!sameOrigin) return NextResponse.json({ code: "invalid_origin", message: "Same-origin request required" }, { status: 403 });
   }
   const { path } = await context.params;
   const target = new URL(`/${path.join("/")}`, apiBase());
@@ -32,3 +37,5 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
 
 export const GET = proxy;
 export const POST = proxy;
+export const PUT = proxy;
+export const DELETE = proxy;

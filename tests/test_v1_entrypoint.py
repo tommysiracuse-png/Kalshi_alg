@@ -1,7 +1,7 @@
 from argparse import Namespace
 
 import V1
-from top_of_book_bot import BotSettings
+from top_of_book_bot import BotSettings, build_settings_from_args, parse_bot_args
 
 
 def test_v1_wires_existing_cli_options_into_kalshi_config(monkeypatch):
@@ -44,3 +44,14 @@ def test_v1_wires_existing_cli_options_into_kalshi_config(monkeypatch):
     assert config.subaccount_number == 7
     assert captured["bot"][0] is settings
     assert captured["ran"] is True
+
+
+def test_projected_contract_limit_is_configurable_from_cli(monkeypatch):
+    monkeypatch.setattr(
+        "sys.argv",
+        ["V1.py", "--ticker", "MKT", "--maximum-projected-contracts-per-line", "12"],
+    )
+
+    settings = build_settings_from_args(parse_bot_args())
+
+    assert settings.maximum_projected_contracts_per_line == 12
