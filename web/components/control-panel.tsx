@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { createRequestId } from "../lib/request-id";
 
 export function ControlPanel({ ticker, disabled = false }: { ticker?: string; disabled?: boolean }) {
   const [pending, setPending] = useState<string>();
@@ -10,9 +11,9 @@ export function ControlPanel({ ticker, disabled = false }: { ticker?: string; di
     const warning = ticker ? `${action} ${ticker}? Open inventory will be retained.` : `${action} the trading fleet? Open inventory will be retained.`;
     if (!window.confirm(warning)) return;
     setPending(action); setMessage(undefined);
-    const path = ticker ? `api/v1/controls/markets/${encodeURIComponent(ticker)}/${action}` : `api/v1/controls/fleet/${action}`;
-    const requestId = crypto.randomUUID();
     try {
+      const path = ticker ? `api/v1/controls/markets/${encodeURIComponent(ticker)}/${action}` : `api/v1/controls/fleet/${action}`;
+      const requestId = createRequestId();
       const response = await fetch(`/api/backend/${path}`, { method: "POST", headers: { "x-request-id": requestId, "content-type": "application/json" }, body: "{}" });
       const body = await response.json();
       if (!response.ok) throw new Error(body.message ?? `Control failed (${response.status})`);

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { SavedSession } from "@/lib/types";
+import { createRequestId } from "../lib/request-id";
 
 type ActiveRun = { id: string; sessionId: string; sessionName: string; status: string };
 
@@ -26,7 +27,7 @@ export function OverviewSessionSelector({
     try {
       const response = await fetch(`/api/backend/api/v1/sessions/${sessionId}/select`, {
         method: "POST",
-        headers: { "content-type": "application/json", "x-request-id": crypto.randomUUID() },
+        headers: { "content-type": "application/json", "x-request-id": createRequestId() },
         body: "{}",
       });
       const result = await response.json();

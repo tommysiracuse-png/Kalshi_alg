@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import type { SavedSession, SessionConfiguration } from "@/lib/types";
+import { createRequestId } from "../lib/request-id";
 
 type Props = { initial: SavedSession[]; activeRun?: { id: string; sessionId: string; sessionName: string; status: string } | null };
 
@@ -31,7 +32,7 @@ export function SessionEditor({ initial, activeRun }: Props) {
     setPending(true); setMessage(undefined);
     try {
       const response = await fetch(`/api/backend/api/v1/${path}`, {
-        method, headers: { "content-type": "application/json", "x-request-id": crypto.randomUUID() },
+        method, headers: { "content-type": "application/json", "x-request-id": createRequestId() },
         body: body === undefined ? undefined : JSON.stringify(body)
       });
       const result = await response.json();
