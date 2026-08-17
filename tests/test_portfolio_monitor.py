@@ -18,9 +18,11 @@ class FakePortfolioClient:
     def __init__(self):
         self.fail = False
         self.limits_calls = 0
+        self.calls = {"balance": 0, "positions": 0, "orders": 0, "fills": 0, "markets": 0}
         self.now_ms = int(time.time() * 1000)
 
     def get_account_balance(self):
+        self.calls["balance"] += 1
         if self.fail:
             raise RuntimeError("exchange unavailable")
         return AccountBalance(1_000_000, 50_000, 1_000)
@@ -30,20 +32,24 @@ class FakePortfolioClient:
         return AccountLimits("advanced", RateLimitBucket(20, 40), RateLimitBucket(10, 20))
 
     def list_account_positions(self, query):
+        self.calls["positions"] += 1
         return [
             AccountPosition("YES", 200, 20_000, 8_000, 1_000, 100, 1, 2_000),
             AccountPosition("NO", -100, 10_000, 3_000, 0, 0, 0, 2_000),
         ]
 
     def list_account_orders(self, query):
+        self.calls["orders"] += 1
         if query.status == "resting":
             return [AccountOrder("o1", "YES", "yes", status="resting", price_units=4_000, fill_count_units=100, remaining_count_units=200, initial_count_units=300, fill_cost_units=4_000, created_at_ms=self.now_ms - 10_000)]
         return [AccountOrder("o1", "YES", "yes", created_at_ms=self.now_ms - 10_000)]
 
     def list_account_fills(self, query):
+        self.calls["fills"] += 1
         return [AccountFill("f1", "t1", "o1", "YES", "yes", 100, 4_000, created_at_ms=self.now_ms - 7_500)]
 
     def list_markets(self, query):
+        self.calls["markets"] += 1
         return [
             Market("YES", "Yes market", series_id="SER", yes_bid_units=5_000, yes_ask_units=5_200, no_bid_units=4_800, no_ask_units=5_000, last_price_units=5_100, market_url="https://kalshi.com/markets/ser"),
             Market("NO", "No market", series_id="SER", yes_bid_units=6_800, yes_ask_units=7_000, no_bid_units=3_000, no_ask_units=3_200, last_price_units=6_900),
@@ -61,7 +67,12 @@ def test_portfolio_calculations_and_last_good_failure():
         snapshot = monitor.status_snapshot()
         assert snapshot["summary"]["availableCashUnits"] == 1_000_000
         assert snapshot["summary"]["apiTier"] == "advanced"
+        assert snapshot["summary"]["midpointPositionValueUnits"] == 13_300
+        assert snapshot["summary"]["totalPortfolioValueUnits"] == 1_013_300
+        assert snapshot["summary"]["positionsLiquidationValueUnits"] == 13_000
         positions = {item["marketId"]: item for item in snapshot["positions"]}
+        assert positions["YES"]["liquidationValueUnits"] == 10_000
+        assert positions["YES"]["unrealizedValueUnits"] == 10_200
         assert positions["YES"]["unrealizedPnlUnits"] == 2_000
         assert positions["YES"]["marketUnrealizedPnlUnits"] == 2_200
         assert positions["YES"]["marketTotalPnlUnits"] == 3_100
@@ -93,6 +104,7 @@ def test_missing_liquidation_bid_does_not_become_zero():
     yes = next(item for item in snapshot["positions"] if item["marketId"] == "YES")
     assert yes["unrealizedPnlUnits"] is None
     assert snapshot["summary"]["unrealizedPnlUnits"] is None
+    assert snapshot["summary"]["positionsLiquidationValueUnits"] is None
 
 
 def test_refresh_due_and_tier_refresh_cadence():
@@ -114,3 +126,26 @@ def test_refresh_due_and_tier_refresh_cadence():
         assert client.limits_calls == 2
 
     asyncio.run(scenario())
+
+
+def test_analytics_persistence_does_not_add_venue_requests(tmp_path):
+    client = FakePortfolioClient()
+    monitor = PortfolioMonitor(
+        client,
+        PortfolioMonitorConfig(analytics_path=tmp_path / "portfolio.sqlite3"),
+    )
+    assert asyncio.run(monitor.refresh()) is True
+    assert client.calls == {"balance": 1, "positions": 1, "orders": 2, "fills": 1, "markets": 1}
+    assert client.limits_calls == 1
+    assert (tmp_path / "portfolio.sqlite3").exists()
+
+
+def test_analytics_storage_failure_warns_without_losing_live_snapshot(tmp_path):
+    invalid_path = tmp_path / "is-a-directory"
+    invalid_path.mkdir()
+    client = FakePortfolioClient()
+    monitor = PortfolioMonitor(client, PortfolioMonitorConfig(analytics_path=invalid_path))
+    assert asyncio.run(monitor.refresh()) is True
+    snapshot = monitor.status_snapshot()
+    assert snapshot["available"] is True
+    assert any("analytics storage unavailable" in warning for warning in snapshot["warnings"])

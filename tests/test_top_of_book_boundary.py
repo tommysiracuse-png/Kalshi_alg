@@ -112,6 +112,7 @@ def test_monitoring_snapshot_tracks_process_session_separately_from_starting_inv
     bot.book_no = {5_000: 100}
     bot.book_ready = True
     bot.last_market_event_timestamp_ms = bot.started_at_ms
+    bot.fee_model.series_title = "Series title"
 
     status = bot.status_snapshot()
     monitoring = status["monitoring"]
@@ -119,6 +120,7 @@ def test_monitoring_snapshot_tracks_process_session_separately_from_starting_inv
     assert monitoring["pnl"]["sessionPositionUnits"] == 0
     assert monitoring["pnl"]["realizedCents"] == 9.9
     assert monitoring["market"]["priceSource"] == "book_mid"
+    assert monitoring["market"]["marketUrl"] == "https://kalshi.com/markets/series/series-title/event"
 
 
 def test_projected_position_cap_clamps_risk_increasing_quotes():

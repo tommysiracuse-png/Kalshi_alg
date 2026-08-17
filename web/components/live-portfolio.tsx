@@ -1,7 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import type { AccountPortfolio } from "@/lib/types";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type {
+  AccountPortfolio,
+  PortfolioFill,
+  PortfolioFillsAnalytics,
+  PortfolioHistoryMetric,
+  PortfolioOrdersAnalytics,
+  PortfolioPositionsAnalytics,
+  PortfolioSummaryAnalytics,
+} from "@/lib/types";
+import { MiniChart } from "./mini-chart";
 import { StatusBadge, Time } from "./status";
 
 export function moneyUnits(value?: number | null, signed = false) {
@@ -26,8 +35,10 @@ export function percentBps(value?: number | null) {
 export function duration(milliseconds?: number | null) {
   if (milliseconds == null) return "—";
   const seconds = Math.max(0, Math.floor(milliseconds / 1000));
-  const hours = Math.floor(seconds / 3600);
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
+  if (days) return `${days}d ${hours}h`;
   if (hours) return `${hours}h ${minutes}m`;
   if (minutes) return `${minutes}m ${seconds % 60}s`;
   return `${seconds}s`;
@@ -41,41 +52,235 @@ function Value({ value, signed = false }: { value?: number | null; signed?: bool
   return <span className={value == null ? "muted" : value < 0 ? "negative" : value > 0 ? "positive" : ""}>{moneyUnits(value, signed)}</span>;
 }
 
-export function LivePortfolio({ initial }: { initial: AccountPortfolio }) {
-  const [data, setData] = useState(initial);
+function numericRange(value: number | null | undefined, minimum: string, maximum: string, scale = 1) {
+  if (value == null) return minimum === "" && maximum === "";
+  const normalized = value / scale;
+  return (minimum === "" || normalized >= Number(minimum)) && (maximum === "" || normalized <= Number(maximum));
+}
+
+function dateRange(value: number | null | undefined, from: string, to: string) {
+  if (value == null) return from === "" && to === "";
+  const lower = from ? new Date(from).getTime() : null;
+  const upper = to ? new Date(to).getTime() : null;
+  return (lower == null || value >= lower) && (upper == null || value <= upper);
+}
+
+async function fetchJson<T>(path: string): Promise<T> {
+  const response = await fetch(`/api/backend${path}`, { cache: "no-store" });
+  if (!response.ok) throw new Error(`Request failed (${response.status})`);
+  return response.json() as Promise<T>;
+}
+
+function HistoryCard({ label, value, metric }: { label: string; value?: number | null; metric?: PortfolioHistoryMetric }) {
+  const points = metric?.points ?? [];
+  return <article className="portfolio-history-card">
+    <span>{label}</span>
+    <strong>{moneyUnits(value)}</strong>
+    <p className={metric?.changeUnits == null ? "muted" : metric.changeUnits < 0 ? "negative" : metric.changeUnits > 0 ? "positive" : ""}>
+      {metric?.changeUnits == null ? "Change unavailable" : `${moneyUnits(metric.changeUnits, true)} · ${percentBps(metric.changeBps)}`}
+    </p>
+    <div className="portfolio-sparkline">
+      {points.length > 1 ? <MiniChart values={points.map(point => point.valueUnits)} /> : <span>Collecting history</span>}
+    </div>
+    <small>{metric?.partial ? `${duration(metric.actualWindowMs)} partial history` : "24-hour history"}</small>
+  </article>;
+}
+
+type FillPageState = { items: PortfolioFill[]; nextCursor?: string | null; loading: boolean; error?: string };
+
+const emptyPositionFilters = { ticker: "", contractsMin: "", contractsMax: "", valueMin: "", valueMax: "", ordersMin: "", ordersMax: "", currentSession: false };
+const emptyOrderFilters = { ticker: "", createdFrom: "", createdTo: "", updatedFrom: "", updatedTo: "", contractsMin: "", contractsMax: "", bookMin: "", bookMax: "", fillsMin: "", fillsMax: "", currentSession: false };
+
+export function LivePortfolio({
+  initialSummary,
+  initialPositions,
+  initialOrders,
+}: {
+  initialSummary: PortfolioSummaryAnalytics;
+  initialPositions: PortfolioPositionsAnalytics;
+  initialOrders: PortfolioOrdersAnalytics;
+}) {
+  const [summaryData, setSummaryData] = useState(initialSummary);
+  const [positionsData, setPositionsData] = useState(initialPositions);
+  const [ordersData, setOrdersData] = useState(initialOrders);
   const [connected, setConnected] = useState(false);
-  const [clockMs, setClockMs] = useState(initial.generatedAt);
+  const [clockMs, setClockMs] = useState(initialSummary.generatedAt);
+  const [positionFilters, setPositionFilters] = useState(emptyPositionFilters);
+  const [orderFilters, setOrderFilters] = useState(emptyOrderFilters);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [fillPages, setFillPages] = useState<Record<string, FillPageState>>({});
+  const expandedRef = useRef(expanded);
+  const snapshotRef = useRef(initialSummary.snapshotAtMs ?? 0);
+
+  useEffect(() => { expandedRef.current = expanded; }, [expanded]);
+
+  const loadFills = useCallback(async (ticker: string, cursor = "", replace = false) => {
+    setFillPages(previous => ({
+      ...previous,
+      [ticker]: { items: replace ? [] : previous[ticker]?.items ?? [], nextCursor: previous[ticker]?.nextCursor, loading: true },
+    }));
+    try {
+      const query = cursor ? `?limit=100&cursor=${encodeURIComponent(cursor)}` : "?limit=100";
+      const response = await fetchJson<PortfolioFillsAnalytics>(`/api/v1/portfolio/positions/${encodeURIComponent(ticker)}/fills${query}`);
+      setFillPages(previous => ({
+        ...previous,
+        [ticker]: {
+          items: replace ? response.items : [...(previous[ticker]?.items ?? []), ...response.items],
+          nextCursor: response.nextCursor,
+          loading: false,
+        },
+      }));
+    } catch (error) {
+      setFillPages(previous => ({
+        ...previous,
+        [ticker]: { ...(previous[ticker] ?? { items: [] }), loading: false, error: error instanceof Error ? error.message : "Could not load fills" },
+      }));
+    }
+  }, []);
+
+  const refreshAnalytics = useCallback(async () => {
+    const [summary, positions, orders] = await Promise.all([
+      fetchJson<PortfolioSummaryAnalytics>("/api/v1/portfolio/summary?window=24h"),
+      fetchJson<PortfolioPositionsAnalytics>("/api/v1/portfolio/positions"),
+      fetchJson<PortfolioOrdersAnalytics>("/api/v1/portfolio/orders"),
+    ]);
+    snapshotRef.current = summary.snapshotAtMs ?? snapshotRef.current;
+    setSummaryData(summary);
+    setPositionsData(positions);
+    setOrdersData(orders);
+    await Promise.all([...expandedRef.current].map(ticker => loadFills(ticker, "", true)));
+  }, [loadFills]);
+
   useEffect(() => {
     const events = new EventSource("/api/backend/api/v1/events");
     events.addEventListener("portfolio", event => {
-      setData(JSON.parse((event as MessageEvent).data));
+      const payload = JSON.parse((event as MessageEvent).data) as AccountPortfolio;
       setConnected(true);
+      const nextSnapshot = payload.generatedAtMs ?? payload.lastSuccessAtMs ?? 0;
+      if (nextSnapshot && nextSnapshot !== snapshotRef.current) void refreshAnalytics();
     });
     events.onerror = () => setConnected(false);
-    const fallback = window.setInterval(async () => {
-      if (events.readyState === EventSource.OPEN) return;
-      const response = await fetch("/api/backend/api/v1/portfolio", { cache: "no-store" });
-      if (response.ok) setData(await response.json());
+    const fallback = window.setInterval(() => {
+      if (events.readyState !== EventSource.OPEN) void refreshAnalytics();
     }, 5000);
     const clock = window.setInterval(() => setClockMs(Date.now()), 1000);
     return () => { events.close(); window.clearInterval(fallback); window.clearInterval(clock); };
-  }, []);
+  }, [refreshAnalytics]);
 
-  const summary = data.summary ?? {};
-  const orderSummary = data.orders?.summary ?? {};
-  const positions = data.positions ?? [];
-  const orders = data.orders?.items ?? [];
-  const stale = Boolean(data.stale || data.source?.stale || !data.available);
+  const visiblePositions = useMemo(() => positionsData.items.filter(position => {
+    const ticker = `${position.ticker} ${position.title}`.toLowerCase();
+    return ticker.includes(positionFilters.ticker.trim().toLowerCase())
+      && numericRange(position.contractsUnits, positionFilters.contractsMin, positionFilters.contractsMax, 100)
+      && numericRange(position.unrealizedValueUnits, positionFilters.valueMin, positionFilters.valueMax, 10_000)
+      && numericRange(position.openOrderCount, positionFilters.ordersMin, positionFilters.ordersMax)
+      && (!positionFilters.currentSession || Boolean(position.runningInCurrentSession));
+  }), [positionFilters, positionsData.items]);
+
+  const visibleOrders = useMemo(() => ordersData.items.filter(order => {
+    const ticker = `${order.ticker} ${order.title}`.toLowerCase();
+    return ticker.includes(orderFilters.ticker.trim().toLowerCase())
+      && dateRange(order.firstCreatedAtMs, orderFilters.createdFrom, orderFilters.createdTo)
+      && dateRange(order.lastUpdatedAtMs, orderFilters.updatedFrom, orderFilters.updatedTo)
+      && numericRange(order.remainingContractsUnits, orderFilters.contractsMin, orderFilters.contractsMax, 100)
+      && numericRange(order.totalTimeOnBookMs, orderFilters.bookMin, orderFilters.bookMax, 3_600_000)
+      && numericRange(order.totalFillCount, orderFilters.fillsMin, orderFilters.fillsMax)
+      && (!orderFilters.currentSession || order.runningInCurrentSession);
+  }), [orderFilters, ordersData.items]);
+
+  function togglePosition(ticker: string) {
+    const opening = !expanded.has(ticker);
+    const next = new Set(expanded);
+    if (opening) next.add(ticker); else next.delete(ticker);
+    setExpanded(next);
+    if (opening && !fillPages[ticker]) void loadFills(ticker);
+  }
+
+  const warnings = [...new Set([...summaryData.warnings, ...positionsData.warnings, ...ordersData.warnings])];
+  const stale = summaryData.source.stale || positionsData.source.stale || ordersData.source.stale;
+  const orderSummary = ordersData.summary;
+
   return <>
-    <header className="page-header"><div><span className="eyebrow">ACCOUNT MONITORING</span><h1>Portfolio</h1><p>Authoritative positions and resting orders for Kalshi subaccount {data.subaccountNumber ?? 0}.</p></div><div className="header-status"><StatusBadge value={data.running ? "refreshing" : stale ? "stale" : "current"} /><span className={connected ? "positive" : "negative"}>{connected ? "Live" : "Reconnecting"}</span></div></header>
-    {(stale || data.warnings?.length > 0) && <section className="warning-panel"><strong>{data.available ? "Portfolio data may be incomplete or stale" : "Portfolio data is unavailable"}</strong>{data.lastError && <p>{data.lastError}</p>}<ul>{(data.warnings ?? []).map(item => <li key={item}>{item}</li>)}</ul></section>}
+    <header className="page-header"><div><span className="eyebrow">ACCOUNT ANALYTICS</span><h1>Portfolio</h1><p>Account-wide inventory, fill history, and open-order analytics from locally persisted snapshots.</p></div><div className="header-status"><StatusBadge value={stale ? "stale" : "current"} /><span className={connected ? "positive" : "negative"}>{connected ? "Live" : "Reconnecting"}</span></div></header>
+    {(stale || warnings.length > 0) && <section className="warning-panel"><strong>{stale ? "Portfolio analytics may be stale" : "Portfolio analytics notice"}</strong><ul>{warnings.map(item => <li key={item}>{item}</li>)}</ul></section>}
 
-    <section className="metrics"><article><span>Available cash</span><strong>{moneyUnits(summary.availableCashUnits)}</strong><p>Balance updated {age(summary.balanceUpdatedAtMs, clockMs)}</p></article><article><span>Liquidation unrealized</span><strong className={(summary.unrealizedPnlUnits ?? 0) < 0 ? "negative" : "positive"}>{moneyUnits(summary.unrealizedPnlUnits, true)}</strong><p>Bid-marked · {percentBps(summary.unrealizedReturnBps)} across {summary.positionCount ?? 0} positions</p></article><article><span>API tier</span><strong>{summary.apiTier ?? "Unavailable"}</strong><p>{summary.readRateLimit?.refillRate ?? "—"} reads/s · {summary.writeRateLimit?.refillRate ?? "—"} writes/s</p></article><article><span>Snapshot</span><strong>{age(data.lastSuccessAtMs, clockMs)}</strong><p>{data.running ? `Refreshing for ${duration(data.currentStartedAtMs ? clockMs - data.currentStartedAtMs : data.currentDurationMs)}` : `Every 15s · ${data.apiActivity?.rest?.total ?? 0} API requests`}</p></article></section>
+    <section className="metrics portfolio-summary-metrics">
+      <HistoryCard label="Available Cash" value={summaryData.summary.availableCashUnits} metric={summaryData.history.availableCash} />
+      <HistoryCard label="Total Portfolio Value" value={summaryData.summary.totalPortfolioValueUnits} metric={summaryData.history.totalPortfolioValue} />
+      <HistoryCard label="Positions Liquidation Value" value={summaryData.summary.positionsLiquidationValueUnits} metric={summaryData.history.positionsLiquidationValue} />
+      <article><span>API Tier</span><strong>{summaryData.summary.apiTier ?? "Unavailable"}</strong><p>{summaryData.summary.readRateLimit?.refillRate ?? "—"} reads/s · {summaryData.summary.writeRateLimit?.refillRate ?? "—"} writes/s</p></article>
+      <article><span>Last Snapshot</span><strong className="small-value">{age(summaryData.snapshotAtMs, clockMs)}</strong><p><Time value={summaryData.snapshotAtMs} /></p></article>
+    </section>
 
-    <section className="panel portfolio-section"><div className="panel-heading"><div><span className="eyebrow">POSITIONS</span><h2>Account inventory</h2></div><strong>{positions.length} markets</strong></div><div className="table-wrap portfolio-table"><table><thead><tr><th>Market</th><th>Side / contracts</th><th>Last / liquidation</th><th>Cost / average</th><th>Market Price P&amp;L</th><th>Liquidation P&amp;L</th><th>Open orders</th></tr></thead><tbody>{positions.map(position => <tr key={position.marketId}><td>{position.marketUrl ? <a className="external-link" href={position.marketUrl} target="_blank" rel="noreferrer"><strong>{position.title || position.ticker}</strong> ↗</a> : <strong>{position.title || position.ticker}</strong>}<small className="mono">{position.ticker}</small><small>Updated {age(position.updatedAtMs, clockMs)}</small></td><td><span className={`side side-${position.side}`}>{position.side.toUpperCase()}</span><small>{contractUnits(position.contractsUnits)} contracts</small></td><td>{priceUnits(position.lastPriceUnits)} last<small>{priceUnits(position.bidPriceUnits)} bid · {priceUnits(position.askPriceUnits)} ask</small></td><td>{moneyUnits(position.costBasisUnits)}<small>{priceUnits(position.averageCostPriceUnits)} average</small></td><td><Value value={position.marketTotalPnlUnits} signed /><small>{percentBps(position.marketTotalReturnBps)} total · <Value value={position.marketUnrealizedPnlUnits} signed /> unrealized</small></td><td><Value value={position.totalPnlUnits} signed /><small>{percentBps(position.totalReturnBps)} total · <Value value={position.unrealizedPnlUnits} signed /> unrealized · {moneyUnits(position.feesUnits)} fees</small></td><td>{position.openOrderCount}</td></tr>)}</tbody></table>{positions.length === 0 && <p className="empty">{data.available ? "No open positions in this subaccount." : "No portfolio snapshot is available."}</p>}</div></section>
+    <section className="panel portfolio-section">
+      <div className="panel-heading"><div><span className="eyebrow">POSITIONS</span><h2>Account Inventory</h2></div><strong>{visiblePositions.length} of {positionsData.items.length} markets</strong></div>
+      <div className="portfolio-filter-panel">
+        <label className="wide-filter"><span>Ticker</span><input value={positionFilters.ticker} onChange={event => setPositionFilters({ ...positionFilters, ticker: event.target.value })} placeholder="Search ticker or description" /></label>
+        <label><span>Contracts min</span><input type="number" value={positionFilters.contractsMin} onChange={event => setPositionFilters({ ...positionFilters, contractsMin: event.target.value })} /></label>
+        <label><span>Contracts max</span><input type="number" value={positionFilters.contractsMax} onChange={event => setPositionFilters({ ...positionFilters, contractsMax: event.target.value })} /></label>
+        <label><span>Unrealized $ min</span><input type="number" value={positionFilters.valueMin} onChange={event => setPositionFilters({ ...positionFilters, valueMin: event.target.value })} /></label>
+        <label><span>Unrealized $ max</span><input type="number" value={positionFilters.valueMax} onChange={event => setPositionFilters({ ...positionFilters, valueMax: event.target.value })} /></label>
+        <label><span>Open orders min</span><input type="number" value={positionFilters.ordersMin} onChange={event => setPositionFilters({ ...positionFilters, ordersMin: event.target.value })} /></label>
+        <label><span>Open orders max</span><input type="number" value={positionFilters.ordersMax} onChange={event => setPositionFilters({ ...positionFilters, ordersMax: event.target.value })} /></label>
+        <label className="checkbox-filter"><input type="checkbox" checked={positionFilters.currentSession} onChange={event => setPositionFilters({ ...positionFilters, currentSession: event.target.checked })} /><span>Running in current session</span></label>
+        <button className="button" type="button" onClick={() => setPositionFilters(emptyPositionFilters)}>Clear filters</button>
+      </div>
+      <div className="table-wrap portfolio-table"><table><thead><tr><th>Market</th><th>Side / contracts</th><th>Bid / ask / mid</th><th>Cost / average</th><th>Liquidation value</th><th>Unrealized value</th><th>Fills / orders</th><th>Open orders</th></tr></thead><tbody>
+        {visiblePositions.map(position => {
+          const isExpanded = expanded.has(position.ticker);
+          const fills = fillPages[position.ticker];
+          return <Fragment key={position.marketId}>
+            <tr className="expandable-position" tabIndex={0} aria-expanded={isExpanded} onClick={() => togglePosition(position.ticker)} onKeyDown={event => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); togglePosition(position.ticker); } }}>
+              <td><div className="market-cell"><button type="button" className="row-toggle" aria-label={`${isExpanded ? "Collapse" : "Expand"} fills for ${position.ticker}`} aria-expanded={isExpanded} onClick={event => { event.stopPropagation(); togglePosition(position.ticker); }}>{isExpanded ? "⌄" : "›"}</button><div>{position.marketUrl ? <a className="external-link" href={position.marketUrl} target="_blank" rel="noreferrer" onClick={event => event.stopPropagation()}><strong>{position.title || position.ticker}</strong> ↗</a> : <strong>{position.title || position.ticker}</strong>}<small className="mono">{position.ticker}</small>{position.runningInCurrentSession && <small className="session-tag">Current session</small>}</div></div></td>
+              <td><span className={`side side-${position.side}`}>{position.side.toUpperCase()}</span><small>{contractUnits(position.contractsUnits)} contracts</small></td>
+              <td>{priceUnits(position.bidPriceUnits)} / {priceUnits(position.askPriceUnits)}<small>{priceUnits(position.midPriceUnits)} midpoint</small></td>
+              <td>{moneyUnits(position.costBasisUnits)}<small>{priceUnits(position.averageCostPriceUnits)} average</small></td>
+              <td>{moneyUnits(position.liquidationValueUnits)}</td>
+              <td>{moneyUnits(position.unrealizedValueUnits)}</td>
+              <td>{position.totalFillCount ?? 0} / {position.totalOrderCount ?? 0}<small>Observed since <Time value={positionsData.coverage.startedAtMs} /></small></td>
+              <td>{position.openOrderCount}</td>
+            </tr>
+            <tr className={`position-detail-row ${isExpanded ? "open" : ""}`}><td colSpan={8}><div className="position-expansion" aria-hidden={!isExpanded}><div>
+              <div className="fill-heading"><strong>Fill history</strong><span>{fills?.items.length ?? 0} loaded</span></div>
+              {fills?.error && <p className="error">{fills.error} <button type="button" className="link-inline" onClick={() => void loadFills(position.ticker, "", true)}>Retry</button></p>}
+              {!fills && <p className="empty">Open the position to load fills.</p>}
+              {fills && !fills.loading && !fills.error && fills.items.length === 0 && <p className="empty">No stored fills are available for this market.</p>}
+              {fills && fills.items.length > 0 && <div className="table-wrap fill-table"><table><thead><tr><th>Filled</th><th>Side / contracts</th><th>Time to fill</th><th>Cost / total paid</th><th>Liquidation value</th><th>Unrealized value</th><th>Fill P&amp;L</th></tr></thead><tbody>{fills.items.map(fill => <tr key={fill.fillId}><td><Time value={fill.filledAtMs} /><small className="mono">{fill.orderId}</small></td><td><span className={`side side-${fill.side ?? "unknown"}`}>{fill.side?.toUpperCase() ?? "UNKNOWN"}</span><small>{contractUnits(fill.contractsUnits)} contracts</small></td><td>{duration(fill.timeToFillMs)}</td><td>{priceUnits(fill.costOfContractsUnits)}<small>{moneyUnits(fill.costInPositionUnits)} incl. {moneyUnits(fill.feeUnits)} fees</small></td><td>{moneyUnits(fill.liquidationValueUnits)}</td><td>{moneyUnits(fill.unrealizedValueUnits)}</td><td><Value value={fill.liquidationPnlUnits} signed /><small>Liquidation · <Value value={fill.marketPnlUnits} signed /> midpoint</small></td></tr>)}</tbody></table></div>}
+              {fills?.loading && <p className="empty">Loading fills…</p>}
+              {fills?.nextCursor && !fills.loading && <button className="button load-more" type="button" onClick={() => void loadFills(position.ticker, fills.nextCursor ?? "")}>Load more</button>}
+            </div></div></td></tr>
+          </Fragment>;
+        })}
+      </tbody></table>{visiblePositions.length === 0 && <p className="empty">No positions match the current filters.</p>}</div>
+    </section>
 
-    <section className="metrics compact order-metrics"><article><span>Open orders</span><strong>{orderSummary.openOrderCount ?? 0}</strong><p>Resting now</p></article><article><span>Last order</span><strong className="small-value">{age(orderSummary.lastOrderAtMs, clockMs)}</strong><p>Rolling 24-hour history</p></article><article><span>Last fill</span><strong className="small-value">{age(orderSummary.lastFillAtMs, clockMs)}</strong><p>Rolling 24-hour history</p></article><article><span>Open market value</span><strong>{moneyUnits(orderSummary.openMarketValueUnits)}</strong><p>At resting limit prices</p></article><article><span>Average fill time</span><strong className="small-value">{duration(orderSummary.averageFirstFillTimeMs)}</strong><p>Creation to first fill · {orderSummary.filledOrderSampleSize ?? 0} orders</p></article></section>
+    <section className="metrics compact order-summary-metrics">
+      <article><span>Total Open Orders</span><strong>{orderSummary.totalOpenOrders ?? 0}</strong><p>Resting now</p></article>
+      <article><span>Orders Attempted</span><strong>{orderSummary.ordersAttempted ?? 0}</strong><p>Placement attempts this session</p></article>
+      <article><span>Last Order</span><strong className="small-value">{age(orderSummary.lastOrderAtMs, clockMs)}</strong><p><Time value={orderSummary.lastOrderAtMs} /></p></article>
+      <article><span>Avg Placement Interval</span><strong className="small-value">{duration(orderSummary.averageTimeBetweenOrdersMs)}</strong><p>Across open orders</p></article>
+      <article><span>Last Fill</span><strong className="small-value">{age(orderSummary.lastFillAtMs, clockMs)}</strong><p><Time value={orderSummary.lastFillAtMs} /></p></article>
+      <article><span>Avg Fill Time</span><strong className="small-value">{duration(orderSummary.averageFillTimeMs)}</strong><p>{orderSummary.fillSampleSize ?? 0} fill samples</p></article>
+      <article><span>Total Market Value</span><strong>{moneyUnits(orderSummary.totalMarketValueUnits)}</strong><p>Remaining contracts at midpoint</p></article>
+    </section>
 
-    <section className="panel portfolio-section"><div className="panel-heading"><div><span className="eyebrow">ORDERS</span><h2>Resting orders</h2></div><strong>{orders.length} open</strong></div><div className="table-wrap portfolio-table"><table><thead><tr><th>Market / order</th><th>Side / remaining</th><th>Average fill</th><th>Order price</th><th>Current market</th><th>Last fill</th><th>First-fill time</th></tr></thead><tbody>{orders.map(order => <tr key={order.orderId}><td>{order.marketUrl ? <a className="external-link" href={order.marketUrl} target="_blank" rel="noreferrer"><strong>{order.title || order.ticker}</strong> ↗</a> : <strong>{order.title || order.ticker}</strong>}<small className="mono">{order.ticker} · {order.orderId}</small><small>Created <Time value={order.createdAtMs} /></small></td><td><span className={`side side-${order.side ?? "unknown"}`}>{order.side?.toUpperCase() ?? "UNKNOWN"}</span><small>{contractUnits(order.remainingContractsUnits)} remaining · {contractUnits(order.filledContractsUnits)} filled</small></td><td>{priceUnits(order.averageFillPriceUnits)}</td><td>{priceUnits(order.orderPriceUnits)}<small>{moneyUnits(order.openMarketValueUnits)} open value</small></td><td>{priceUnits(order.bidPriceUnits)} / {priceUnits(order.askPriceUnits)}<small>{priceUnits(order.midPriceUnits)} midpoint</small></td><td>{order.lastFillAtMs ? <><Time value={order.lastFillAtMs} /><small>{age(order.lastFillAtMs, clockMs)}</small></> : <span className="muted">No fill</span>}</td><td>{duration(order.firstFillTimeMs)}</td></tr>)}</tbody></table>{orders.length === 0 && <p className="empty">{data.available ? "No resting orders in this subaccount." : "No order snapshot is available."}</p>}</div></section>
+    <section className="panel portfolio-section">
+      <div className="panel-heading"><div><span className="eyebrow">OPEN ORDERS</span><h2>Orders by Market Line</h2></div><strong>{visibleOrders.length} of {ordersData.items.length} lines</strong></div>
+      <div className="portfolio-filter-panel order-filter-panel">
+        <label className="wide-filter"><span>Ticker</span><input value={orderFilters.ticker} onChange={event => setOrderFilters({ ...orderFilters, ticker: event.target.value })} placeholder="Search ticker or description" /></label>
+        <label><span>First creation from</span><input type="datetime-local" value={orderFilters.createdFrom} onChange={event => setOrderFilters({ ...orderFilters, createdFrom: event.target.value })} /></label>
+        <label><span>First creation to</span><input type="datetime-local" value={orderFilters.createdTo} onChange={event => setOrderFilters({ ...orderFilters, createdTo: event.target.value })} /></label>
+        <label><span>Last update from</span><input type="datetime-local" value={orderFilters.updatedFrom} onChange={event => setOrderFilters({ ...orderFilters, updatedFrom: event.target.value })} /></label>
+        <label><span>Last update to</span><input type="datetime-local" value={orderFilters.updatedTo} onChange={event => setOrderFilters({ ...orderFilters, updatedTo: event.target.value })} /></label>
+        <label><span>Contracts min</span><input type="number" value={orderFilters.contractsMin} onChange={event => setOrderFilters({ ...orderFilters, contractsMin: event.target.value })} /></label>
+        <label><span>Contracts max</span><input type="number" value={orderFilters.contractsMax} onChange={event => setOrderFilters({ ...orderFilters, contractsMax: event.target.value })} /></label>
+        <label><span>Book hours min</span><input type="number" value={orderFilters.bookMin} onChange={event => setOrderFilters({ ...orderFilters, bookMin: event.target.value })} /></label>
+        <label><span>Book hours max</span><input type="number" value={orderFilters.bookMax} onChange={event => setOrderFilters({ ...orderFilters, bookMax: event.target.value })} /></label>
+        <label><span>Total fills min</span><input type="number" value={orderFilters.fillsMin} onChange={event => setOrderFilters({ ...orderFilters, fillsMin: event.target.value })} /></label>
+        <label><span>Total fills max</span><input type="number" value={orderFilters.fillsMax} onChange={event => setOrderFilters({ ...orderFilters, fillsMax: event.target.value })} /></label>
+        <label className="checkbox-filter"><input type="checkbox" checked={orderFilters.currentSession} onChange={event => setOrderFilters({ ...orderFilters, currentSession: event.target.checked })} /><span>Running in current session</span></label>
+        <button className="button" type="button" onClick={() => setOrderFilters(emptyOrderFilters)}>Clear filters</button>
+      </div>
+      <div className="table-wrap portfolio-table order-lines-table"><table><thead><tr><th>Market</th><th>Sides / open</th><th>Contracts</th><th>First created / last update</th><th>Time on book</th><th>Orders attempted</th><th>Total fills</th><th>Market value</th></tr></thead><tbody>{visibleOrders.map(order => <tr key={order.ticker}><td>{order.marketUrl ? <a className="external-link" href={order.marketUrl} target="_blank" rel="noreferrer"><strong>{order.title || order.ticker}</strong> ↗</a> : <strong>{order.title || order.ticker}</strong>}<small className="mono">{order.ticker}</small>{order.runningInCurrentSession && <small className="session-tag">Current session</small>}</td><td><div className="side-breakdown">{order.sideBreakdown.map(side => <span key={side.side} className={`side side-${side.side}`}>{side.side.toUpperCase()} {side.openOrderCount} · {priceUnits(side.midPriceUnits)}</span>)}</div><small>{order.openOrderCount} open orders</small></td><td>{contractUnits(order.remainingContractsUnits)} remaining<small>{contractUnits(order.initialContractsUnits)} initial · {contractUnits(order.filledContractsUnits)} filled</small></td><td><Time value={order.firstCreatedAtMs} /><small>Updated <Time value={order.lastUpdatedAtMs} /></small></td><td>{duration(order.totalTimeOnBookMs)}</td><td>{order.ordersAttempted}</td><td>{order.totalFillCount}</td><td>{moneyUnits(order.totalMarketValueUnits)}<small>{order.midPriceUnits == null && order.sideBreakdown.length > 1 ? "Side-specific midpoints" : `${priceUnits(order.midPriceUnits)} midpoint`}</small></td></tr>)}</tbody></table>{visibleOrders.length === 0 && <p className="empty">No open-order lines match the current filters.</p>}</div>
+    </section>
   </>;
 }

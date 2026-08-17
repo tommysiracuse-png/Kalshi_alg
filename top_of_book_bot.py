@@ -62,6 +62,7 @@ from clients.models import (
     StreamReset,
     TickerUpdate,
 )
+from kalshi_urls import canonical_market_url
 
 
 # ---------------------------------------------------------------------------
@@ -1470,6 +1471,7 @@ class FeeModel:
         self.telemetry_store = telemetry_store
         self.fee_type = "quadratic"
         self.fee_multiplier = 1.0
+        self.series_title = ""
         self.maker_fee_factor = float(settings.default_fee_factor_for_maker_quotes)
         self.realized_fee_per_contract_units_ewma: Optional[float] = None
         self.upcoming_fee_changes: List[object] = []
@@ -1480,6 +1482,7 @@ class FeeModel:
             series_payload = self.api_client.get_series(self.market.series_ticker)
             self.fee_type = str(series_payload.fee_type or self.fee_type)
             self.fee_multiplier = float(series_payload.fee_multiplier or self.fee_multiplier or 1.0)
+            self.series_title = str(series_payload.title or self.series_title)
         except Exception as exc:
             log_event("FEE_MODEL_SERIES_REFRESH_ERROR", error=str(exc), series=self.market.series_ticker)
         try:
@@ -4591,6 +4594,14 @@ class TopOfBookBot:
                 "market": {
                     "marketId": self.market.ticker,
                     "title": self.market.title,
+                    "seriesTicker": self.market.series_ticker,
+                    "eventTicker": self.market.event_ticker,
+                    "seriesTitle": self.fee_model.series_title,
+                    "marketUrl": canonical_market_url(
+                        self.market.series_ticker,
+                        self.market.event_ticker,
+                        self.fee_model.series_title,
+                    ),
                     "priceUnits": price_units,
                     "priceSource": price_source,
                     "priceAtMs": price_at_ms,

@@ -10,6 +10,7 @@ import httpx
 import pytest
 
 import ui_api.app as app_module
+from clients.models import AccountFill, AccountOrder
 from ui_api.config import Settings
 from ui_api.store import OperationsStore
 
@@ -27,7 +28,11 @@ def fixture_store(root: Path) -> OperationsStore:
         "launcher": {"lifecycle": "running", "heartbeatAt": 9999999999999},
         "bots": [], "counts": {},
         "manager": {"running": True, "botsRunning": 1, "pnl": {"totalCents": 12.5}},
-        "clients": [{"marketId": "TEST-1", "title": "Test market", "apiActivity": {"rest": {"total": 4}}}],
+        "clients": [{
+            "marketId": "TEST-1", "title": "Test market",
+            "market": {"marketId": "TEST-1", "marketUrl": "https://kalshi.com/markets/test/test-market/test-event"},
+            "apiActivity": {"rest": {"total": 4}},
+        }],
         "screener": {"running": False, "generationId": 3, "picks": [{"marketId": "TEST-1"}]},
         "portfolio": {"available": True, "stale": False, "summary": {"availableCashUnits": 125000}, "positions": [], "orders": {"summary": {"openOrderCount": 0}, "items": []}, "warnings": []},
     }))
@@ -88,6 +93,63 @@ async def test_portfolio_contract_is_authenticated_and_uses_launcher_snapshot():
         assert unauthorized.status_code == 401
         assert response.status_code == 200
         assert response.json()["summary"]["availableCashUnits"] == 125000
+
+
+@pytest.mark.anyio
+async def test_portfolio_analytics_endpoints_are_storage_backed():
+    with tempfile.TemporaryDirectory() as temporary:
+        operations = fixture_store(Path(temporary))
+        timestamp = 2_000_000
+        order = AccountOrder(
+            "order-1", "TEST-1", "yes", status="resting", price_units=4_000,
+            fill_count_units=100, remaining_count_units=100, initial_count_units=200,
+            created_at_ms=timestamp - 2_000, updated_at_ms=timestamp - 500,
+        )
+        fill = AccountFill(
+            "fill-1", "trade-1", "order-1", "TEST-1", "yes", 100, 4_000,
+            fee_units=100, created_at_ms=timestamp - 1_000,
+        )
+        operations.portfolio_analytics.record_refresh({
+            "generatedAtMs": timestamp,
+            "warnings": [],
+            "summary": {
+                "availableCashUnits": 100_000, "midpointPositionValueUnits": 5_100,
+                "totalPortfolioValueUnits": 105_100, "positionsLiquidationValueUnits": 5_000,
+                "apiTier": "advanced", "positionCount": 1,
+            },
+            "positions": [{
+                "marketId": "TEST-1", "ticker": "TEST-1", "title": "Test market", "side": "yes",
+                "contractsUnits": 100, "bidPriceUnits": 5_000, "askPriceUnits": 5_200,
+                "midPriceUnits": 5_100, "costBasisUnits": 4_000,
+                "averageCostPriceUnits": 4_000, "liquidationValueUnits": 5_000,
+                "unrealizedValueUnits": 5_100, "openOrderCount": 1,
+            }],
+            "orders": {"items": [{
+                "ticker": "TEST-1", "marketId": "TEST-1", "title": "Test market", "side": "yes", "midPriceUnits": 5_100,
+            }]},
+        }, [order], [fill], [order])
+        active_run = operations.sessions.claim_run()
+        operations.sessions.record_metrics(active_run["id"], {
+            "markets": {"TEST-1": {"orderPlacementsAttempted": 9}},
+        }, sample=False)
+        app_module.store = operations
+        headers = {"x-internal-token": "test-token"}
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app_module.app), base_url="http://test") as client:
+            assert (await client.get("/api/v1/portfolio/summary")).status_code == 401
+            summary = await client.get("/api/v1/portfolio/summary", headers=headers)
+            positions = await client.get("/api/v1/portfolio/positions", headers=headers)
+            fills = await client.get("/api/v1/portfolio/positions/TEST-1/fills?limit=1", headers=headers)
+            orders = await client.get("/api/v1/portfolio/orders", headers=headers)
+        assert summary.json()["summary"]["totalPortfolioValueUnits"] == 105_100
+        assert summary.json()["coverage"]["partial"] is True
+        assert positions.json()["items"][0]["totalFillCount"] == 1
+        assert positions.json()["items"][0]["marketUrl"] == "https://kalshi.com/markets/test/test-market/test-event"
+        assert fills.json()["items"][0]["costInPositionUnits"] == 4_100
+        assert orders.json()["summary"]["totalOpenOrders"] == 1
+        assert orders.json()["summary"]["ordersAttempted"] == 9
+        assert orders.json()["items"][0]["ticker"] == "TEST-1"
+        assert orders.json()["items"][0]["ordersAttempted"] == 9
+        assert orders.json()["items"][0]["marketUrl"] == "https://kalshi.com/markets/test/test-market/test-event"
 
 
 @pytest.mark.anyio

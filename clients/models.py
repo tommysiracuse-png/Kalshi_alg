@@ -198,6 +198,7 @@ class Series:
     series_id: str
     fee_type: str = ""
     fee_multiplier: float = 1.0
+    title: str = ""
 
 
 @dataclass(frozen=True)

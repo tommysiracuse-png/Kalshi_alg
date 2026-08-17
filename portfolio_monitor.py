@@ -6,6 +6,7 @@ import asyncio
 import threading
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Dict, Iterable, Optional
 
 from clients.base_client import BaseClient
@@ -20,6 +21,7 @@ from clients.models import (
     Market,
     MarketQuery,
 )
+from portfolio_analytics import PortfolioAnalyticsStore
 
 
 PRICE_SCALE = 10_000
@@ -63,6 +65,7 @@ class PortfolioMonitorConfig:
     refresh_interval_seconds: float = 15.0
     history_window_seconds: float = 86_400.0
     tier_refresh_seconds: float = 3_600.0
+    analytics_path: Optional[Path] = None
 
 
 class PortfolioMonitor:
@@ -82,6 +85,13 @@ class PortfolioMonitor:
         self._last_success_at_ms: Optional[int] = None
         self._last_error: Optional[str] = None
         self._lock = asyncio.Lock()
+        self._analytics: Optional[PortfolioAnalyticsStore] = None
+        self._analytics_error: Optional[str] = None
+        if config.analytics_path is not None:
+            try:
+                self._analytics = PortfolioAnalyticsStore(config.analytics_path)
+            except Exception as exc:
+                self._analytics_error = str(exc)
 
     def due(self, now_ms: Optional[int] = None) -> bool:
         current = _now_ms() if now_ms is None else now_ms
@@ -219,7 +229,21 @@ class PortfolioMonitor:
         market_ids.extend(item.market_id for item in resting)
         markets, market_warnings = self._load_markets(market_ids)
         warnings.extend(market_warnings)
+        if self._analytics_error:
+            warnings.append(f"portfolio analytics storage unavailable: {self._analytics_error}")
         snapshot = self._build_snapshot(now_ms, balance, positions, resting, orders, fills, markets, limits, warnings)
+        if self._analytics is not None:
+            try:
+                self._analytics.record_refresh(snapshot, orders.values(), fills.values(), resting)
+                self._analytics_error = None
+            except Exception as exc:
+                self._analytics_error = str(exc)
+                snapshot["warnings"] = list(
+                    dict.fromkeys(
+                        list(snapshot.get("warnings") or [])
+                        + [f"portfolio analytics storage unavailable: {exc}"]
+                    )
+                )
         order_times = [item.created_at_ms for item in orders.values() if item.created_at_ms is not None]
         fill_times = [item.created_at_ms for item in fills.values() if item.created_at_ms is not None]
         return (
@@ -251,6 +275,8 @@ class PortfolioMonitor:
 
         position_rows = []
         unrealized_values: list[int] = []
+        liquidation_values: list[int] = []
+        midpoint_values: list[int] = []
         total_open_cost = 0
         for position in positions:
             if position.position_units == 0:
@@ -265,6 +291,7 @@ class PortfolioMonitor:
             cost = abs(position.market_exposure_units) if position.market_exposure_units is not None else None
             liquidation = _position_value_units(quantity, bid) if bid is not None else None
             unrealized = liquidation - cost if liquidation is not None and cost is not None else None
+            midpoint_value = _position_value_units(quantity, mid) if mid is not None else None
             market_value = _position_value_units(quantity, last) if last is not None else None
             market_unrealized = market_value - cost if market_value is not None and cost is not None else None
             realized = position.realized_pnl_units
@@ -281,6 +308,10 @@ class PortfolioMonitor:
                 warnings.append(f"{position.market_id} has no complete liquidation mark")
             if cost is not None:
                 total_open_cost += cost
+            if liquidation is not None:
+                liquidation_values.append(liquidation)
+            if midpoint_value is not None:
+                midpoint_values.append(midpoint_value)
             position_rows.append(
                 {
                     "marketId": position.market_id,
@@ -295,6 +326,8 @@ class PortfolioMonitor:
                     "midPriceUnits": mid,
                     "costBasisUnits": cost,
                     "averageCostPriceUnits": int(round(cost * COUNT_SCALE / quantity)) if cost is not None and quantity else None,
+                    "liquidationValueUnits": liquidation,
+                    "unrealizedValueUnits": midpoint_value,
                     "realizedPnlUnits": realized,
                     "feesUnits": fees,
                     "unrealizedPnlUnits": unrealized,
@@ -392,6 +425,13 @@ class PortfolioMonitor:
             if item.created_at_ms is not None and item.created_at_ms >= history_cutoff_ms
         ]
         aggregate_unrealized = sum(unrealized_values) if len(unrealized_values) == len(position_rows) else None
+        aggregate_liquidation = sum(liquidation_values) if len(liquidation_values) == len(position_rows) else None
+        aggregate_midpoint = sum(midpoint_values) if len(midpoint_values) == len(position_rows) else None
+        total_portfolio_value = (
+            balance.available_cash_units + aggregate_midpoint
+            if aggregate_midpoint is not None
+            else None
+        )
         return {
             "schemaVersion": 1,
             "available": True,
@@ -403,6 +443,9 @@ class PortfolioMonitor:
             "summary": {
                 "availableCashUnits": balance.available_cash_units,
                 "portfolioValueUnits": balance.portfolio_value_units,
+                "midpointPositionValueUnits": aggregate_midpoint,
+                "totalPortfolioValueUnits": total_portfolio_value,
+                "positionsLiquidationValueUnits": aggregate_liquidation,
                 "balanceUpdatedAtMs": balance.updated_at_ms,
                 "unrealizedPnlUnits": aggregate_unrealized,
                 "unrealizedReturnBps": _percent_bps(aggregate_unrealized, total_open_cost),

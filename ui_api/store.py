@@ -8,9 +8,11 @@ import subprocess
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Mapping, Optional
 
 from pnl_core import load_fills, summarize_pnl
+from portfolio_analytics import PortfolioAnalyticsStore
+from kalshi_urls import is_canonical_market_url
 from runtime_control import read_json, send_control_command
 from ui_api.config import Settings
 from session_store import SessionConflictError, SessionStore
@@ -63,6 +65,7 @@ class OperationsStore:
         self.settings = settings
         self.audit = AuditStore(settings.runtime_dir / "ui_audit.sqlite3")
         self.sessions = SessionStore(settings.session_dir or settings.workspace / "session_data")
+        self.portfolio_analytics = PortfolioAnalyticsStore(settings.runtime_dir / "portfolio_analytics.sqlite3")
         self._position_cache: Dict[str, tuple[int, Dict[str, Any]]] = {}
 
     def position(self, ticker: str) -> Dict[str, Any]:
@@ -306,6 +309,61 @@ class OperationsStore:
             **portfolio,
             "warnings": list(dict.fromkeys(warnings)),
         }
+
+    def portfolio_summary(self, window: str = "24h") -> Dict[str, Any]:
+        if window != "24h":
+            raise ValueError("window must be 24h")
+        return self.portfolio_analytics.summary(window_ms=86_400_000)
+
+    def portfolio_positions(self) -> Dict[str, Any]:
+        result = self.portfolio_analytics.positions(active_run=self.sessions.active_run())
+        return self._apply_portfolio_links(result, self.status()["data"])
+
+    def portfolio_fills(self, ticker: str, *, limit: int = 100, cursor: str = "") -> Dict[str, Any]:
+        if not self.portfolio_analytics.has_market(ticker):
+            raise KeyError(ticker)
+        return self.portfolio_analytics.fills(ticker, limit=limit, cursor=cursor)
+
+    def portfolio_orders(self) -> Dict[str, Any]:
+        active_run = self.sessions.active_run()
+        attempts: Dict[str, int] = {}
+        market_metrics = ((active_run or {}).get("metrics") or {}).get("markets") or {}
+        for market_id, values in market_metrics.items():
+            if isinstance(values, dict):
+                attempts[str(market_id)] = int(values.get("orderPlacementsAttempted") or 0)
+        status = self.status()["data"]
+        for client in (status.get("clients") or []) if active_run else []:
+            if not isinstance(client, dict):
+                continue
+            market_id = str(client.get("marketId") or "")
+            create = (((client.get("orderActivity") or {}).get("byAction") or {}).get("create") or {})
+            if market_id:
+                attempts[market_id] = max(attempts.get(market_id, 0), int(create.get("attempts") or 0))
+        result = self.portfolio_analytics.orders(active_run=active_run, placement_attempts=attempts)
+        return self._apply_portfolio_links(result, status)
+
+    def _apply_portfolio_links(self, payload: Dict[str, Any], status: Mapping[str, Any]) -> Dict[str, Any]:
+        current_links: Dict[str, str] = {}
+        for client in status.get("clients") or []:
+            if not isinstance(client, dict):
+                continue
+            market = client.get("market") if isinstance(client.get("market"), dict) else {}
+            market_id = str(client.get("marketId") or market.get("marketId") or "")
+            url = market.get("marketUrl")
+            if market_id and is_canonical_market_url(url):
+                current_links[market_id] = str(url)
+        self.portfolio_analytics.cache_market_links(current_links)
+        cached_links = self.portfolio_analytics.market_links()
+        items = []
+        for raw in payload.get("items") or []:
+            if not isinstance(raw, dict):
+                continue
+            item = dict(raw)
+            market_id = str(item.get("marketId") or item.get("ticker") or "")
+            existing = item.get("marketUrl")
+            item["marketUrl"] = cached_links.get(market_id) or (existing if is_canonical_market_url(existing) else None)
+            items.append(item)
+        return {**payload, "items": items}
 
     def client_monitoring(self, market_id: str) -> Dict[str, Any]:
         self.require_ticker(market_id)

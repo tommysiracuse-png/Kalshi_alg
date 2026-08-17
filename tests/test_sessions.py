@@ -113,7 +113,10 @@ def test_metrics_accumulator_keeps_completed_process_counters():
         "screener": {"apiActivity": {"rest": {"total": 4}}}, "portfolio": {},
     }
     assert recorder.observe(first)["orders"] == 3
+    assert recorder.observe(first)["orderPlacementsAttempted"] == 3
     second = {"clients": [{**first["clients"][0], "pid": 2, "runtime": {"startedAtMs": 20}, "fills": {"count": 1}}], "screener": {}, "portfolio": {}}
     result = recorder.observe(second)
     assert result["fills"] == 3
+    assert result["orderPlacementsAttempted"] == 6
+    assert result["markets"]["A"]["orderPlacementsAttempted"] == 6
     assert result["apiByComponent"]["screener"] == 4

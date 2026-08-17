@@ -401,6 +401,11 @@ class RunMetricsAccumulator:
             total += int((action or {}).get(outcome) or 0)
         return total
 
+    @staticmethod
+    def _placement_attempts(client: Mapping[str, Any]) -> int:
+        create = ((client.get("orderActivity") or {}).get("byAction") or {}).get("create") or {}
+        return int(create.get("attempts") or 0)
+
     def observe(self, status: Mapping[str, Any]) -> Dict[str, Any]:
         per_market: Dict[str, Dict[str, Any]] = {}
         for client in status.get("clients") or []:
@@ -410,6 +415,7 @@ class RunMetricsAccumulator:
             rest = (client.get("apiActivity") or {}).get("rest") or {}
             self.processes[key] = {
                 "marketId": client.get("marketId"), "orders": self._sum_actions(client, "attempts"),
+                "orderPlacementsAttempted": self._placement_attempts(client),
                 "orderSuccesses": self._sum_actions(client, "successes"), "orderErrors": self._sum_actions(client, "errors"),
                 "fills": int((client.get("fills") or {}).get("count") or 0), "apiCalls": int(rest.get("total") or 0),
                 "apiErrors": int(rest.get("errors") or 0), "realizedCents": float(pnl.get("realizedCents") or 0),
@@ -422,9 +428,10 @@ class RunMetricsAccumulator:
             current["total"] = max(current["total"], int(rest.get("total") or 0))
             current["errors"] = max(current["errors"], int(rest.get("errors") or 0))
         for value in self.processes.values():
-            market = per_market.setdefault(str(value["marketId"]), {"orders": 0, "fills": 0, "totalCents": 0.0, "apiCalls": 0})
+            market = per_market.setdefault(str(value["marketId"]), {"orders": 0, "orderPlacementsAttempted": 0, "fills": 0, "totalCents": 0.0, "apiCalls": 0})
             for name in ("orders", "fills", "apiCalls"):
                 market[name] += value[name]
+            market["orderPlacementsAttempted"] += value["orderPlacementsAttempted"]
             market["totalCents"] += value["totalCents"]
         values = list(self.processes.values())
         bot_api = sum(item["apiCalls"] for item in values)
@@ -434,6 +441,7 @@ class RunMetricsAccumulator:
         return {
             "runtimeMs": max(0, timestamp - self.started_at_ms),
             "orders": sum(item["orders"] for item in values), "orderSuccesses": sum(item["orderSuccesses"] for item in values),
+            "orderPlacementsAttempted": sum(item["orderPlacementsAttempted"] for item in values),
             "orderErrors": sum(item["orderErrors"] for item in values), "fills": sum(item["fills"] for item in values),
             "apiCalls": sum(api_by_component.values()), "apiErrors": bot_errors + sum(item["errors"] for item in self.components.values()),
             "apiByComponent": api_by_component, "realizedCents": round(sum(item["realizedCents"] for item in values), 4),

@@ -477,13 +477,15 @@ class KalshiApiClient(BaseClient):
             if close_time is not None:
                 break
         market_id = str(payload.get("ticker") or fallback_id)
-        series_id = str(payload.get("series_ticker") or payload.get("series") or payload.get("series_name") or market_id)
+        event_id = str(payload.get("event_ticker") or payload.get("event") or payload.get("event_name") or market_id)
+        derived_series_id = event_id.split("-", 1)[0] if "-" in event_id else event_id
+        series_id = str(payload.get("series_ticker") or payload.get("series") or payload.get("series_name") or derived_series_id)
         return Market(
             market_id=market_id,
             title=str(payload.get("title") or ""),
             status=str(payload.get("status") or ""),
             series_id=series_id,
-            event_id=str(payload.get("event_ticker") or payload.get("event") or payload.get("event_name") or market_id),
+            event_id=event_id,
             close_time_ms=close_time,
             price_level_structure=str(payload.get("price_level_structure") or ""),
             fractional_trading_enabled=bool(payload.get("fractional_trading_enabled")),
@@ -502,7 +504,7 @@ class KalshiApiClient(BaseClient):
             open_interest_units=_optional_count(payload, "open_interest_fp", "open_interest"),
             expected_expiration_time_ms=_optional_timestamp_ms(payload.get("expected_expiration_time")),
             expiration_time_ms=_optional_timestamp_ms(payload.get("expiration_time")),
-            market_url=f"https://kalshi.com/markets/{series_id.lower()}" if series_id else None,
+            market_url=None,
         )
 
     @staticmethod
@@ -860,6 +862,7 @@ class KalshiApiClient(BaseClient):
             series_id=str(item.get("ticker") or item.get("series_ticker") or series_id),
             fee_type=str(item.get("fee_type") or ""),
             fee_multiplier=float(item.get("fee_multiplier") or 1.0),
+            title=str(item.get("title") or ""),
         )
 
     def get_series_fee_changes(self, series_id: str, *, show_historical: bool = False) -> List[SeriesFeeChange]:

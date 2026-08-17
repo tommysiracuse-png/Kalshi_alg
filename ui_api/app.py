@@ -92,6 +92,31 @@ async def portfolio(_: str = Depends(authorize)) -> dict:
     return store.portfolio()
 
 
+@app.get("/api/v1/portfolio/summary")
+async def portfolio_summary(window: Literal["24h"] = "24h", _: str = Depends(authorize)) -> dict:
+    return store.portfolio_summary(window)
+
+
+@app.get("/api/v1/portfolio/positions")
+async def portfolio_positions(_: str = Depends(authorize)) -> dict:
+    return store.portfolio_positions()
+
+
+@app.get("/api/v1/portfolio/positions/{ticker}/fills")
+async def portfolio_fills(
+    ticker: str,
+    limit: int = Query(100, ge=1, le=500),
+    cursor: str = "",
+    _: str = Depends(authorize),
+) -> dict:
+    return store.portfolio_fills(ticker, limit=limit, cursor=cursor)
+
+
+@app.get("/api/v1/portfolio/orders")
+async def portfolio_orders(_: str = Depends(authorize)) -> dict:
+    return store.portfolio_orders()
+
+
 @app.get("/api/v1/audit")
 async def audit(limit: int = Query(100, ge=1, le=500), _: str = Depends(authorize)) -> dict:
     return {"generatedAt": now_ms(), "items": store.audit.list(limit)}

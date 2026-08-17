@@ -83,7 +83,10 @@ class Launcher:
         self.portfolio_client = KalshiApiClient(client_config)
         self.portfolio = PortfolioMonitor(
             self.portfolio_client,
-            PortfolioMonitorConfig(subaccount_number=int(arguments.subaccount or 0)),
+            PortfolioMonitorConfig(
+                subaccount_number=int(arguments.subaccount or 0),
+                analytics_path=self.runtime_dir / "portfolio_analytics.sqlite3",
+            ),
         )
         screener_args = build_screener_parser().parse_args([])
         screener_args.output = str(self.screen_path)

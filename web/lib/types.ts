@@ -36,7 +36,7 @@ export type ApiActivity = {
 export type ClientMonitoring = {
   marketId: string; title: string; pid?: number; lifecycle?: string; socketHealthy?: boolean; restartCount?: number;
   runtime?: { startedAtMs?: number; runningForMs?: number };
-  market?: { marketId?: string; title?: string; priceUnits?: number | null; priceSource?: string; priceAtMs?: number | null };
+  market?: { marketId?: string; title?: string; seriesTicker?: string; eventTicker?: string; seriesTitle?: string; marketUrl?: string | null; priceUnits?: number | null; priceSource?: string; priceAtMs?: number | null };
   portfolio?: { startingPositionUnits?: number; currentPositionUnits?: number; updatedAtMs?: number };
   pnl?: PnlTotals & { sessionPositionUnits?: number; markPriceUnits?: number | null; markSource?: string; markAtMs?: number | null };
   fills?: { count?: number; quantityUnits?: number; lastFillAtMs?: number | null; recent?: Array<Record<string, unknown>> };
@@ -58,6 +58,8 @@ export type PortfolioPosition = {
   unrealizedPnlUnits?: number | null; unrealizedReturnBps?: number | null; totalPnlUnits?: number | null; totalReturnBps?: number | null;
   marketUnrealizedPnlUnits?: number | null; marketUnrealizedReturnBps?: number | null; marketTotalPnlUnits?: number | null; marketTotalReturnBps?: number | null;
   totalTradedUnits?: number | null; openOrderCount: number; updatedAtMs?: number | null;
+  liquidationValueUnits?: number | null; unrealizedValueUnits?: number | null;
+  totalFillCount?: number; totalOrderCount?: number; runningInCurrentSession?: boolean;
 };
 export type PortfolioOrder = {
   orderId: string; marketId: string; ticker: string; title: string; marketUrl?: string | null; side?: "yes" | "no" | null;
@@ -73,4 +75,50 @@ export type AccountPortfolio = {
   summary: { availableCashUnits?: number | null; portfolioValueUnits?: number | null; balanceUpdatedAtMs?: number | null; unrealizedPnlUnits?: number | null; unrealizedReturnBps?: number | null; positionCount?: number; apiTier?: string | null; readRateLimit?: { refillRate: number; bucketCapacity: number } | null; writeRateLimit?: { refillRate: number; bucketCapacity: number } | null };
   positions: PortfolioPosition[];
   orders: { summary: { openOrderCount?: number; lastOrderAtMs?: number | null; lastFillAtMs?: number | null; openMarketValueUnits?: number | null; averageFirstFillTimeMs?: number | null; filledOrderSampleSize?: number }; items: PortfolioOrder[] };
+};
+
+export type AnalyticsSource = { available: boolean; updatedAt: number | null; stale: boolean };
+export type AnalyticsCoverage = { startedAtMs?: number | null; requestedWindowMs?: number; actualWindowMs?: number; partial?: boolean };
+export type PortfolioHistoryMetric = {
+  currentUnits?: number | null; baselineUnits?: number | null; changeUnits?: number | null; changeBps?: number | null;
+  points: Array<{ timestampMs: number; valueUnits: number }>; partial: boolean; actualWindowMs: number;
+};
+export type PortfolioSummaryAnalytics = {
+  generatedAt: number; snapshotAtMs?: number | null; source: AnalyticsSource; coverage: AnalyticsCoverage; warnings: string[];
+  summary: {
+    availableCashUnits?: number | null; midpointPositionValueUnits?: number | null; totalPortfolioValueUnits?: number | null;
+    positionsLiquidationValueUnits?: number | null; apiTier?: string | null; positionCount?: number;
+    readRateLimit?: { refillRate: number; bucketCapacity: number } | null;
+    writeRateLimit?: { refillRate: number; bucketCapacity: number } | null;
+  };
+  history: { availableCash?: PortfolioHistoryMetric; totalPortfolioValue?: PortfolioHistoryMetric; positionsLiquidationValue?: PortfolioHistoryMetric };
+};
+export type PortfolioPositionsAnalytics = {
+  generatedAt: number; snapshotAtMs?: number | null; source: AnalyticsSource; coverage: AnalyticsCoverage; warnings: string[]; items: PortfolioPosition[];
+};
+export type PortfolioFill = {
+  fillId: string; tradeId: string; orderId: string; ticker: string; side?: "yes" | "no" | null;
+  filledAtMs?: number | null; timeToFillMs?: number | null; contractsUnits: number;
+  costOfContractsUnits?: number | null; notionalCostUnits?: number | null; feeUnits: number; costInPositionUnits?: number | null;
+  liquidationValueUnits?: number | null; unrealizedValueUnits?: number | null; liquidationPnlUnits?: number | null; marketPnlUnits?: number | null;
+  isTaker: boolean;
+};
+export type PortfolioFillsAnalytics = {
+  generatedAt: number; snapshotAtMs?: number | null; source: AnalyticsSource; coverage: AnalyticsCoverage; warnings: string[];
+  ticker: string; items: PortfolioFill[]; nextCursor?: string | null;
+};
+export type PortfolioOrderLine = {
+  ticker: string; marketId: string; title: string; marketUrl?: string | null; openOrderCount: number; ordersAttempted: number;
+  remainingContractsUnits: number; initialContractsUnits: number; filledContractsUnits: number; totalFillCount: number;
+  firstCreatedAtMs?: number | null; lastUpdatedAtMs?: number | null; totalTimeOnBookMs?: number | null;
+  midPriceUnits?: number | null; totalMarketValueUnits?: number | null; runningInCurrentSession: boolean;
+  sideBreakdown: Array<{ side: string; openOrderCount: number; remainingContractsUnits: number; midPriceUnits?: number | null; marketValueUnits?: number | null }>;
+};
+export type PortfolioOrdersAnalytics = {
+  generatedAt: number; snapshotAtMs?: number | null; source: AnalyticsSource; coverage: AnalyticsCoverage; warnings: string[];
+  summary: {
+    totalOpenOrders: number; ordersAttempted: number; lastOrderAtMs?: number | null; averageTimeBetweenOrdersMs?: number | null;
+    lastFillAtMs?: number | null; averageFillTimeMs?: number | null; fillSampleSize: number; totalMarketValueUnits?: number | null;
+  };
+  items: PortfolioOrderLine[];
 };

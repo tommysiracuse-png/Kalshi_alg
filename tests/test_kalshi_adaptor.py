@@ -114,6 +114,7 @@ def test_market_position_and_order_payloads_are_normalized():
 
     assert market.market_id == "MKT"
     assert market.series_id == "SERIES"
+    assert market.market_url is None
     assert market.price_ranges[0].step_units == 100
     assert positions[0].position_units == 250
     assert order.order_id == "order-1"
@@ -124,6 +125,27 @@ def test_market_position_and_order_payloads_are_normalized():
     assert body["side"] == "ask"
     assert body["price"] == "0.7500"
     assert body["count"] == "1.50"
+
+
+def test_market_derives_series_from_official_event_ticker_without_guessing_a_url():
+    market = KalshiApiClient._market({
+        "ticker": "KXDEEPSHARE-DEEP-26",
+        "event_ticker": "KXDEEPSHARE-DEEP",
+        "title": "DeepSeek market share this week?",
+    }, "")
+    assert market.series_id == "KXDEEPSHARE"
+    assert market.event_id == "KXDEEPSHARE-DEEP"
+    assert market.market_url is None
+
+
+def test_series_title_is_retained_for_canonical_website_links():
+    http = FakeHTTP()
+    http.responses = [{"series": {
+        "ticker": "KXDEEPSHARE", "title": "DeepSeek market share",
+        "fee_type": "quadratic", "fee_multiplier": 1,
+    }}]
+    series = make_client(http=http).get_series("KXDEEPSHARE")
+    assert series.title == "DeepSeek market share"
 
 
 def test_http_rate_limit_is_mapped_to_typed_error():
