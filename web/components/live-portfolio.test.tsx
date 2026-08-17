@@ -56,7 +56,7 @@ describe("portfolio fixed-point formatting", () => {
     const positions: PortfolioPositionsAnalytics = {
       generatedAt: 2_000_000, snapshotAtMs: 2_000_000, source, warnings: [], coverage: { startedAtMs: 1_000_000 },
       items: [
-        { marketId: "TEST-1", ticker: "TEST-1", title: "Test market", side: "yes", contractsUnits: 100, bidPriceUnits: 5000, askPriceUnits: 5200, midPriceUnits: 5100, costBasisUnits: 4000, averageCostPriceUnits: 4000, liquidationValueUnits: 5000, unrealizedValueUnits: 5100, totalFillCount: 1, totalOrderCount: 1, openOrderCount: 1, runningInCurrentSession: true },
+        { marketId: "TEST-1", ticker: "TEST-1", title: "Test market", marketUrl: "https://kalshi.com/markets/test/test-market/test-event", side: "yes", contractsUnits: 100, bidPriceUnits: 5000, askPriceUnits: 5200, midPriceUnits: 5100, costBasisUnits: 4000, averageCostPriceUnits: 4000, liquidationValueUnits: 5000, unrealizedValueUnits: 5100, totalFillCount: 1, totalOrderCount: 1, openOrderCount: 1, runningInCurrentSession: true },
         { marketId: "OTHER-1", ticker: "OTHER-1", title: "Other market", side: "no", contractsUnits: 200, bidPriceUnits: 3000, askPriceUnits: 3200, midPriceUnits: 3100, liquidationValueUnits: 6000, unrealizedValueUnits: 6200, totalFillCount: 0, totalOrderCount: 0, openOrderCount: 0, runningInCurrentSession: false },
       ],
     };
@@ -72,6 +72,9 @@ describe("portfolio fixed-point formatting", () => {
     expect(screen.getByText("Positions Liquidation Value")).toBeInTheDocument();
     expect(screen.getByText("Orders Attempted")).toBeInTheDocument();
     expect(screen.getByText("2 of 2 markets")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Test market ↗" })).toHaveAttribute("href", "https://kalshi.com/markets/test/test-market/test-event");
+    expect(screen.getByRole("link", { name: "Open market ↗" })).toHaveAttribute("href", "https://kalshi.com/markets/test/test-market/test-event");
+    expect(screen.getByRole("link", { name: "Open market ↗" })).toHaveAttribute("target", "_blank");
 
     fireEvent.change(screen.getAllByLabelText("Ticker")[0], { target: { value: "OTHER" } });
     expect(screen.getByText("1 of 2 markets")).toBeInTheDocument();

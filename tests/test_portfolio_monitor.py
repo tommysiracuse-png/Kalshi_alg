@@ -51,8 +51,8 @@ class FakePortfolioClient:
     def list_markets(self, query):
         self.calls["markets"] += 1
         return [
-            Market("YES", "Yes market", series_id="SER", yes_bid_units=5_000, yes_ask_units=5_200, no_bid_units=4_800, no_ask_units=5_000, last_price_units=5_100, market_url="https://kalshi.com/markets/ser"),
-            Market("NO", "No market", series_id="SER", yes_bid_units=6_800, yes_ask_units=7_000, no_bid_units=3_000, no_ask_units=3_200, last_price_units=6_900),
+            Market("YES", "Yes market", series_id="SER", event_id="SER-EVENT", yes_bid_units=5_000, yes_ask_units=5_200, no_bid_units=4_800, no_ask_units=5_000, last_price_units=5_100, market_url="https://kalshi.com/markets/ser", series_title="Series title"),
+            Market("NO", "No market", series_id="SER", event_id="SER-EVENT", yes_bid_units=6_800, yes_ask_units=7_000, no_bid_units=3_000, no_ask_units=3_200, last_price_units=6_900, series_title="Series title"),
         ]
 
     def activity_snapshot(self):
@@ -76,6 +76,8 @@ def test_portfolio_calculations_and_last_good_failure():
         assert positions["YES"]["unrealizedPnlUnits"] == 2_000
         assert positions["YES"]["marketUnrealizedPnlUnits"] == 2_200
         assert positions["YES"]["marketTotalPnlUnits"] == 3_100
+        assert positions["YES"]["marketUrl"] == "https://kalshi.com/markets/ser/series-title/ser-event"
+        assert positions["NO"]["marketUrl"] == "https://kalshi.com/markets/ser/series-title/ser-event"
         assert positions["NO"]["lastPriceUnits"] == 3_100
         assert positions["NO"]["unrealizedPnlUnits"] == 0
         assert positions["NO"]["marketUnrealizedPnlUnits"] == 100

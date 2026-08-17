@@ -224,13 +224,14 @@ export function LivePortfolio({
         <label className="checkbox-filter"><input type="checkbox" checked={positionFilters.currentSession} onChange={event => setPositionFilters({ ...positionFilters, currentSession: event.target.checked })} /><span>Running in current session</span></label>
         <button className="button" type="button" onClick={() => setPositionFilters(emptyPositionFilters)}>Clear filters</button>
       </div>
-      <div className="table-wrap portfolio-table"><table><thead><tr><th>Market</th><th>Side / contracts</th><th>Bid / ask / mid</th><th>Cost / average</th><th>Liquidation value</th><th>Unrealized value</th><th>Fills / orders</th><th>Open orders</th></tr></thead><tbody>
+      <div className="table-wrap portfolio-table"><table><thead><tr><th>Market</th><th>Venue</th><th>Side / contracts</th><th>Bid / ask / mid</th><th>Cost / average</th><th>Liquidation value</th><th>Unrealized value</th><th>Fills / orders</th><th>Open orders</th></tr></thead><tbody>
         {visiblePositions.map(position => {
           const isExpanded = expanded.has(position.ticker);
           const fills = fillPages[position.ticker];
           return <Fragment key={position.marketId}>
             <tr className="expandable-position" tabIndex={0} aria-expanded={isExpanded} onClick={() => togglePosition(position.ticker)} onKeyDown={event => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); togglePosition(position.ticker); } }}>
               <td><div className="market-cell"><button type="button" className="row-toggle" aria-label={`${isExpanded ? "Collapse" : "Expand"} fills for ${position.ticker}`} aria-expanded={isExpanded} onClick={event => { event.stopPropagation(); togglePosition(position.ticker); }}>{isExpanded ? "⌄" : "›"}</button><div>{position.marketUrl ? <a className="external-link" href={position.marketUrl} target="_blank" rel="noreferrer" onClick={event => event.stopPropagation()}><strong>{position.title || position.ticker}</strong> ↗</a> : <strong>{position.title || position.ticker}</strong>}<small className="mono">{position.ticker}</small>{position.runningInCurrentSession && <small className="session-tag">Current session</small>}</div></div></td>
+              <td>{position.marketUrl ? <a className="external-link venue-market-link" href={position.marketUrl} target="_blank" rel="noreferrer" onClick={event => event.stopPropagation()}>Open market ↗</a> : <span className="muted">Unavailable</span>}</td>
               <td><span className={`side side-${position.side}`}>{position.side.toUpperCase()}</span><small>{contractUnits(position.contractsUnits)} contracts</small></td>
               <td>{priceUnits(position.bidPriceUnits)} / {priceUnits(position.askPriceUnits)}<small>{priceUnits(position.midPriceUnits)} midpoint</small></td>
               <td>{moneyUnits(position.costBasisUnits)}<small>{priceUnits(position.averageCostPriceUnits)} average</small></td>
@@ -239,7 +240,7 @@ export function LivePortfolio({
               <td>{position.totalFillCount ?? 0} / {position.totalOrderCount ?? 0}<small>Observed since <Time value={positionsData.coverage.startedAtMs} /></small></td>
               <td>{position.openOrderCount}</td>
             </tr>
-            <tr className={`position-detail-row ${isExpanded ? "open" : ""}`}><td colSpan={8}><div className="position-expansion" aria-hidden={!isExpanded}><div>
+            <tr className={`position-detail-row ${isExpanded ? "open" : ""}`}><td colSpan={9}><div className="position-expansion" aria-hidden={!isExpanded}><div>
               <div className="fill-heading"><strong>Fill history</strong><span>{fills?.items.length ?? 0} loaded</span></div>
               {fills?.error && <p className="error">{fills.error} <button type="button" className="link-inline" onClick={() => void loadFills(position.ticker, "", true)}>Retry</button></p>}
               {!fills && <p className="empty">Open the position to load fills.</p>}

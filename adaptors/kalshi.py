@@ -505,6 +505,7 @@ class KalshiApiClient(BaseClient):
             expected_expiration_time_ms=_optional_timestamp_ms(payload.get("expected_expiration_time")),
             expiration_time_ms=_optional_timestamp_ms(payload.get("expiration_time")),
             market_url=None,
+            series_title=str(payload.get("series_title") or ""),
         )
 
     @staticmethod

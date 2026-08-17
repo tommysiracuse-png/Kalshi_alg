@@ -132,9 +132,11 @@ def test_market_derives_series_from_official_event_ticker_without_guessing_a_url
         "ticker": "KXDEEPSHARE-DEEP-26",
         "event_ticker": "KXDEEPSHARE-DEEP",
         "title": "DeepSeek market share this week?",
+        "series_title": "DeepSeek market share",
     }, "")
     assert market.series_id == "KXDEEPSHARE"
     assert market.event_id == "KXDEEPSHARE-DEEP"
+    assert market.series_title == "DeepSeek market share"
     assert market.market_url is None
 
 

@@ -95,6 +95,7 @@ class Market:
     expected_expiration_time_ms: Optional[int] = None
     expiration_time_ms: Optional[int] = None
     market_url: Optional[str] = None
+    series_title: str = ""
 
 
 @dataclass(frozen=True)

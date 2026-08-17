@@ -21,6 +21,7 @@ from clients.models import (
     Market,
     MarketQuery,
 )
+from kalshi_urls import canonical_market_url, is_canonical_market_url
 from portfolio_analytics import PortfolioAnalyticsStore
 
 
@@ -57,6 +58,18 @@ def _percent_bps(numerator: Optional[int], denominator: Optional[int]) -> Option
     if numerator is None or denominator in (None, 0):
         return None
     return int(round(numerator * 10_000 / abs(denominator)))
+
+
+def _venue_market_url(market: Optional[Market]) -> Optional[str]:
+    if market is None:
+        return None
+    if is_canonical_market_url(market.market_url):
+        return market.market_url
+    return canonical_market_url(
+        market.series_id,
+        market.event_id,
+        market.series_title or market.title,
+    )
 
 
 @dataclass(frozen=True)
@@ -317,7 +330,10 @@ class PortfolioMonitor:
                     "marketId": position.market_id,
                     "ticker": position.market_id,
                     "title": market.title if market else "",
-                    "marketUrl": market.market_url if market else None,
+                    "seriesTicker": market.series_id if market else "",
+                    "eventTicker": market.event_id if market else "",
+                    "seriesTitle": market.series_title if market else "",
+                    "marketUrl": _venue_market_url(market),
                     "side": side,
                     "contractsUnits": quantity,
                     "lastPriceUnits": last,
@@ -383,7 +399,10 @@ class PortfolioMonitor:
                     "marketId": order.market_id,
                     "ticker": order.market_id,
                     "title": market.title if market else "",
-                    "marketUrl": market.market_url if market else None,
+                    "seriesTicker": market.series_id if market else "",
+                    "eventTicker": market.event_id if market else "",
+                    "seriesTitle": market.series_title if market else "",
+                    "marketUrl": _venue_market_url(market),
                     "side": order.side,
                     "remainingContractsUnits": order.remaining_count_units,
                     "initialContractsUnits": order.initial_count_units,

@@ -52,7 +52,7 @@ export type Monitoring = {
 };
 
 export type PortfolioPosition = {
-  marketId: string; ticker: string; title: string; marketUrl?: string | null; side: "yes" | "no";
+  marketId: string; ticker: string; title: string; seriesTicker?: string; eventTicker?: string; seriesTitle?: string; marketUrl?: string | null; side: "yes" | "no";
   contractsUnits: number; lastPriceUnits?: number | null; bidPriceUnits?: number | null; askPriceUnits?: number | null; midPriceUnits?: number | null;
   costBasisUnits?: number | null; averageCostPriceUnits?: number | null; realizedPnlUnits?: number | null; feesUnits?: number | null;
   unrealizedPnlUnits?: number | null; unrealizedReturnBps?: number | null; totalPnlUnits?: number | null; totalReturnBps?: number | null;
@@ -108,7 +108,7 @@ export type PortfolioFillsAnalytics = {
   ticker: string; items: PortfolioFill[]; nextCursor?: string | null;
 };
 export type PortfolioOrderLine = {
-  ticker: string; marketId: string; title: string; marketUrl?: string | null; openOrderCount: number; ordersAttempted: number;
+  ticker: string; marketId: string; title: string; seriesTicker?: string; eventTicker?: string; seriesTitle?: string; marketUrl?: string | null; openOrderCount: number; ordersAttempted: number;
   remainingContractsUnits: number; initialContractsUnits: number; filledContractsUnits: number; totalFillCount: number;
   firstCreatedAtMs?: number | null; lastUpdatedAtMs?: number | null; totalTimeOnBookMs?: number | null;
   midPriceUnits?: number | null; totalMarketValueUnits?: number | null; runningInCurrentSession: boolean;
