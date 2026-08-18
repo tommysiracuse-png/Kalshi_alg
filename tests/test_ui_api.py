@@ -1,6 +1,7 @@
 import csv
 import json
 import os
+import sqlite3
 import tempfile
 from pathlib import Path
 
@@ -13,6 +14,7 @@ import ui_api.app as app_module
 from clients.models import AccountFill, AccountOrder
 from ui_api.config import Settings
 from ui_api.store import OperationsStore
+from top_of_book_bot import TelemetryStore
 
 
 def fixture_store(root: Path) -> OperationsStore:
@@ -167,3 +169,93 @@ async def test_session_crud_and_metrics_are_authenticated():
         assert created.json()["item"]["name"] == "Test config"
         assert metrics.status_code == 200
         assert metrics.json()["summary"]["timesRun"] == 0
+
+
+@pytest.mark.anyio
+async def test_run_market_activity_contract_limits_and_path_validation():
+    with tempfile.TemporaryDirectory() as temporary:
+        operations = fixture_store(Path(temporary))
+        run = operations.sessions.prepare_run()
+        database = Path(run["artifactPath"]) / "markets" / "TEST-1" / "telemetry.sqlite3"
+        telemetry = TelemetryStore(str(database), enabled=True)
+        telemetry.record_market_metadata(
+            ticker="TEST-1", title="Test market", series_ticker="TEST", event_ticker="TEST-EVENT",
+            market_url="https://kalshi.com/markets/test/test-market/test-event",
+        )
+        telemetry.start_order_revision(
+            revision_key="rejected", action="create", side="yes", client_order_id="client",
+            order_id=None, placed_at_ms=2_000_000, size_units=100, price_units=4_000,
+            book_bid_units=3_900, book_ask_units=4_100, book_mid_units=4_000,
+        )
+        telemetry.reject_order_revision("rejected", "rejected")
+        app_module.store = operations
+        headers = {"x-internal-token": "test-token"}
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app_module.app, raise_app_exceptions=False), base_url="http://test") as client:
+            assert (await client.get(f"/api/v1/runs/{run['id']}/markets")).status_code == 401
+            markets = await client.get(f"/api/v1/runs/{run['id']}/markets", headers=headers)
+            activity = await client.get(f"/api/v1/runs/{run['id']}/markets/TEST-1/activity?fill_limit=25&order_limit=25", headers=headers)
+            too_small = await client.get(f"/api/v1/runs/{run['id']}/markets/TEST-1/activity?fill_limit=0", headers=headers)
+            too_large = await client.get(f"/api/v1/runs/{run['id']}/markets/TEST-1/activity?order_limit=501", headers=headers)
+            traversal = await client.get(f"/api/v1/runs/{run['id']}/markets/BAD%5C..%5CTEST-1/activity", headers=headers)
+        assert markets.status_code == 200
+        assert markets.json()["items"][0]["ticker"] == "TEST-1"
+        assert activity.status_code == 200
+        assert activity.json()["orders"]["items"][0]["endedState"] == "Rejected"
+        assert too_small.status_code == 422
+        assert too_large.status_code == 422
+        assert traversal.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_metrics_heartbeat_is_compact_authenticated_and_shared(monkeypatch: pytest.MonkeyPatch):
+    with tempfile.TemporaryDirectory() as temporary:
+        operations = fixture_store(Path(temporary))
+        run = operations.sessions.claim_run()
+        operations.sessions.record_metrics(run["id"], {
+            "runtimeMs": 12_345, "orders": 2, "fills": 1, "totalCents": 50,
+            "apiCalls": 9, "apiErrors": 1,
+            "markets": {"TEST-1": {"orders": 2, "orderPlacementsAttempted": 1, "fills": 1}},
+        }, sample=False)
+        calls = 0
+        original = operations.sessions.metrics_heartbeat
+
+        def counted():
+            nonlocal calls
+            calls += 1
+            return original()
+
+        monkeypatch.setattr(operations.sessions, "metrics_heartbeat", counted)
+        app_module.store = operations
+        headers = {"x-internal-token": "test-token"}
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app_module.app), base_url="http://test") as client:
+            assert (await client.get("/api/v1/metrics/heartbeat")).status_code == 401
+            first = await client.get("/api/v1/metrics/heartbeat", headers=headers)
+            second = await client.get("/api/v1/metrics/heartbeat", headers=headers)
+        payload = first.json()
+        assert first.status_code == second.status_code == 200
+        assert calls == 1
+        assert payload["activeRun"]["summary"]["orders"] == 2
+        assert payload["activeRun"]["activityRevision"]
+        assert payload["source"]["available"] is True
+        assert len(first.content) < 2_000
+
+
+@pytest.mark.anyio
+async def test_sse_source_failure_does_not_end_other_producers(monkeypatch: pytest.MonkeyPatch):
+    class ConnectedRequest:
+        async def is_disconnected(self):
+            return False
+
+    def broken_overview():
+        raise sqlite3.OperationalError("overview database unavailable")
+
+    monkeypatch.setattr(app_module.store, "overview", broken_overview)
+    monkeypatch.setattr(app_module.store, "monitoring", lambda: {"healthy": True})
+    stream = app_module.event_stream(ConnectedRequest())
+    first = await anext(stream)
+    second = await anext(stream)
+    await stream.aclose()
+    assert "event: source_error" in first
+    assert '"sourceName":"overview"' in first
+    assert "event: monitoring" in second
+    assert '"healthy":true' in second

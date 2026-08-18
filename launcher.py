@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import queue
 import signal
+import sqlite3
 import threading
 import time
 from pathlib import Path
@@ -26,6 +28,9 @@ from lip_launcher import (
 from runtime_control import ControlRequest, ControlServer, STATUS_SCHEMA_VERSION
 from screener import Screener
 from portfolio_monitor import PortfolioMonitor, PortfolioMonitorConfig
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 class Launcher:
@@ -146,6 +151,8 @@ class Launcher:
         self._portfolio_task: Optional["asyncio.Task[bool]"] = None
         self._run_error: Optional[str] = None
         self._last_metric_sample_ms = 0
+        self._observability_warning: Optional[str] = None
+        self._last_observability_warning_log_ms = 0
         self._metrics = None
         if self.session_store is not None:
             from session_store import RunMetricsAccumulator
@@ -196,6 +203,7 @@ class Launcher:
                 "nextRefreshAt": int(self.next_refresh_at * 1000) if self.next_refresh_at else None,
                 "lastError": self.last_error,
                 "pendingAction": self.pending_action,
+                "observabilityWarning": self._observability_warning,
             },
             "counts": counts,
             "bots": manager_status["bots"],
@@ -218,15 +226,34 @@ class Launcher:
         status = self.status_snapshot(lifecycle)
         with self.status_lock:
             self.latest_status = status
-        atomic_write_json(self.status_path, status)
+        # In-memory status is published first so trading/control loops remain
+        # usable even if an observability filesystem is temporarily unavailable.
+        runtime_snapshot_ok = True
+        try:
+            atomic_write_json(self.status_path, status)
+        except OSError as exc:
+            runtime_snapshot_ok = False
+            self._record_observability_failure("runtime snapshot", exc)
         if self.session_store is not None and self.run_id and self._metrics is not None:
             metrics = self._metrics.observe(status)
             current = int(time.time() * 1000)
             sample = current - self._last_metric_sample_ms >= 15_000
-            self.session_store.record_metrics(self.run_id, metrics, sample=sample)
-            if sample:
-                self._last_metric_sample_ms = current
+            try:
+                self.session_store.record_metrics(self.run_id, metrics, sample=sample)
+                if sample:
+                    self._last_metric_sample_ms = current
+                if runtime_snapshot_ok:
+                    self._observability_warning = None
+            except (sqlite3.Error, OSError) as exc:
+                self._record_observability_failure("session metrics", exc)
         return status
+
+    def _record_observability_failure(self, operation: str, exc: BaseException) -> None:
+        current = int(time.time() * 1000)
+        self._observability_warning = f"{operation} unavailable: {exc}"
+        if current - self._last_observability_warning_log_ms >= 60_000:
+            LOGGER.warning("observability failure does not stop trading: %s", self._observability_warning)
+            self._last_observability_warning_log_ms = current
 
     def _status_provider(self) -> Dict[str, object]:
         with self.status_lock:
@@ -416,7 +443,10 @@ class Launcher:
             self.publish_status("running")
             self._append_run_log("launcher running")
             if self.session_store is not None and self.run_id:
-                self.session_store.mark_running(self.run_id)
+                try:
+                    self.session_store.mark_running(self.run_id)
+                except (sqlite3.Error, OSError) as exc:
+                    self._record_observability_failure("mark run running", exc)
             while not self.shutdown_requested.is_set():
                 while True:
                     try:
@@ -486,8 +516,11 @@ class Launcher:
                 if self.session_store is not None and self.run_id:
                     final_metrics = self._metrics.observe(self.latest_status) if self._metrics is not None else None
                     final_status = "shutdown_failed" if shutdown_error else "failed" if self._run_error else "stopped"
-                    self.session_store.finish_run(self.run_id, final_status, metrics=final_metrics, error=str(shutdown_error or self._run_error or "") or None)
-                    self._append_run_log(f"launcher finalized status={final_status}")
+                    try:
+                        self.session_store.finish_run(self.run_id, final_status, metrics=final_metrics, error=str(shutdown_error or self._run_error or "") or None)
+                        self._append_run_log(f"launcher finalized status={final_status}")
+                    except (sqlite3.Error, OSError) as exc:
+                        self._record_observability_failure("final session metrics", exc)
                 for sig in installed_signals:
                     loop.remove_signal_handler(sig)
             if shutdown_error is not None:

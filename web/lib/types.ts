@@ -15,6 +15,47 @@ export type HistoricalRun = {
   status: string; createdAt: number; startedAt?: number | null; endedAt?: number | null; heartbeatAt?: number | null;
   artifactPath: string; artifactBytes?: number; error?: string | null; metrics: Record<string, unknown>;
 };
+export type MetricsSummary = {
+  timesRun: number; runtimeMs: number; orders: number; ordersPerMinute: number; fills: number; fillsPerMinute: number;
+  apiCalls: number; apiErrors: number; realizedCents: number; unrealizedCents: number; totalCents: number;
+  pnlComplete: boolean; outcomes: Record<string, number>; apiByComponent: Record<string, number>;
+};
+export type MetricsResponse = { generatedAt: number; summary: MetricsSummary; runs: HistoricalRun[] };
+export type MetricsHeartbeat = {
+  generatedAt: number; source: SourceState;
+  activeRun?: {
+    id: string; sessionId: string; status: string; heartbeatAt?: number | null;
+    activityRevision: string; summary: Partial<Pick<MetricsSummary, "runtimeMs" | "orders" | "fills" | "apiCalls" | "apiErrors" | "realizedCents" | "unrealizedCents" | "totalCents" | "pnlComplete">>;
+    source: SourceState;
+  } | null;
+};
+export type RunMarketMetrics = {
+  ticker: string; description: string; marketUrl?: string | null; side: "YES" | "NO" | "BOTH" | "—";
+  yesContractsUnits: number; noContractsUnits: number; yesAverageCostPriceUnits?: number | null; noAverageCostPriceUnits?: number | null;
+  totalCostUnits?: number | null; realizedPnlUnits?: number | null; realizedReturnBps?: number | null;
+  fillCount: number; orderCount: number; firstFillAtMs?: number | null; lastFillAtMs?: number | null;
+  coverage: { fillsComplete: boolean; ordersComplete: boolean; fillPricesComplete?: boolean; fillFeesComplete?: boolean; descriptionComplete?: boolean; marketLinkAvailable?: boolean }; warnings: string[];
+};
+export type RunMarketsResponse = {
+  generatedAt: number; runId: string; activityRevision?: string; source: SourceState; items: RunMarketMetrics[]; warnings: string[];
+};
+export type RunFillActivity = {
+  fillId: string; orderId?: string | null; filledAtMs: number; side: "yes" | "no";
+  contractsUnits: number; matchedContractsUnits: number; openContractsUnits: number;
+  timeToFillMs?: number | null; totalPaidUnits?: number | null;
+  liquidationValueUnits?: number | null; unrealizedValueUnits?: number | null; fillPnlUnits?: number | null;
+  realizedPnlUnits?: number | null; unrealizedPnlUnits?: number | null;
+};
+export type RunOrderRevision = {
+  revisionKey: string; orderId?: string | null; placedAtMs: number; side: "yes" | "no"; contractsUnits: number;
+  timeOnBookMs: number; bookBidPriceUnits?: number | null; bookAskPriceUnits?: number | null;
+  bookMidPriceUnits?: number | null; orderPriceUnits?: number | null; endedState: string;
+};
+export type RunMarketActivityResponse = {
+  generatedAt: number; runId: string; market: RunMarketMetrics; source: SourceState;
+  fills: { items: RunFillActivity[]; totalCount: number; truncated: boolean };
+  orders: { items: RunOrderRevision[]; totalCount: number; truncated: boolean }; warnings: string[];
+};
 export type PnlTotals = { fills: number; feesCents: number; realizedCents: number; unrealizedCents: number; totalCents: number };
 export type BotState = { ticker: string; title: string; botRunning: boolean; watchdogRunning: boolean; watchdogMode: string; watchdogConfidence?: number; watchdogReason?: string; yesBudgetCents: number; noBudgetCents: number };
 export type Overview = {

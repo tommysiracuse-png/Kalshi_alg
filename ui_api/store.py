@@ -5,8 +5,10 @@ import json
 import os
 import sqlite3
 import subprocess
+import threading
 import time
 import uuid
+from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
@@ -67,6 +69,8 @@ class OperationsStore:
         self.sessions = SessionStore(settings.session_dir or settings.workspace / "session_data")
         self.portfolio_analytics = PortfolioAnalyticsStore(settings.runtime_dir / "portfolio_analytics.sqlite3")
         self._position_cache: Dict[str, tuple[int, Dict[str, Any]]] = {}
+        self._heartbeat_lock = threading.Lock()
+        self._heartbeat_cache: Optional[tuple[int, Dict[str, Any]]] = None
 
     def position(self, ticker: str) -> Dict[str, Any]:
         """Fetch canonical exchange inventory with a short, explicitly timestamped cache."""
@@ -341,6 +345,47 @@ class OperationsStore:
                 attempts[market_id] = max(attempts.get(market_id, 0), int(create.get("attempts") or 0))
         result = self.portfolio_analytics.orders(active_run=active_run, placement_attempts=attempts)
         return self._apply_portfolio_links(result, status)
+
+    def run_markets(self, run_id: str) -> Dict[str, Any]:
+        return self.sessions.run_markets(run_id, market_links=self.portfolio_analytics.market_links())
+
+    def metrics_heartbeat(self) -> Dict[str, Any]:
+        """Share a brief session-row result across all SSE/polling clients."""
+        current = now_ms()
+        with self._heartbeat_lock:
+            if self._heartbeat_cache and current - self._heartbeat_cache[0] < 1_500:
+                return deepcopy(self._heartbeat_cache[1])
+            try:
+                payload = self.sessions.metrics_heartbeat()
+                self._heartbeat_cache = (current, payload)
+                return deepcopy(payload)
+            except (sqlite3.Error, OSError, ValueError) as exc:
+                if self._heartbeat_cache:
+                    payload = deepcopy(self._heartbeat_cache[1])
+                    payload["generatedAt"] = current
+                    payload["source"] = {
+                        **(payload.get("source") or {}),
+                        "available": False,
+                        "stale": True,
+                        "error": str(exc),
+                    }
+                    if isinstance(payload.get("activeRun"), dict):
+                        payload["activeRun"]["source"] = payload["source"]
+                    return payload
+                return {
+                    "generatedAt": current,
+                    "activeRun": None,
+                    "source": {"available": False, "updatedAt": None, "stale": True, "error": str(exc)},
+                }
+
+    def run_market_activity(self, run_id: str, ticker: str, *, fill_limit: int, order_limit: int) -> Dict[str, Any]:
+        return self.sessions.run_market_activity(
+            run_id,
+            ticker,
+            fill_limit=fill_limit,
+            order_limit=order_limit,
+            market_links=self.portfolio_analytics.market_links(),
+        )
 
     def _apply_portfolio_links(self, payload: Dict[str, Any], status: Mapping[str, Any]) -> Dict[str, Any]:
         current_links: Dict[str, str] = {}

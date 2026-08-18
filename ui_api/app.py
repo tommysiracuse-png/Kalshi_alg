@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import time
 import uuid
@@ -20,6 +21,8 @@ from session_store import SessionConflictError
 settings = Settings.from_environment()
 store = OperationsStore(settings)
 app = FastAPI(title="Kalshi Operations API", version="1.0.0", docs_url=None, redoc_url=None)
+LOGGER = logging.getLogger(__name__)
+SSE_CONNECTION_MAX_SECONDS = 30
 
 
 async def authorize(x_internal_token: Annotated[Optional[str], Header()] = None) -> str:
@@ -33,6 +36,8 @@ async def authorize(x_internal_token: Annotated[Optional[str], Header()] = None)
 async def unhandled_exception(request: Request, exc: Exception) -> JSONResponse:
     request_id = request.headers.get("x-request-id") or str(uuid.uuid4())
     status = 404 if isinstance(exc, KeyError) else 409 if isinstance(exc, SessionConflictError) else 400 if isinstance(exc, ValueError) else 500
+    if status == 500:
+        LOGGER.exception("unhandled API error request_id=%s path=%s", request_id, request.url.path, exc_info=exc)
     return JSONResponse(status_code=status, content={
         "code": "not_found" if status == 404 else "conflict" if status == 409 else "invalid_request" if status == 400 else "internal_error",
         "message": str(exc), "requestId": request_id, "details": None,
@@ -205,27 +210,82 @@ async def run_detail(run_id: str, _: str = Depends(authorize)) -> dict:
     return {"generatedAt": now_ms(), "item": store.sessions.get_run(run_id)}
 
 
+@app.get("/api/v1/runs/{run_id}/markets")
+async def run_markets(run_id: str, _: str = Depends(authorize)) -> dict:
+    return store.run_markets(run_id)
+
+
+@app.get("/api/v1/runs/{run_id}/markets/{ticker}/activity")
+async def run_market_activity(
+    run_id: str,
+    ticker: str,
+    fill_limit: int = Query(100, ge=1, le=500),
+    order_limit: int = Query(100, ge=1, le=500),
+    _: str = Depends(authorize),
+) -> dict:
+    return store.run_market_activity(run_id, ticker, fill_limit=fill_limit, order_limit=order_limit)
+
+
 @app.get("/api/v1/metrics")
-async def historical_metrics(session_id: str = "", status: str = "", from_ms: Optional[int] = None, to_ms: Optional[int] = None, _: str = Depends(authorize)) -> dict:
-    return store.sessions.metrics(session_id=session_id, status=status, from_ms=from_ms, to_ms=to_ms)
+async def historical_metrics(session_id: str = "", status: str = "", from_ms: Optional[int] = None, to_ms: Optional[int] = None, include_artifact_bytes: bool = True, _: str = Depends(authorize)) -> dict:
+    return store.sessions.metrics(session_id=session_id, status=status, from_ms=from_ms, to_ms=to_ms, include_artifact_bytes=include_artifact_bytes)
 
 
-async def event_stream() -> AsyncIterator[str]:
+@app.get("/api/v1/metrics/heartbeat")
+async def metrics_heartbeat(_: str = Depends(authorize)) -> dict:
+    return store.metrics_heartbeat()
+
+
+def legacy_metrics_heartbeat() -> dict:
+    """Keep already-open pre-deployment tabs from treating every tick as a full refresh."""
+    heartbeat = store.metrics_heartbeat()
+    active = heartbeat.get("activeRun")
+    return {
+        "generatedAt": heartbeat.get("generatedAt"),
+        "activeRun": (
+            {key: active.get(key) for key in ("id", "sessionId", "status")}
+            if isinstance(active, dict) else None
+        ),
+        "source": heartbeat.get("source"),
+    }
+
+
+async def event_stream(request: Request) -> AsyncIterator[str]:
     event_id = 0
-    while True:
-        event_id += 1
-        payload = store.overview()
-        yield f"id: {event_id}\nevent: overview\ndata: {json.dumps(payload, separators=(',', ':'))}\n\n"
-        monitoring_payload = store.monitoring()
-        yield f"id: {event_id}\nevent: monitoring\ndata: {json.dumps(monitoring_payload, separators=(',', ':'))}\n\n"
-        portfolio_payload = store.portfolio()
-        yield f"id: {event_id}\nevent: portfolio\ndata: {json.dumps(portfolio_payload, separators=(',', ':'))}\n\n"
-        await asyncio.sleep(2)
+    deadline = time.monotonic() + SSE_CONNECTION_MAX_SECONDS
+    producers = (
+        ("overview", store.overview),
+        ("monitoring", store.monitoring),
+        ("portfolio", store.portfolio),
+        ("metrics", legacy_metrics_heartbeat),
+        ("metrics_heartbeat", store.metrics_heartbeat),
+    )
+    try:
+        while time.monotonic() < deadline and not await request.is_disconnected():
+            for event_name, producer in producers:
+                event_id += 1
+                try:
+                    payload = producer()
+                    event_type = event_name
+                except Exception as exc:
+                    # Each source is independent. A broken observability store
+                    # must not tear down the shared stream or hide healthy data.
+                    LOGGER.exception("SSE producer %s failed", event_name)
+                    event_type = "source_error"
+                    payload = {
+                        "generatedAt": now_ms(),
+                        "sourceName": event_name,
+                        "source": {"available": False, "updatedAt": None, "stale": True, "error": str(exc)},
+                    }
+                yield f"id: {event_id}\nevent: {event_type}\ndata: {json.dumps(payload, separators=(',', ':'))}\n\n"
+            await asyncio.sleep(2)
+    except asyncio.CancelledError:
+        return
 
 
 @app.get("/api/v1/events")
-async def events(_: str = Depends(authorize)) -> StreamingResponse:
-    return StreamingResponse(event_stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+async def events(request: Request, _: str = Depends(authorize)) -> StreamingResponse:
+    return StreamingResponse(event_stream(request), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.get("/api/v1/logs/{ticker}/stream")

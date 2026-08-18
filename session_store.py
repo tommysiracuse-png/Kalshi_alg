@@ -3,18 +3,24 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import sqlite3
 import time
 import uuid
-from contextlib import contextmanager
+from collections import OrderedDict, deque
+from contextlib import closing, contextmanager
+from copy import deepcopy
 from pathlib import Path
+from threading import RLock
 from typing import Any, Dict, Iterable, Iterator, Mapping, Optional
 
 from session_config import default_session_configuration, validate_session_configuration
 
 
 ACTIVE_RUN_STATES = ("pending", "starting", "running")
+MARKET_CACHE_RUN_LIMIT = 32
+HEARTBEAT_STALE_AFTER_MS = 10_000
 
 
 class SessionConflictError(RuntimeError):
@@ -30,6 +36,8 @@ class SessionStore:
         self.root = Path(root).expanduser().resolve()
         self.path = self.root / "sessions.sqlite3"
         self.artifacts_root = self.root / "artifacts"
+        self._market_cache_lock = RLock()
+        self._market_cache: OrderedDict[str, Dict[str, Any]] = OrderedDict()
         self.root.mkdir(parents=True, exist_ok=True)
         self.artifacts_root.mkdir(parents=True, exist_ok=True)
         self._initialize()
@@ -40,7 +48,6 @@ class SessionStore:
         db = sqlite3.connect(self.path, timeout=5)
         try:
             db.row_factory = sqlite3.Row
-            db.execute("PRAGMA journal_mode=WAL")
             db.execute("PRAGMA busy_timeout=5000")
             db.execute("PRAGMA foreign_keys=ON")
             with db:
@@ -50,6 +57,10 @@ class SessionStore:
 
     def _initialize(self) -> None:
         with self._connect() as db:
+            # Journal mode is a persistent database setting. Applying it on every
+            # read connection can require a write lock and turn observability reads
+            # into a source of contention for the running launcher.
+            db.execute("PRAGMA journal_mode=WAL")
             db.executescript("""
                 CREATE TABLE IF NOT EXISTS sessions (
                     id TEXT PRIMARY KEY, name TEXT NOT NULL COLLATE NOCASE UNIQUE,
@@ -235,6 +246,13 @@ class SessionStore:
     def claim_run(self, run_id: Optional[str] = None) -> Dict[str, Any]:
         with self._connect() as db:
             timestamp = now_ms()
+            interrupted_artifacts = [
+                Path(item[0]) for item in db.execute(
+                    "SELECT artifact_path FROM runs WHERE status IN ('starting','running')"
+                ).fetchall()
+            ]
+            for artifact in interrupted_artifacts:
+                self._finalize_order_revisions(artifact, timestamp)
             db.execute("UPDATE runs SET status='interrupted',ended_at_ms=COALESCE(heartbeat_at_ms,?),error=COALESCE(error,'launcher exited without finalizing') WHERE status IN ('starting','running')", (timestamp,))
             row = db.execute("SELECT * FROM runs WHERE id=? AND status='pending'", (run_id,)).fetchone() if run_id else db.execute("SELECT * FROM runs WHERE status='pending' ORDER BY created_at_ms LIMIT 1").fetchone()
             if not row:
@@ -265,7 +283,18 @@ class SessionStore:
         with self._connect() as db:
             db.execute("UPDATE runs SET metrics_json=?,heartbeat_at_ms=? WHERE id=?", (payload, timestamp, run_id))
             if sample:
-                db.execute("INSERT INTO metric_samples(run_id,timestamp_ms,payload_json) VALUES(?,?,?)", (run_id, timestamp, payload))
+                # The current run row remains authoritative and retains the full
+                # per-market map. Historical samples need only aggregate counters.
+                sample_fields = (
+                    "runtimeMs", "orders", "orderSuccesses", "orderPlacementsAttempted",
+                    "orderErrors", "fills", "apiCalls", "apiErrors", "apiByComponent",
+                    "feesCents", "realizedCents", "unrealizedCents", "totalCents", "pnlComplete",
+                )
+                sample_payload = json.dumps(
+                    {key: metrics[key] for key in sample_fields if key in metrics},
+                    separators=(",", ":"),
+                )
+                db.execute("INSERT INTO metric_samples(run_id,timestamp_ms,payload_json) VALUES(?,?,?)", (run_id, timestamp, sample_payload))
 
     def finish_run(self, run_id: str, status: str, *, metrics: Optional[Mapping[str, Any]] = None, error: Optional[str] = None) -> None:
         if status not in {"stopped", "failed", "shutdown_failed", "interrupted"}:
@@ -273,7 +302,9 @@ class SessionStore:
         final_metrics = dict(metrics or {})
         with self._connect() as db:
             row = db.execute("SELECT artifact_path FROM runs WHERE id=?", (run_id,)).fetchone()
+        finished_at = now_ms()
         if row:
+            self._finalize_order_revisions(Path(row["artifact_path"]), finished_at)
             pnl_path = Path(row["artifact_path"]) / "pnl_tracker.jsonl"
             if pnl_path.exists():
                 from pnl_core import load_fills, summarize_pnl
@@ -298,7 +329,24 @@ class SessionStore:
         if final_metrics:
             self.record_metrics(run_id, final_metrics, sample=False)
         with self._connect() as db:
-            db.execute("UPDATE runs SET status=?,ended_at_ms=?,heartbeat_at_ms=?,error=? WHERE id=?", (status, now_ms(), now_ms(), error, run_id))
+            db.execute("UPDATE runs SET status=?,ended_at_ms=?,heartbeat_at_ms=?,error=? WHERE id=?", (status, finished_at, finished_at, error, run_id))
+
+    @staticmethod
+    def _finalize_order_revisions(artifact_path: Path, ended_at_ms: int) -> None:
+        for path in artifact_path.glob("markets/*/telemetry.sqlite3"):
+            try:
+                with sqlite3.connect(path, timeout=1) as db:
+                    if not db.execute(
+                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='order_revisions'"
+                    ).fetchone():
+                        continue
+                    db.execute(
+                        """UPDATE order_revisions SET ended_state='Unknown',ended_at_ms=?
+                           WHERE ended_at_ms IS NULL AND ended_state='Resting'""",
+                        (int(ended_at_ms),),
+                    )
+            except sqlite3.Error:
+                continue
 
     def fail_pending_run(self, run_id: str, error: str) -> None:
         with self._connect() as db:
@@ -315,16 +363,17 @@ class SessionStore:
             "metrics": metrics, "error": row["error"],
         }
 
-    def get_run(self, run_id: str) -> Dict[str, Any]:
+    def get_run(self, run_id: str, *, include_artifact_bytes: bool = True) -> Dict[str, Any]:
         with self._connect() as db:
             row = db.execute("SELECT * FROM runs WHERE id=?", (run_id,)).fetchone()
             if not row:
                 raise KeyError(run_id)
             result = self._run_dict(row)
-        result["artifactBytes"] = self._artifact_size(Path(result["artifactPath"]))
+        if include_artifact_bytes:
+            result["artifactBytes"] = self._artifact_size(Path(result["artifactPath"]))
         return result
 
-    def list_runs(self, *, session_id: str = "", status: str = "", from_ms: Optional[int] = None, to_ms: Optional[int] = None) -> list[Dict[str, Any]]:
+    def list_runs(self, *, session_id: str = "", status: str = "", from_ms: Optional[int] = None, to_ms: Optional[int] = None, include_artifact_bytes: bool = True) -> list[Dict[str, Any]]:
         clauses, values = [], []
         if session_id:
             clauses.append("session_id=?"); values.append(session_id)
@@ -338,8 +387,9 @@ class SessionStore:
         with self._connect() as db:
             rows = db.execute("SELECT * FROM runs" + where + " ORDER BY created_at_ms DESC", values).fetchall()
         items = [self._run_dict(row) for row in rows]
-        for item in items:
-            item["artifactBytes"] = self._artifact_size(Path(item["artifactPath"]))
+        if include_artifact_bytes:
+            for item in items:
+                item["artifactBytes"] = self._artifact_size(Path(item["artifactPath"]))
         return items
 
     @staticmethod
@@ -384,6 +434,599 @@ class SessionStore:
         for key in ("realizedCents", "unrealizedCents", "totalCents"):
             totals[key] = round(totals[key], 4)
         return {"generatedAt": now_ms(), "summary": totals, "runs": runs}
+
+    @staticmethod
+    def _market_counter_signatures(metrics: Mapping[str, Any]) -> Dict[str, tuple[int, int, int]]:
+        signatures: Dict[str, tuple[int, int, int]] = {}
+        markets = metrics.get("markets") if isinstance(metrics, Mapping) else None
+        if not isinstance(markets, Mapping):
+            return signatures
+        for ticker, value in markets.items():
+            if not ticker or not isinstance(value, Mapping):
+                continue
+            signatures[str(ticker)] = (
+                int(value.get("orders") or 0),
+                int(value.get("orderPlacementsAttempted") or 0),
+                int(value.get("fills") or 0),
+            )
+        return signatures
+
+    @classmethod
+    def _activity_revision(cls, metrics: Mapping[str, Any]) -> str:
+        signatures = cls._market_counter_signatures(metrics)
+        compact = [[ticker, *signatures[ticker]] for ticker in sorted(signatures)]
+        return hashlib.blake2s(
+            json.dumps(compact, separators=(",", ":")).encode("utf-8"), digest_size=8
+        ).hexdigest()
+
+    def metrics_heartbeat(self) -> Dict[str, Any]:
+        # active_run performs exactly one indexed row query. In particular this
+        # path never enumerates artifacts or opens per-market telemetry stores.
+        active = self.active_run()
+        generated = now_ms()
+        metric = (active or {}).get("metrics") or {}
+        source = {
+            "available": True,
+            "updatedAt": active.get("heartbeatAt") if active else generated,
+            "stale": bool(active and generated - int(active.get("heartbeatAt") or 0) > HEARTBEAT_STALE_AFTER_MS),
+        }
+        summary_fields = (
+            "runtimeMs", "orders", "fills", "totalCents", "realizedCents",
+            "unrealizedCents", "apiCalls", "apiErrors", "pnlComplete",
+        )
+        return {
+            "generatedAt": generated,
+            "source": source,
+            "activeRun": (
+                {
+                    "id": active["id"],
+                    "sessionId": active["sessionId"],
+                    "status": active["status"],
+                    "heartbeatAt": active["heartbeatAt"],
+                    "summary": {key: metric.get(key) for key in summary_fields if key in metric},
+                    "activityRevision": self._activity_revision(metric),
+                    "source": source,
+                }
+                if active else None
+            ),
+        }
+
+    @staticmethod
+    def _read_screener_titles(artifact: Path) -> Dict[str, str]:
+        path = artifact / "screener" / "latest.json"
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return {}
+        return {
+            str(item.get("marketId")): str(item.get("title") or item.get("marketId"))
+            for item in payload.get("picks") or []
+            if isinstance(item, dict) and item.get("marketId")
+        }
+
+    @staticmethod
+    def _market_database(artifact: Path, ticker: str) -> Path:
+        if not ticker or ticker in {".", ".."} or "/" in ticker or "\\" in ticker:
+            raise KeyError(ticker)
+        root = (artifact / "markets").resolve()
+        candidate = (root / ticker / "telemetry.sqlite3").resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError as exc:
+            raise KeyError(ticker) from exc
+        if not candidate.exists():
+            raise KeyError(ticker)
+        return candidate
+
+    def _artifact_for_run(self, run: Mapping[str, Any]) -> Path:
+        artifact = Path(str(run["artifactPath"])).resolve()
+        expected = (self.artifacts_root / str(run["sessionId"]) / str(run["id"])).resolve()
+        if artifact != expected:
+            raise KeyError(run["id"])
+        return artifact
+
+    @staticmethod
+    def _table_exists(db: sqlite3.Connection, table: str) -> bool:
+        return db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
+        ).fetchone() is not None
+
+    @staticmethod
+    def _value_units(count_units: int, price_units: Optional[float]) -> Optional[int]:
+        if price_units is None:
+            return None
+        return int(round(int(count_units) * float(price_units) / 100))
+
+    @staticmethod
+    def _telemetry_updated_at(path: Path) -> Optional[int]:
+        modified: list[int] = []
+        for candidate in (path, Path(f"{path}-wal")):
+            try:
+                modified.append(int(candidate.stat().st_mtime * 1000))
+            except OSError:
+                continue
+        return max(modified) if modified else None
+
+    @staticmethod
+    def _consume_proportionally(
+        amount: Optional[int], quantity: int, remaining_quantity: int
+    ) -> tuple[Optional[int], Optional[int]]:
+        """Consume a proportional integer amount while preserving every unit."""
+        if amount is None:
+            return None, None
+        if quantity >= remaining_quantity:
+            return amount, 0
+        allocated = int(amount) * int(quantity) // int(remaining_quantity)
+        return allocated, int(amount) - allocated
+
+    @classmethod
+    def _fill_pnl_breakdown(
+        cls,
+        fills: Iterable[Mapping[str, Any]],
+        *,
+        latest_bids: Mapping[str, Optional[int]],
+    ) -> tuple[Dict[int, Dict[str, Optional[int]]], list[str]]:
+        """Match YES/NO lots FIFO and attribute realized P&L to closing fills."""
+        queues: Dict[str, Any] = {"yes": deque(), "no": deque()}
+        results: Dict[int, Dict[str, Any]] = {}
+        warnings: list[str] = []
+        realized_incomplete = False
+        unrealized_mark_incomplete = False
+        unrealized_cost_incomplete = False
+
+        for row in fills:
+            row_id = int(row["id"])
+            side = str(row["side"] or "").lower()
+            quantity = max(0, int(row["size_units"] or 0))
+            result: Dict[str, Any] = {
+                "contractsUnits": quantity,
+                "openContractsUnits": 0,
+                "realizedPnlUnits": 0,
+                "_lot": None,
+            }
+            results[row_id] = result
+            if side not in {"yes", "no"}:
+                result["realizedPnlUnits"] = None
+                result["unrealizedPnlUnits"] = None
+                result["fillPnlUnits"] = None
+                warnings.append("One or more fills have an unsupported side; fill P&L is unavailable.")
+                continue
+
+            price = int(row["price_units"]) if row["price_units"] is not None else None
+            current_notional = cls._value_units(quantity, price)
+            current_fee = int(row["fee_units"]) if row["fee_units"] is not None else None
+            current_remaining = quantity
+            opposite = "no" if side == "yes" else "yes"
+            realized = 0
+            realized_known = True
+
+            while current_remaining and queues[opposite]:
+                lot = queues[opposite][0]
+                matched = min(current_remaining, int(lot["remainingQuantity"]))
+                entry_notional, lot["remainingNotional"] = cls._consume_proportionally(
+                    lot["remainingNotional"], matched, int(lot["remainingQuantity"])
+                )
+                entry_fee, lot["remainingFee"] = cls._consume_proportionally(
+                    lot["remainingFee"], matched, int(lot["remainingQuantity"])
+                )
+                exit_notional, current_notional = cls._consume_proportionally(
+                    current_notional, matched, current_remaining
+                )
+                exit_fee, current_fee = cls._consume_proportionally(
+                    current_fee, matched, current_remaining
+                )
+                payout = cls._value_units(matched, 10_000)
+                if None in {entry_notional, entry_fee, exit_notional, exit_fee, payout}:
+                    realized_known = False
+                    realized_incomplete = True
+                elif realized_known:
+                    realized += int(payout) - int(entry_notional) - int(entry_fee) - int(exit_notional) - int(exit_fee)
+
+                lot["remainingQuantity"] -= matched
+                lot["result"]["openContractsUnits"] -= matched
+                current_remaining -= matched
+                if lot["remainingQuantity"] == 0:
+                    queues[opposite].popleft()
+
+            result["realizedPnlUnits"] = realized if realized_known else None
+            if current_remaining:
+                result["openContractsUnits"] = current_remaining
+                lot = {
+                    "remainingQuantity": current_remaining,
+                    "remainingNotional": current_notional,
+                    "remainingFee": current_fee,
+                    "result": result,
+                    "side": side,
+                }
+                result["_lot"] = lot
+                queues[side].append(lot)
+
+        for result in results.values():
+            open_quantity = int(result["openContractsUnits"])
+            result["matchedContractsUnits"] = int(result["contractsUnits"]) - open_quantity
+            if "unrealizedPnlUnits" in result:
+                result.pop("_lot", None)
+                result.pop("contractsUnits", None)
+                continue
+            if not open_quantity:
+                unrealized: Optional[int] = 0
+            else:
+                lot = result["_lot"]
+                mark = latest_bids.get(str(lot["side"]))
+                market_value = cls._value_units(open_quantity, mark)
+                remaining_notional = lot["remainingNotional"]
+                remaining_fee = lot["remainingFee"]
+                if market_value is None:
+                    unrealized_mark_incomplete = True
+                if remaining_notional is None or remaining_fee is None:
+                    unrealized_cost_incomplete = True
+                if market_value is None or remaining_notional is None or remaining_fee is None:
+                    unrealized = None
+                else:
+                    unrealized = int(market_value) - int(remaining_notional) - int(remaining_fee)
+            result["unrealizedPnlUnits"] = unrealized
+            realized_value = result["realizedPnlUnits"]
+            result["fillPnlUnits"] = (
+                int(realized_value) + int(unrealized)
+                if realized_value is not None and unrealized is not None else None
+            )
+            result.pop("_lot", None)
+            result.pop("contractsUnits", None)
+
+        if realized_incomplete:
+            warnings.append(
+                "Realized fill P&L is unavailable for one or more matched fills because a price or fee was not persisted."
+            )
+        if unrealized_mark_incomplete:
+            warnings.append(
+                "Unrealized fill P&L is unavailable for one or more open fills because no latest same-side bid was persisted."
+            )
+        if unrealized_cost_incomplete:
+            warnings.append(
+                "Unrealized fill P&L is unavailable for one or more open fills because a price or fee was not persisted."
+            )
+        return results, list(dict.fromkeys(warnings))
+
+    def _market_summary(
+        self,
+        path: Path,
+        *,
+        ticker: str,
+        fallback_title: str,
+        fallback_url: Optional[str],
+        legacy_metric: Mapping[str, Any],
+    ) -> Dict[str, Any]:
+        uri = f"file:{path}?mode=ro"
+        with closing(sqlite3.connect(uri, uri=True, timeout=1)) as db:
+            db.row_factory = sqlite3.Row
+            has_orders = self._table_exists(db, "order_revisions")
+            has_metadata = self._table_exists(db, "market_metadata")
+            fill = db.execute(
+                """SELECT COUNT(*) AS fill_count,
+                    COALESCE(SUM(CASE WHEN side='yes' THEN size_units ELSE 0 END),0) AS yes_units,
+                    COALESCE(SUM(CASE WHEN side='no' THEN size_units ELSE 0 END),0) AS no_units,
+                    COALESCE(SUM(CASE WHEN side='yes' AND price_units IS NOT NULL THEN price_units*size_units ELSE 0 END),0) AS yes_weighted,
+                    COALESCE(SUM(CASE WHEN side='no' AND price_units IS NOT NULL THEN price_units*size_units ELSE 0 END),0) AS no_weighted,
+                    COALESCE(SUM(CASE WHEN side='yes' AND price_units IS NULL THEN 1 ELSE 0 END),0) AS yes_missing_prices,
+                    COALESCE(SUM(CASE WHEN side='no' AND price_units IS NULL THEN 1 ELSE 0 END),0) AS no_missing_prices,
+                    COALESCE(SUM(CASE WHEN fee_units IS NULL THEN 1 ELSE 0 END),0) AS missing_fees,
+                    COALESCE(SUM(fee_units),0) AS fee_units,
+                    MIN(ts_ms) AS first_fill_at_ms,MAX(ts_ms) AS last_fill_at_ms
+                    FROM fills"""
+            ).fetchone()
+            order_count = int(db.execute("SELECT COUNT(*) FROM order_revisions").fetchone()[0]) if has_orders else int(legacy_metric.get("orderPlacementsAttempted") or 0)
+            order_sides = {
+                str(row[0]) for row in db.execute("SELECT DISTINCT side FROM order_revisions")
+            } if has_orders else set()
+            metadata = db.execute("SELECT * FROM market_metadata WHERE singleton=1").fetchone() if has_metadata else None
+        yes_units, no_units = int(fill["yes_units"]), int(fill["no_units"])
+        yes_prices_complete = not int(fill["yes_missing_prices"])
+        no_prices_complete = not int(fill["no_missing_prices"])
+        fees_complete = not int(fill["missing_fees"])
+        yes_average = int(round(int(fill["yes_weighted"]) / yes_units)) if yes_units and yes_prices_complete else None
+        no_average = int(round(int(fill["no_weighted"]) / no_units)) if no_units and no_prices_complete else None
+        yes_cost = int(round(int(fill["yes_weighted"]) / 100)) if yes_prices_complete else None
+        no_cost = int(round(int(fill["no_weighted"]) / 100)) if no_prices_complete else None
+        fees = int(fill["fee_units"] or 0)
+        total_cost = yes_cost + no_cost + fees if yes_cost is not None and no_cost is not None and fees_complete else None
+        matched = min(yes_units, no_units)
+        matched_payout = self._value_units(matched, 10_000) or 0
+        matched_prices_complete = matched == 0 or (yes_average is not None and no_average is not None)
+        matched_cost = (
+            (self._value_units(matched, yes_average) or 0) + (self._value_units(matched, no_average) or 0)
+            if matched_prices_complete else None
+        )
+        realized = matched_payout - matched_cost - fees if matched_cost is not None and fees_complete else None
+        sides = set(order_sides)
+        if yes_units: sides.add("yes")
+        if no_units: sides.add("no")
+        side = "BOTH" if {"yes", "no"}.issubset(sides) else "YES" if "yes" in sides else "NO" if "no" in sides else "—"
+        warnings = [] if has_orders else ["Detailed order revisions were not persisted for this legacy run."]
+        if not yes_prices_complete or not no_prices_complete:
+            warnings.append("One or more fill prices are unavailable; affected cost and realized values are unavailable.")
+        if not fees_complete:
+            warnings.append("One or more fill fees are unavailable; total cost and realized values are unavailable.")
+        description = str((metadata["title"] if metadata else "") or fallback_title or ticker)
+        market_url = str((metadata["market_url"] if metadata else "") or fallback_url or "") or None
+        description_complete = description != ticker
+        if not description_complete:
+            warnings.append("Market description was not persisted for this run.")
+        if market_url is None:
+            warnings.append("Venue market link is unavailable from persisted data.")
+        return {
+            "ticker": ticker,
+            "description": description,
+            "marketUrl": market_url,
+            "side": side,
+            "yesContractsUnits": yes_units,
+            "noContractsUnits": no_units,
+            "yesAverageCostPriceUnits": yes_average,
+            "noAverageCostPriceUnits": no_average,
+            "totalCostUnits": total_cost,
+            "realizedPnlUnits": realized,
+            "realizedReturnBps": int(round(realized * 10_000 / total_cost)) if realized is not None and total_cost else None,
+            "fillCount": int(fill["fill_count"]),
+            "orderCount": order_count,
+            "firstFillAtMs": fill["first_fill_at_ms"],
+            "lastFillAtMs": fill["last_fill_at_ms"],
+            "coverage": {
+                "fillsComplete": True, "ordersComplete": has_orders,
+                "fillPricesComplete": yes_prices_complete and no_prices_complete,
+                "fillFeesComplete": fees_complete,
+                "descriptionComplete": description_complete,
+                "marketLinkAvailable": market_url is not None,
+            },
+            "warnings": warnings,
+        }
+
+    def run_markets(self, run_id: str, *, market_links: Optional[Mapping[str, str]] = None) -> Dict[str, Any]:
+        with self._market_cache_lock:
+            completed_cache = self._market_cache.get(run_id)
+            if completed_cache and completed_cache["completed"]:
+                self._market_cache.move_to_end(run_id)
+                result = deepcopy(completed_cache["response"])
+                result["generatedAt"] = now_ms()
+                return result
+        run = self.get_run(run_id, include_artifact_bytes=False)
+        artifact = self._artifact_for_run(run)
+        metrics = run.get("metrics") or {}
+        legacy = metrics.get("markets") if isinstance(metrics, Mapping) else {}
+        legacy = legacy if isinstance(legacy, Mapping) else {}
+        signatures = self._market_counter_signatures(metrics)
+        revision = self._activity_revision(metrics)
+        completed = run["status"] not in ACTIVE_RUN_STATES
+
+        # A lock deliberately covers recomputation. It gives concurrent callers a
+        # single-flight cache and prevents identical SSE clients from opening the
+        # same telemetry database in parallel.
+        with self._market_cache_lock:
+            cached = self._market_cache.get(run_id)
+            if cached and completed:
+                cached["completed"] = True
+                cached["response"]["source"]["updatedAt"] = run.get("heartbeatAt")
+                cached["response"]["source"]["stale"] = False
+            cached_error = bool(((cached or {}).get("response") or {}).get("source", {}).get("error"))
+            if cached and (cached["completed"] or (cached["revision"] == revision and not cached_error)):
+                self._market_cache.move_to_end(run_id)
+                result = deepcopy(cached["response"])
+                result["generatedAt"] = now_ms()
+                result["source"]["updatedAt"] = run.get("heartbeatAt")
+                return result
+
+            titles = self._read_screener_titles(artifact)
+            links = market_links or {}
+            cached_items = dict(cached.get("items") or {}) if cached else {}
+            cached_signatures = dict(cached.get("signatures") or {}) if cached else {}
+            warnings: list[str] = []
+            failed: list[str] = []
+            failed_errors: list[str] = []
+
+            # Counters are trusted for current-format runs. A missing counter map
+            # is a legacy coverage gap, scanned only on the first cached access.
+            candidates = {
+                ticker for ticker, signature in signatures.items() if any(signature)
+            }
+            if not signatures:
+                legacy_paths = sorted((artifact / "markets").glob("*/telemetry.sqlite3"))
+                candidates.update(path.parent.name for path in legacy_paths)
+            if not signatures and candidates:
+                warnings.append(
+                    "Per-market activity counters are unavailable for this legacy run; telemetry was scanned once and coverage may be incomplete."
+                )
+
+            items_by_ticker: Dict[str, Dict[str, Any]] = {}
+            for ticker in sorted(candidates):
+                signature = signatures.get(ticker, (0, 0, 0))
+                if ticker in cached_items and cached_signatures.get(ticker) == signature:
+                    items_by_ticker[ticker] = cached_items[ticker]
+                    continue
+                previous = cached_items.get(ticker)
+                try:
+                    path = self._market_database(artifact, ticker)
+                    item = self._market_summary(
+                        path,
+                        ticker=ticker,
+                        fallback_title=titles.get(ticker, ticker),
+                        fallback_url=links.get(ticker),
+                        legacy_metric=legacy.get(ticker) if isinstance(legacy.get(ticker), Mapping) else {},
+                    )
+                    if item["fillCount"] or item["orderCount"]:
+                        items_by_ticker[ticker] = item
+                except (sqlite3.Error, OSError) as exc:
+                    failed.append(ticker)
+                    failed_errors.append(f"{ticker}: {exc}")
+                    if previous:
+                        stale_item = deepcopy(previous)
+                        stale_item.setdefault("warnings", []).append(
+                            f"Latest telemetry could not be read for {ticker}; showing the last successful summary."
+                        )
+                        items_by_ticker[ticker] = stale_item
+                    warnings.append(f"Telemetry for {ticker} is unavailable: {exc}")
+
+            # A counter cannot normally fall, but retaining an existing item across
+            # a transient launcher restart is safer than dropping known activity.
+            for ticker, item in cached_items.items():
+                if ticker not in items_by_ticker and ticker in signatures:
+                    items_by_ticker[ticker] = item
+
+            items = list(items_by_ticker.values())
+            items.sort(key=lambda item: (-(item["fillCount"] + item["orderCount"]), item["ticker"]))
+            warnings.extend(warning for item in items for warning in item["warnings"])
+            current = now_ms()
+            stale = bool(failed) or (
+                not completed and current - int(run.get("heartbeatAt") or 0) > HEARTBEAT_STALE_AFTER_MS
+            )
+            source: Dict[str, Any] = {
+                "available": not failed or bool(items),
+                "updatedAt": run.get("heartbeatAt"),
+                "stale": stale,
+            }
+            if failed:
+                source["error"] = f"Failed to refresh {len(failed)} market(s): {'; '.join(failed_errors)}"
+            response = {
+                "generatedAt": current,
+                "runId": run_id,
+                "activityRevision": revision,
+                "source": source,
+                "items": items,
+                "warnings": list(dict.fromkeys(warnings)),
+            }
+            self._market_cache[run_id] = {
+                "completed": completed,
+                "revision": revision,
+                "signatures": signatures,
+                "items": items_by_ticker,
+                "response": deepcopy(response),
+            }
+            self._market_cache.move_to_end(run_id)
+            while len(self._market_cache) > MARKET_CACHE_RUN_LIMIT:
+                self._market_cache.popitem(last=False)
+            return response
+
+    def run_market_activity(
+        self,
+        run_id: str,
+        ticker: str,
+        *,
+        fill_limit: int,
+        order_limit: int,
+        market_links: Optional[Mapping[str, str]] = None,
+    ) -> Dict[str, Any]:
+        run = self.get_run(run_id, include_artifact_bytes=False)
+        artifact = self._artifact_for_run(run)
+        path = self._market_database(artifact, ticker)
+        titles = self._read_screener_titles(artifact)
+        legacy = ((run.get("metrics") or {}).get("markets") or {}).get(ticker) or {}
+        market = self._market_summary(
+            path,
+            ticker=ticker,
+            fallback_title=titles.get(ticker, ticker),
+            fallback_url=(market_links or {}).get(ticker),
+            legacy_metric=legacy if isinstance(legacy, Mapping) else {},
+        )
+        current = now_ms()
+        with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1)) as db:
+            db.row_factory = sqlite3.Row
+            all_fills = list(db.execute("SELECT * FROM fills ORDER BY ts_ms,id"))
+            fill_total = len(all_fills)
+            fills = list(reversed(all_fills[-int(fill_limit):]))
+            latest_bids: Dict[str, Optional[int]] = {"yes": None, "no": None}
+            if self._table_exists(db, "market_state"):
+                latest_state = db.execute(
+                    """SELECT best_yes_bid_units,best_no_bid_units FROM market_state
+                       WHERE best_yes_bid_units IS NOT NULL OR best_no_bid_units IS NOT NULL
+                       ORDER BY ts_ms DESC,id DESC LIMIT 1"""
+                ).fetchone()
+                if latest_state:
+                    latest_bids["yes"] = (
+                        int(latest_state["best_yes_bid_units"])
+                        if latest_state["best_yes_bid_units"] is not None else None
+                    )
+                    latest_bids["no"] = (
+                        int(latest_state["best_no_bid_units"])
+                        if latest_state["best_no_bid_units"] is not None else None
+                    )
+            if latest_bids["yes"] is None or latest_bids["no"] is None:
+                for historical_fill in reversed(all_fills):
+                    if latest_bids["yes"] is None and historical_fill["best_yes_bid_units"] is not None:
+                        latest_bids["yes"] = int(historical_fill["best_yes_bid_units"])
+                    if latest_bids["no"] is None and historical_fill["best_no_bid_units"] is not None:
+                        latest_bids["no"] = int(historical_fill["best_no_bid_units"])
+                    if latest_bids["yes"] is not None and latest_bids["no"] is not None:
+                        break
+            has_orders = self._table_exists(db, "order_revisions")
+            order_total = int(db.execute("SELECT COUNT(*) FROM order_revisions").fetchone()[0]) if has_orders else int(market["orderCount"])
+            orders = list(db.execute("SELECT * FROM order_revisions ORDER BY placed_at_ms DESC,id DESC LIMIT ?", (int(order_limit),))) if has_orders else []
+            order_times: Dict[str, list[int]] = {}
+            if has_orders:
+                for row in db.execute("SELECT order_id,placed_at_ms FROM order_revisions WHERE order_id IS NOT NULL ORDER BY placed_at_ms"):
+                    order_times.setdefault(str(row[0]), []).append(int(row[1]))
+        pnl_by_fill, pnl_warnings = self._fill_pnl_breakdown(all_fills, latest_bids=latest_bids)
+        fill_items = []
+        for row in fills:
+            side = str(row["side"] or "")
+            yes_bid = int(row["best_yes_bid_units"]) if row["best_yes_bid_units"] is not None else None
+            no_bid = int(row["best_no_bid_units"]) if row["best_no_bid_units"] is not None else None
+            bid = yes_bid if side == "yes" else no_bid
+            ask = (10_000 - no_bid) if side == "yes" and no_bid is not None else (10_000 - yes_bid) if side == "no" and yes_bid is not None else None
+            midpoint = int(round((bid + ask) / 2)) if bid is not None and ask is not None else None
+            count = int(row["size_units"] or 0)
+            price = int(row["price_units"]) if row["price_units"] is not None else None
+            notional = self._value_units(count, price)
+            fee = int(row["fee_units"]) if row["fee_units"] is not None else None
+            total_paid = notional + fee if notional is not None and fee is not None else None
+            liquidation = self._value_units(count, bid)
+            unrealized = self._value_units(count, midpoint)
+            placements = order_times.get(str(row["order_id"] or ""), [])
+            placed = max((value for value in placements if value <= int(row["ts_ms"])), default=None)
+            fill_items.append({
+                "fillId": str(row["trade_id"] or row["fill_key"]),
+                "orderId": row["order_id"],
+                "filledAtMs": int(row["ts_ms"]),
+                "side": side,
+                "contractsUnits": count,
+                "timeToFillMs": max(0, int(row["ts_ms"]) - placed) if placed is not None else None,
+                "totalPaidUnits": total_paid,
+                "liquidationValueUnits": liquidation,
+                "unrealizedValueUnits": unrealized,
+                **pnl_by_fill.get(int(row["id"]), {
+                    "matchedContractsUnits": 0,
+                    "openContractsUnits": count,
+                    "realizedPnlUnits": None,
+                    "unrealizedPnlUnits": None,
+                    "fillPnlUnits": None,
+                }),
+            })
+        order_items = [{
+            "revisionKey": row["revision_key"],
+            "orderId": row["order_id"] or row["client_order_id"],
+            "placedAtMs": int(row["placed_at_ms"]),
+            "side": row["side"],
+            "contractsUnits": int(row["size_units"] or 0),
+            "timeOnBookMs": max(0, int(row["ended_at_ms"] or current) - int(row["placed_at_ms"])),
+            "bookBidPriceUnits": row["book_bid_units"],
+            "bookAskPriceUnits": row["book_ask_units"],
+            "bookMidPriceUnits": row["book_mid_units"],
+            "orderPriceUnits": row["price_units"],
+            "endedState": row["ended_state"],
+        } for row in orders]
+        warnings = list(dict.fromkeys([*market["warnings"], *pnl_warnings]))
+        updated_at = self._telemetry_updated_at(path)
+        return {
+            "generatedAt": current,
+            "runId": run_id,
+            "market": market,
+            "source": {
+                "available": True,
+                "updatedAt": updated_at,
+                "stale": run["status"] in ACTIVE_RUN_STATES and (
+                    updated_at is None or current - updated_at > HEARTBEAT_STALE_AFTER_MS
+                ),
+            },
+            "fills": {"items": fill_items, "totalCount": fill_total, "truncated": fill_total > len(fill_items)},
+            "orders": {"items": order_items, "totalCount": order_total, "truncated": order_total > len(order_items)},
+            "warnings": warnings,
+        }
 
 
 class RunMetricsAccumulator:

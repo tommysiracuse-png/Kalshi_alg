@@ -863,6 +863,8 @@ class MarketMetadata:
     price_level_structure: str
     fractional_trading_enabled: bool
     price_grid: PriceGrid
+    series_title: str = ""
+    market_url: Optional[str] = None
 
 
 @dataclass
@@ -1064,17 +1066,46 @@ class TelemetryStore:
         self.database_path = database_path
         self._connection: Optional[sqlite3.Connection] = None
         self._lock = Lock()
+        self.last_error: Optional[str] = None
+        self.last_error_at_ms: Optional[int] = None
+        self._last_error_log_ms = 0
         if not self.enabled:
             return
+        try:
+            directory = os.path.dirname(os.path.abspath(database_path))
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+            self._connection = sqlite3.connect(database_path, check_same_thread=False)
+            self._connection.row_factory = sqlite3.Row
+            self._connection.execute("PRAGMA journal_mode=WAL")
+            self._connection.execute("PRAGMA synchronous=NORMAL")
+            self._initialize_schema()
+        except (sqlite3.Error, OSError) as exc:
+            self._storage_error(exc)
 
-        directory = os.path.dirname(os.path.abspath(database_path))
-        if directory:
-            os.makedirs(directory, exist_ok=True)
-        self._connection = sqlite3.connect(database_path, check_same_thread=False)
-        self._connection.row_factory = sqlite3.Row
-        self._connection.execute("PRAGMA journal_mode=WAL")
-        self._connection.execute("PRAGMA synchronous=NORMAL")
-        self._initialize_schema()
+    def _storage_error(self, exc: BaseException) -> None:
+        """Disable only telemetry after a storage failure; trading stays live."""
+        current = now_ms()
+        self.last_error = str(exc)
+        self.last_error_at_ms = current
+        connection, self._connection = self._connection, None
+        self.enabled = False
+        if connection is not None:
+            try:
+                connection.close()
+            except sqlite3.Error:
+                pass
+        if current - self._last_error_log_ms >= 60_000:
+            LOGGER.warning("SQLite telemetry disabled; trading continues: %s", exc)
+            self._last_error_log_ms = current
+
+    def health_snapshot(self) -> Dict[str, object]:
+        return {
+            "available": bool(self.enabled and self._connection is not None),
+            "stale": self.last_error is not None,
+            "updatedAt": self.last_error_at_ms,
+            "error": self.last_error,
+        }
 
     def _initialize_schema(self) -> None:
         if not self._connection:
@@ -1100,6 +1131,34 @@ class TelemetryStore:
                     best_yes_bid_units INTEGER,
                     best_no_bid_units INTEGER,
                     queue_ahead_units INTEGER
+                );
+                CREATE TABLE IF NOT EXISTS market_metadata (
+                    singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                    ticker TEXT NOT NULL,
+                    title TEXT NOT NULL DEFAULT '',
+                    series_ticker TEXT NOT NULL DEFAULT '',
+                    event_ticker TEXT NOT NULL DEFAULT '',
+                    series_title TEXT NOT NULL DEFAULT '',
+                    market_url TEXT,
+                    updated_at_ms INTEGER NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS order_revisions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    revision_key TEXT NOT NULL UNIQUE,
+                    action TEXT NOT NULL,
+                    order_id TEXT,
+                    client_order_id TEXT,
+                    side TEXT NOT NULL,
+                    placed_at_ms INTEGER NOT NULL,
+                    ended_at_ms INTEGER,
+                    size_units INTEGER NOT NULL DEFAULT 0,
+                    filled_units INTEGER NOT NULL DEFAULT 0,
+                    price_units INTEGER,
+                    book_bid_units INTEGER,
+                    book_ask_units INTEGER,
+                    book_mid_units INTEGER,
+                    ended_state TEXT NOT NULL,
+                    error TEXT
                 );
                 CREATE TABLE IF NOT EXISTS quotes (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1196,6 +1255,10 @@ class TelemetryStore:
                 CREATE INDEX IF NOT EXISTS idx_markouts_bucket ON markouts(bucket_key, horizon_ms);
                 CREATE INDEX IF NOT EXISTS idx_fills_ticker_ts ON fills(ticker, ts_ms);
                 CREATE INDEX IF NOT EXISTS idx_quotes_ticker_ts ON quotes(ticker, ts_ms);
+                CREATE INDEX IF NOT EXISTS idx_order_revisions_order
+                    ON order_revisions(order_id, placed_at_ms DESC);
+                CREATE INDEX IF NOT EXISTS idx_order_revisions_time
+                    ON order_revisions(placed_at_ms DESC);
                 """
             )
             self._connection.commit()
@@ -1203,48 +1266,65 @@ class TelemetryStore:
     def _execute(self, sql: str, params: Tuple[object, ...]) -> None:
         if not self._connection:
             return
-        with self._lock:
-            self._connection.execute(sql, params)
-            self._connection.commit()
+        try:
+            with self._lock:
+                if not self._connection:
+                    return
+                self._connection.execute(sql, params)
+                self._connection.commit()
+        except (sqlite3.Error, OSError) as exc:
+            self._storage_error(exc)
 
     def load_recent_markouts(self, *, limit: int = 5000) -> List[sqlite3.Row]:
         if not self._connection:
             return []
-        with self._lock:
-            cursor = self._connection.execute(
-                """
-                SELECT side, horizon_ms, adverse_units, bucket_key,
-                       fill_price_units, future_mid_yes_units
-                FROM markouts ORDER BY id DESC LIMIT ?
-                """,
-                (int(limit),),
-            )
-            return list(cursor.fetchall())
+        try:
+            with self._lock:
+                cursor = self._connection.execute(
+                    """
+                    SELECT side, horizon_ms, adverse_units, bucket_key,
+                           fill_price_units, future_mid_yes_units
+                    FROM markouts ORDER BY id DESC LIMIT ?
+                    """,
+                    (int(limit),),
+                )
+                return list(cursor.fetchall())
+        except (sqlite3.Error, OSError) as exc:
+            self._storage_error(exc)
+            return []
 
     def load_recent_fill_prob_attempts(self, *, limit: int = 10000) -> List[sqlite3.Row]:
         if not self._connection:
             return []
-        with self._lock:
-            cursor = self._connection.execute(
-                """
-                SELECT bucket_key, filled_30s
-                FROM fill_prob_attempts
-                ORDER BY id DESC
-                LIMIT ?
-                """,
-                (int(limit),),
-            )
-            return list(cursor.fetchall())
+        try:
+            with self._lock:
+                cursor = self._connection.execute(
+                    """
+                    SELECT bucket_key, filled_30s
+                    FROM fill_prob_attempts
+                    ORDER BY id DESC
+                    LIMIT ?
+                    """,
+                    (int(limit),),
+                )
+                return list(cursor.fetchall())
+        except (sqlite3.Error, OSError) as exc:
+            self._storage_error(exc)
+            return []
 
     def load_recent_fills(self, *, limit: int = 1000) -> List[sqlite3.Row]:
         if not self._connection:
             return []
-        with self._lock:
-            cursor = self._connection.execute(
-                "SELECT price_units, size_units, fee_units FROM fills WHERE fee_units IS NOT NULL ORDER BY id DESC LIMIT ?",
-                (int(limit),),
-            )
-            return list(cursor.fetchall())
+        try:
+            with self._lock:
+                cursor = self._connection.execute(
+                    "SELECT price_units, size_units, fee_units FROM fills WHERE fee_units IS NOT NULL ORDER BY id DESC LIMIT ?",
+                    (int(limit),),
+                )
+                return list(cursor.fetchall())
+        except (sqlite3.Error, OSError) as exc:
+            self._storage_error(exc)
+            return []
 
     def record_fill_prob_attempt(
         self,
@@ -1321,6 +1401,177 @@ class TelemetryStore:
                 queue_ahead_units,
             ),
         )
+
+    def record_market_metadata(
+        self,
+        *,
+        ticker: str,
+        title: str,
+        series_ticker: str,
+        event_ticker: str,
+        series_title: str = "",
+        market_url: Optional[str] = None,
+    ) -> None:
+        self._execute(
+            """
+            INSERT INTO market_metadata(
+                singleton,ticker,title,series_ticker,event_ticker,series_title,market_url,updated_at_ms
+            ) VALUES(1,?,?,?,?,?,?,?)
+            ON CONFLICT(singleton) DO UPDATE SET
+                ticker=excluded.ticker,title=excluded.title,
+                series_ticker=excluded.series_ticker,event_ticker=excluded.event_ticker,
+                series_title=CASE WHEN excluded.series_title<>'' THEN excluded.series_title ELSE market_metadata.series_title END,
+                market_url=COALESCE(excluded.market_url,market_metadata.market_url),
+                updated_at_ms=excluded.updated_at_ms
+            """,
+            (ticker, title, series_ticker, event_ticker, series_title, market_url, now_ms()),
+        )
+
+    def start_order_revision(
+        self,
+        *,
+        revision_key: str,
+        action: str,
+        side: str,
+        client_order_id: str,
+        order_id: Optional[str],
+        placed_at_ms: int,
+        size_units: int,
+        price_units: Optional[int],
+        book_bid_units: Optional[int],
+        book_ask_units: Optional[int],
+        book_mid_units: Optional[int],
+    ) -> None:
+        self._execute(
+            """
+            INSERT OR IGNORE INTO order_revisions(
+                revision_key,action,order_id,client_order_id,side,placed_at_ms,size_units,
+                price_units,book_bid_units,book_ask_units,book_mid_units,ended_state
+            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,'Resting')
+            """,
+            (
+                revision_key, action, order_id, client_order_id, side, int(placed_at_ms), int(size_units),
+                price_units, book_bid_units, book_ask_units, book_mid_units,
+            ),
+        )
+
+    def accept_order_revision(
+        self,
+        *,
+        revision_key: str,
+        order_id: Optional[str],
+        client_order_id: str,
+        previous_order_id: Optional[str] = None,
+        amended: bool = False,
+        status: str = "resting",
+    ) -> None:
+        if not self._connection:
+            return
+        timestamp = now_ms()
+        normalized = self._normalized_order_state(status, default="Resting")
+        try:
+            with self._lock:
+                if not self._connection:
+                    return
+                if amended and previous_order_id:
+                    self._connection.execute(
+                        """UPDATE order_revisions SET ended_state='Amended',ended_at_ms=?
+                           WHERE order_id=? AND revision_key<>? AND ended_at_ms IS NULL""",
+                        (timestamp, previous_order_id, revision_key),
+                    )
+                self._connection.execute(
+                    """UPDATE order_revisions SET order_id=?,client_order_id=?,ended_state=?,
+                       ended_at_ms=CASE WHEN ?='Resting' THEN NULL ELSE ? END WHERE revision_key=?""",
+                    (order_id, client_order_id, normalized, normalized, timestamp, revision_key),
+                )
+                self._connection.commit()
+        except (sqlite3.Error, OSError) as exc:
+            self._storage_error(exc)
+
+    def reject_order_revision(self, revision_key: str, error: str) -> None:
+        self._execute(
+            """UPDATE order_revisions SET ended_state='Rejected',ended_at_ms=?,error=?
+               WHERE revision_key=?""",
+            (now_ms(), str(error)[:500], revision_key),
+        )
+
+    @staticmethod
+    def _normalized_order_state(status: object, *, default: str = "Unknown") -> str:
+        value = str(status or "").strip().lower()
+        if value in {"resting", "open", "pending", "accepted", "executed_pending"}:
+            return "Resting"
+        if value in {"filled", "executed", "complete", "completed"}:
+            return "Filled"
+        if value in {"canceled", "cancelled"}:
+            return "Cancelled"
+        if value in {"expired"}:
+            return "Expired"
+        if value in {"rejected", "failed"}:
+            return "Rejected"
+        return default
+
+    def update_order_revision(
+        self,
+        *,
+        order_id: str,
+        status: object,
+        filled_units: Optional[int] = None,
+        remaining_units: Optional[int] = None,
+        timestamp_ms: Optional[int] = None,
+    ) -> None:
+        if not self._connection or not order_id:
+            return
+        normalized = self._normalized_order_state(status, default="Unknown")
+        if remaining_units == 0 and filled_units is not None and filled_units > 0:
+            normalized = "Filled"
+        try:
+            with self._lock:
+                if not self._connection:
+                    return
+                row = self._connection.execute(
+                    """SELECT id FROM order_revisions WHERE order_id=?
+                       ORDER BY placed_at_ms DESC,id DESC LIMIT 1""",
+                    (order_id,),
+                ).fetchone()
+                if row is None:
+                    return
+                if normalized == "Resting":
+                    self._connection.execute(
+                        "UPDATE order_revisions SET filled_units=COALESCE(?,filled_units) WHERE id=?",
+                        (filled_units, row["id"]),
+                    )
+                else:
+                    self._connection.execute(
+                        """UPDATE order_revisions SET ended_state=?,filled_units=COALESCE(?,filled_units),
+                           ended_at_ms=COALESCE(ended_at_ms,?) WHERE id=?""",
+                        (normalized, filled_units, int(timestamp_ms or now_ms()), row["id"]),
+                    )
+                self._connection.commit()
+        except (sqlite3.Error, OSError) as exc:
+            self._storage_error(exc)
+
+    def update_order_revision_from_fills(self, order_id: str) -> None:
+        if not self._connection or not order_id:
+            return
+        try:
+            with self._lock:
+                if not self._connection:
+                    return
+                filled = int(self._connection.execute(
+                    "SELECT COALESCE(SUM(size_units),0) FROM fills WHERE order_id=?", (order_id,)
+                ).fetchone()[0])
+                self._connection.execute(
+                    """UPDATE order_revisions SET filled_units=? WHERE id=(
+                           SELECT id FROM order_revisions WHERE order_id=? ORDER BY placed_at_ms DESC,id DESC LIMIT 1
+                       )""",
+                    (filled, order_id),
+                )
+                self._connection.commit()
+        except (sqlite3.Error, OSError) as exc:
+            self._storage_error(exc)
+
+    def close_order_revision(self, order_id: str, state: str, *, timestamp_ms: Optional[int] = None) -> None:
+        self.update_order_revision(order_id=order_id, status=state, timestamp_ms=timestamp_ms)
 
     def record_quote_decision(self, *, ts_ms: int, ticker: str, decision: SideQuoteDecision, context: MarketContext) -> None:
         self._execute(
@@ -2032,6 +2283,14 @@ class TopOfBookBot:
         safe_ticker = self.settings.market_ticker.replace("/", "_").replace("\\", "_")
         telemetry_path = self.settings.telemetry_sqlite_path or os.path.join(os.getcwd(), "telemetry", f"telemetry_{safe_ticker}.sqlite3")
         self.telemetry_store = TelemetryStore(telemetry_path, enabled=self.settings.enable_sqlite_telemetry)
+        self.telemetry_store.record_market_metadata(
+            ticker=self.market.ticker,
+            title=self.market.title,
+            series_ticker=self.market.series_ticker,
+            event_ticker=self.market.event_ticker,
+            series_title=self.market.series_title,
+            market_url=self.market.market_url,
+        )
         self.fee_model = FeeModel(self.api_client, self.market, self.settings, self.telemetry_store)
         self.incentive_model = IncentiveModel(self.api_client, self.market)
         self.fair_value_engine = FairValueEngine(self.market, self.settings)
@@ -2261,6 +2520,7 @@ class TopOfBookBot:
                     self.record_order_activity("cancel", "attempt", order_id=order.order_id)
                     self.api_client.cancel_order(order_id=order.order_id)
                     self.record_order_activity("cancel", "success", order_id=order.order_id)
+                    self.telemetry_store.close_order_revision(order.order_id, "Cancelled")
                     canceled_count += 1
                     log_event(
                         "CANCELLED_OWN_ORDER",
@@ -2498,6 +2758,32 @@ class TopOfBookBot:
         self.incentive_model.refresh_from_api()
         self.toxicity_model.bootstrap_from_telemetry(limit=5_000)
         self.fill_probability_model.bootstrap_from_telemetry(limit=10_000)
+        series_title = self.fee_model.series_title or self.market.series_title
+        market_url = self.market.market_url or canonical_market_url(
+            self.market.series_ticker,
+            self.market.event_ticker,
+            series_title,
+        )
+        self.telemetry_store.record_market_metadata(
+            ticker=self.market.ticker,
+            title=self.market.title,
+            series_ticker=self.market.series_ticker,
+            event_ticker=self.market.event_ticker,
+            series_title=series_title,
+            market_url=market_url,
+        )
+
+    def side_book_snapshot(self, side: str) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+        yes_bid = self.best_bid("yes")
+        no_bid = self.best_bid("no")
+        if side == "yes":
+            bid = yes_bid
+            ask = PRICE_SCALE - no_bid if no_bid is not None else None
+        else:
+            bid = no_bid
+            ask = PRICE_SCALE - yes_bid if yes_bid is not None else None
+        midpoint = int(round((bid + ask) / 2)) if bid is not None and ask is not None else None
+        return bid, ask, midpoint
 
     def build_market_context(self) -> Optional[MarketContext]:
         best_yes_bid_units = self.best_bid("yes")
@@ -3597,6 +3883,7 @@ class TopOfBookBot:
             self.record_order_activity("cancel", "attempt", side=side, order_id=order_id)
             await asyncio.to_thread(self.api_client.cancel_order, order_id=order_id)
             self.record_order_activity("cancel", "success", side=side, order_id=order_id)
+            self.telemetry_store.close_order_revision(order_id, "Cancelled")
             log_event("CANCEL_REQUESTED", side=side, reason=reason, order_id=order_id)
         except Exception as exc:
             self.record_order_activity("cancel", "error", side=side, order_id=order_id, error=str(exc))
@@ -3636,6 +3923,7 @@ class TopOfBookBot:
             try:
                 await asyncio.to_thread(self.api_client.cancel_order, order_id=order.order_id)
                 self.record_order_activity("cancel", "success", side=side, order_id=order.order_id)
+                self.telemetry_store.close_order_revision(order.order_id, "Cancelled")
             except Exception as exc:
                 self.record_order_activity("cancel", "error", side=side, order_id=order.order_id, error=str(exc))
                 if not is_order_not_found_error(exc):
@@ -3689,6 +3977,7 @@ class TopOfBookBot:
                     return
 
             order_action = "create" if not state.has_active_resting_order else "amend"
+            revision_key = ""
             try:
                 if not state.has_active_resting_order:
                     if await self.clear_untracked_owned_orders_before_create(side):
@@ -3698,6 +3987,21 @@ class TopOfBookBot:
                         return
                     new_client_order_id = f"{self.settings.primary_client_order_prefix}:{side}:{uuid.uuid4().hex[:16]}"
                     expiration_ts = self.expiration_timestamp_for_side(side)
+                    revision_key = uuid.uuid4().hex
+                    book_bid, book_ask, book_mid = self.side_book_snapshot(side)
+                    self.telemetry_store.start_order_revision(
+                        revision_key=revision_key,
+                        action="create",
+                        side=side,
+                        client_order_id=new_client_order_id,
+                        order_id=None,
+                        placed_at_ms=now_ms(),
+                        size_units=desired_remaining_units,
+                        price_units=attempt_price_units,
+                        book_bid_units=book_bid,
+                        book_ask_units=book_ask,
+                        book_mid_units=book_mid,
+                    )
                     self.record_order_activity("create", "attempt", side=side)
                     response = await asyncio.to_thread(
                         self.api_client.create_order,
@@ -3722,6 +4026,12 @@ class TopOfBookBot:
                     state.status = "resting"
                     state.last_queue_position_units = self.displayed_size_units_at_price(side, attempt_price_units)
                     state.expiration_time_ms = response.expiration_time_ms
+                    self.telemetry_store.accept_order_revision(
+                        revision_key=revision_key,
+                        order_id=state.order_id,
+                        client_order_id=state.client_order_id,
+                        status=response.status or "resting",
+                    )
                     self.record_order_activity("create", "success", side=side, order_id=state.order_id)
                     log_event(
                         "CREATE_OK",
@@ -3737,6 +4047,22 @@ class TopOfBookBot:
                     continue
 
                 updated_client_order_id = f"{self.settings.primary_client_order_prefix}:{side}:{uuid.uuid4().hex[:16]}"
+                previous_order_id = state.order_id
+                revision_key = uuid.uuid4().hex
+                book_bid, book_ask, book_mid = self.side_book_snapshot(side)
+                self.telemetry_store.start_order_revision(
+                    revision_key=revision_key,
+                    action="amend",
+                    side=side,
+                    client_order_id=updated_client_order_id,
+                    order_id=previous_order_id,
+                    placed_at_ms=now_ms(),
+                    size_units=desired_remaining_units,
+                    price_units=attempt_price_units,
+                    book_bid_units=book_bid,
+                    book_ask_units=book_ask,
+                    book_mid_units=book_mid,
+                )
                 self.record_order_activity("amend", "attempt", side=side, order_id=state.order_id)
                 response = await asyncio.to_thread(
                     self.api_client.amend_order,
@@ -3761,6 +4087,14 @@ class TopOfBookBot:
                 if price_changed or state.last_queue_position_units is None:
                     state.last_queue_position_units = self.displayed_size_units_at_price(side, attempt_price_units)
                 state.expiration_time_ms = response.expiration_time_ms
+                self.telemetry_store.accept_order_revision(
+                    revision_key=revision_key,
+                    order_id=state.order_id,
+                    client_order_id=state.client_order_id,
+                    previous_order_id=previous_order_id,
+                    amended=True,
+                    status=response.status or "resting",
+                )
                 self.record_order_activity("amend", "success", side=side, order_id=state.order_id)
                 log_event(
                     "AMEND_OK",
@@ -3772,6 +4106,8 @@ class TopOfBookBot:
                 return
 
             except Exception as exc:
+                if revision_key:
+                    self.telemetry_store.reject_order_revision(revision_key, str(exc))
                 self.record_order_activity(
                     order_action, "error", side=side, order_id=state.order_id, error=str(exc)
                 )
@@ -4107,6 +4443,7 @@ class TopOfBookBot:
             best_no_bid_units=(context_before.best_no_bid_units if context_before is not None else None),
             queue_ahead_units=(context_before.queue_ahead_units_for_side(side) if context_before is not None else None),
         )
+        self.telemetry_store.update_order_revision_from_fills(order_id)
         log_event(
             "FILL_TELEMETRY",
             side=side,
@@ -4208,6 +4545,13 @@ class TopOfBookBot:
         expiration_time_ms = order.expiration_time_ms
         if expiration_time_ms is not None:
             state.expiration_time_ms = expiration_time_ms
+
+        self.telemetry_store.update_order_revision(
+            order_id=incoming_order_id,
+            status=incoming_status,
+            filled_units=fill_units,
+            remaining_units=remaining_units,
+        )
 
         if state.status != "resting":
             preserve_cycle = state.status == "canceled"
@@ -4393,6 +4737,20 @@ class TopOfBookBot:
 
         exit_count_units = abs(net_position_units)
         client_order_id = f"wd:{held_side}:{uuid.uuid4().hex[:16]}"
+        revision_key = uuid.uuid4().hex
+        self.telemetry_store.start_order_revision(
+            revision_key=revision_key,
+            action="create",
+            side=held_side,
+            client_order_id=client_order_id,
+            order_id=None,
+            placed_at_ms=now_ms(),
+            size_units=exit_count_units,
+            price_units=best_bid_units,
+            book_bid_units=best_bid_units,
+            book_ask_units=None,
+            book_mid_units=None,
+        )
         self.record_order_activity("create", "attempt", side=held_side)
         try:
             response = await asyncio.to_thread(
@@ -4412,8 +4770,15 @@ class TopOfBookBot:
             ),
             )
         except Exception as exc:
+            self.telemetry_store.reject_order_revision(revision_key, str(exc))
             self.record_order_activity("create", "error", side=held_side, error=str(exc))
             raise
+        self.telemetry_store.accept_order_revision(
+            revision_key=revision_key,
+            order_id=response.order_id,
+            client_order_id=response.client_order_id or client_order_id,
+            status=response.status or "unknown",
+        )
         self.record_order_activity("create", "success", side=held_side, order_id=response.order_id)
         log_event(
             "WATCHDOG_EXIT_ORDER",
@@ -4596,11 +4961,11 @@ class TopOfBookBot:
                     "title": self.market.title,
                     "seriesTicker": self.market.series_ticker,
                     "eventTicker": self.market.event_ticker,
-                    "seriesTitle": self.fee_model.series_title,
-                    "marketUrl": canonical_market_url(
+                    "seriesTitle": self.fee_model.series_title or self.market.series_title,
+                    "marketUrl": self.market.market_url or canonical_market_url(
                         self.market.series_ticker,
                         self.market.event_ticker,
-                        self.fee_model.series_title,
+                        self.fee_model.series_title or self.market.series_title,
                     ),
                     "priceUnits": price_units,
                     "priceSource": price_source,
@@ -4624,6 +4989,7 @@ class TopOfBookBot:
                     "active": active_orders,
                     "recent": list(self.recent_order_activity),
                 },
+                "telemetry": self.telemetry_store.health_snapshot(),
                 "apiActivity": api_activity,
             },
         }
@@ -4695,4 +5061,6 @@ def load_market_metadata(api_client: BaseClient, market_id: str) -> MarketMetada
         price_level_structure=market.price_level_structure,
         fractional_trading_enabled=market.fractional_trading_enabled,
         price_grid=PriceGrid.from_market(market),
+        series_title=market.series_title,
+        market_url=market.market_url,
     )
