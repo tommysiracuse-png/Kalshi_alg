@@ -300,9 +300,16 @@ class SessionStore:
         if status not in {"stopped", "failed", "shutdown_failed", "interrupted"}:
             raise ValueError("invalid final run status")
         final_metrics = dict(metrics or {})
+        finished_at = now_ms()
         with self._connect() as db:
             row = db.execute("SELECT artifact_path FROM runs WHERE id=?", (run_id,)).fetchone()
-        finished_at = now_ms()
+            # Commit the terminal state before best-effort artifact processing.
+            # A large run may contain hundreds of telemetry databases; failure
+            # to summarize one must never leave the run blocking future starts.
+            db.execute(
+                "UPDATE runs SET status=?,ended_at_ms=?,heartbeat_at_ms=?,error=? WHERE id=?",
+                (status, finished_at, finished_at, error, run_id),
+            )
         if row:
             self._finalize_order_revisions(Path(row["artifact_path"]), finished_at)
             pnl_path = Path(row["artifact_path"]) / "pnl_tracker.jsonl"
@@ -328,23 +335,25 @@ class SessionStore:
                 final_metrics["markets"] = markets
         if final_metrics:
             self.record_metrics(run_id, final_metrics, sample=False)
-        with self._connect() as db:
-            db.execute("UPDATE runs SET status=?,ended_at_ms=?,heartbeat_at_ms=?,error=? WHERE id=?", (status, finished_at, finished_at, error, run_id))
 
     @staticmethod
     def _finalize_order_revisions(artifact_path: Path, ended_at_ms: int) -> None:
         for path in artifact_path.glob("markets/*/telemetry.sqlite3"):
             try:
-                with sqlite3.connect(path, timeout=1) as db:
-                    if not db.execute(
-                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='order_revisions'"
-                    ).fetchone():
-                        continue
-                    db.execute(
-                        """UPDATE order_revisions SET ended_state='Unknown',ended_at_ms=?
-                           WHERE ended_at_ms IS NULL AND ended_state='Resting'""",
-                        (int(ended_at_ms),),
-                    )
+                # A sqlite3 connection's context manager controls only the
+                # transaction; it does not close the connection. Explicitly
+                # close each database so large runs cannot exhaust RLIMIT_NOFILE.
+                with closing(sqlite3.connect(path, timeout=1)) as db:
+                    with db:
+                        if not db.execute(
+                            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='order_revisions'"
+                        ).fetchone():
+                            continue
+                        db.execute(
+                            """UPDATE order_revisions SET ended_state='Unknown',ended_at_ms=?
+                               WHERE ended_at_ms IS NULL AND ended_state='Resting'""",
+                            (int(ended_at_ms),),
+                        )
             except sqlite3.Error:
                 continue
 

@@ -65,7 +65,16 @@ def test_http_client_raises_structured_error():
     activity = client.activity_snapshot()["rest"]
     assert activity["total"] == 1
     assert activity["errors"] == 1
+    assert activity["errorsLast60s"] == 1
+    assert activity["rateLimitErrors"] == 1
+    assert activity["rateLimitErrorsLast60s"] == 1
     assert activity["byStatus"] == {"429": 1}
+    assert activity["lastError"]["statusCode"] == 429
+    assert activity["lastRateLimitError"]["statusCode"] == 429
+    assert activity["lastError"]["operation"] == "get"
+    assert activity["operations"]["get"]["errors"] == 1
+    assert activity["operations"]["get"]["errorsLast60s"] == 1
+    assert "rate limited" in activity["operations"]["get"]["lastError"]["message"]
 
 
 def test_http_activity_uses_logical_operations_without_request_data():
@@ -74,6 +83,11 @@ def test_http_activity_uses_logical_operations_without_request_data():
     activity = client.activity_snapshot()
     assert activity["rest"]["byOperation"] == {"get_market": 1}
     assert activity["rest"]["requestsLast60s"] == 1
+    operation = activity["rest"]["operations"]["get_market"]
+    assert operation["total"] == operation["successes"] == 1
+    assert operation["errors"] == 0
+    assert operation["lastActivityAtMs"] is not None
+    assert operation["averageLatencyMs"] >= 0
     assert "SECRET" not in str(activity)
     assert "Authorization" not in str(activity)
 

@@ -86,6 +86,7 @@ class HTTPClient:
         started = time.perf_counter()
         response = None
         error = False
+        error_message = None
         try:
             request = getattr(self.session, method.lower())
             kwargs = {"headers": dict(headers or {}), "params": params, "timeout": self.timeout_seconds}
@@ -93,8 +94,9 @@ class HTTPClient:
                 kwargs["json"] = dict(body or {})
             response = request(self._url(path), **kwargs)
             return self._decode(response, method=method, path=path)
-        except Exception:
+        except Exception as exc:
             error = True
+            error_message = str(exc)
             raise
         finally:
             status = int(getattr(response, "status_code", 0)) if response is not None else None
@@ -104,6 +106,7 @@ class HTTPClient:
                 status_code=status,
                 latency_ms=(time.perf_counter() - started) * 1000,
                 error=error or bool(status and status >= 400),
+                error_message=error_message,
             )
 
     def activity_snapshot(self) -> dict:

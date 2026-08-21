@@ -40,6 +40,70 @@ def test_session_store_closes_connections_on_success_and_error(tmp_path: Path, m
     assert all(connection.closed for connection in connections)
 
 
+def test_finish_run_closes_every_telemetry_connection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    store = SessionStore(tmp_path / "session_data")
+    run = store.prepare_run()
+    telemetry_path = Path(run["artifactPath"]) / "markets" / "TEST-1" / "telemetry.sqlite3"
+    telemetry_path.parent.mkdir(parents=True)
+    setup_connection = sqlite3.connect(telemetry_path)
+    try:
+        setup_connection.execute(
+            """CREATE TABLE order_revisions(
+                   ended_state TEXT NOT NULL, ended_at_ms INTEGER
+               )"""
+        )
+        setup_connection.execute(
+            "INSERT INTO order_revisions(ended_state,ended_at_ms) VALUES('Resting',NULL)"
+        )
+        setup_connection.commit()
+    finally:
+        setup_connection.close()
+
+    original_connect = sqlite3.connect
+    connections: list[TrackingConnection] = []
+
+    def connect(*args, **kwargs):
+        connection = original_connect(*args, **kwargs, factory=TrackingConnection)
+        connections.append(connection)
+        return connection
+
+    monkeypatch.setattr("session_store.sqlite3.connect", connect)
+    store.finish_run(run["id"], "stopped")
+
+    assert connections
+    assert all(connection.closed for connection in connections)
+    verification = sqlite3.connect(telemetry_path)
+    try:
+        state, ended_at = verification.execute(
+            "SELECT ended_state,ended_at_ms FROM order_revisions"
+        ).fetchone()
+    finally:
+        verification.close()
+    assert state == "Unknown"
+    assert ended_at is not None
+
+
+def test_finish_run_commits_terminal_state_before_artifact_finalization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    store = SessionStore(tmp_path / "session_data")
+    run = store.prepare_run()
+    store.claim_run(run["id"])
+    store.mark_running(run["id"])
+
+    def fail_finalization(*_args):
+        raise OSError(24, "Too many open files")
+
+    monkeypatch.setattr(store, "_finalize_order_revisions", fail_finalization)
+    with pytest.raises(OSError, match="Too many open files"):
+        store.finish_run(run["id"], "stopped")
+
+    saved = store.get_run(run["id"], include_artifact_bytes=False)
+    assert saved["status"] == "stopped"
+    assert saved["endedAt"] is not None
+    assert store.active_run() is None
+
+
 def test_configuration_round_trip_and_unknown_rejection():
     config = default_session_configuration()
     config["launcher"]["fixedTicker"] = "TEST-MARKET"
