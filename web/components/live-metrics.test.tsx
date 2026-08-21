@@ -55,6 +55,9 @@ describe("LiveMetrics", () => {
     render(<LiveMetrics initial={initial} sessions={sessions} query="" />);
     await waitFor(() => expect(screen.getByLabelText("Fills")).toHaveValue("25"));
     expect(screen.getByLabelText("Orders")).toHaveValue("50");
+    expect(screen.getByLabelText("Total Cost minimum")).toBeDisabled();
+    expect(screen.getByLabelText("Markets: Name / Description / Link / Ticker")).toBeChecked();
+    expect(screen.getByLabelText("Markets: Name / Description / Link / Ticker")).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: /Default.*1 run/i }));
     fireEvent.click(screen.getByRole("button", { name: /Expand run run-12345678/i }));
     expect(await screen.findByText("TEST-1")).toBeInTheDocument();
@@ -83,5 +86,185 @@ describe("LiveMetrics", () => {
     act(() => MockEventSource.emit("metrics_heartbeat", { ...heartbeat, generatedAt: 2_002_000, activeRun: { ...heartbeat.activeRun, heartbeatAt: 2_002_000, summary: { ...heartbeat.activeRun.summary, runtimeMs: 102_000 } } }));
     await act(async () => { await Promise.resolve(); });
     expect(request.mock.calls.length).toBe(afterRevision);
+
+    const beforeColumns = request.mock.calls.length;
+    fireEvent.click(screen.getByLabelText("Fills: Fill ID"));
+    const dragData = new Map<string, string>();
+    const dataTransfer = {
+      effectAllowed: "none", dropEffect: "none",
+      setData: (type: string, value: string) => dragData.set(type, value),
+      getData: (type: string) => dragData.get(type) ?? "",
+    } as unknown as DataTransfer;
+    fireEvent.dragStart(screen.getByRole("columnheader", { name: "Total paid" }), { dataTransfer });
+    expect(dragData.size).toBe(2);
+    const fillTable = (activityView as HTMLElement).querySelector(".activity-table") as HTMLElement;
+    const contractsHeader = [...fillTable.querySelectorAll("th")].find(header => header.textContent?.includes("Contracts")) as HTMLElement;
+    fireEvent.dragOver(contractsHeader, { dataTransfer });
+    fireEvent.drop(contractsHeader, { dataTransfer });
+    expect(screen.queryByRole("columnheader", { name: "Fill ID" })).not.toBeInTheDocument();
+    const fillHeaders = [...((activityView as HTMLElement).querySelector(".activity-table") as HTMLElement).querySelectorAll("th")].map(item => item.textContent);
+    expect(fillHeaders).toEqual(["⋮⋮Fill time↓", "⋮⋮Side↕", "⋮⋮Contracts↕", "⋮⋮Total paid↕", "⋮⋮Time to fill↕", "⋮⋮Realized P&L↕", "⋮⋮Unrealized P&L↕", "⋮⋮Fill P&L↕"]);
+    await waitFor(() => {
+      const stored = JSON.parse(window.localStorage.getItem("kalshi.metrics.columns.v1") ?? "null") as { tables: { fills: Array<{ id: string; enabled: boolean }> } };
+      expect(stored.tables.fills.find(column => column.id === "fillId")?.enabled).toBe(false);
+      expect(stored.tables.fills.map(column => column.id).indexOf("totalPaid")).toBeLessThan(stored.tables.fills.map(column => column.id).indexOf("timeToFill"));
+    });
+    expect(request.mock.calls.length).toBe(beforeColumns);
+
+    cleanup();
+    render(<LiveMetrics initial={initial} sessions={sessions} query="" />);
+    fireEvent.click(screen.getByRole("button", { name: /Default.*1 run/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Expand run run-12345678/i }));
+    expect(await screen.findByText("TEST-1")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Expand TEST-1" }));
+    expect(await screen.findByText("Newest 1 of 125")).toBeInTheDocument();
+    expect(screen.queryByRole("columnheader", { name: "Fill ID" })).not.toBeInTheDocument();
+    for (const label of ["Order Time", "Order ID", "Side", "Contracts", "Time on Book", "Bid / Ask / Mid", "Order Price", "Latest State"]) {
+      fireEvent.click(screen.getByLabelText(`Orders: ${label}`));
+    }
+    expect(screen.getByText("No columns enabled for Orders. Use Columns at the top of the page to enable one.")).toBeInTheDocument();
+  });
+
+  it("sorts each activity table and filters loaded rows without fetching", async () => {
+    class MockEventSource {
+      static OPEN = 1;
+      readyState = 1;
+      onopen: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      addEventListener() {}
+      close() {}
+    }
+    vi.stubGlobal("EventSource", MockEventSource);
+    const source = { available: true, updatedAt: 4_000_000, stale: false };
+    const market = (ticker: string, lastFillAtMs: number, totalCostUnits: number, contractsUnits: number) => ({
+      ticker, description: `${ticker} market`, marketUrl: null, side: "YES" as const,
+      yesContractsUnits: contractsUnits, noContractsUnits: 0, yesAverageCostPriceUnits: 4_000, noAverageCostPriceUnits: null,
+      totalCostUnits, realizedPnlUnits: ticker === "NEW" ? 1_000 : 500, realizedReturnBps: 500,
+      fillCount: 2, orderCount: 2, firstFillAtMs: lastFillAtMs - 500, lastFillAtMs,
+      coverage: { fillsComplete: true, ordersComplete: true }, warnings: [],
+    });
+    const markets: RunMarketsResponse = {
+      generatedAt: 4_000_000, runId: "run-12345678", source, warnings: [],
+      items: [market("OLD", 2_000_000, 10_000, 100), market("NEW", 4_000_000, 30_000, 300)],
+    };
+    const activity: RunMarketActivityResponse = {
+      generatedAt: 4_000_000, runId: "run-12345678", market: markets.items[1], source, warnings: [],
+      fills: { totalCount: 2, truncated: false, items: [
+        { fillId: "fill-old", orderId: "order-old", filledAtMs: 2_000_000, side: "yes", contractsUnits: 50, matchedContractsUnits: 50, openContractsUnits: 0, timeToFillMs: 500, totalPaidUnits: 5_000, realizedPnlUnits: 100, unrealizedPnlUnits: 0, fillPnlUnits: 100 },
+        { fillId: "fill-new", orderId: "order-new", filledAtMs: 4_000_000, side: "yes", contractsUnits: 200, matchedContractsUnits: 100, openContractsUnits: 100, timeToFillMs: 1_000, totalPaidUnits: 20_000, realizedPnlUnits: 600, unrealizedPnlUnits: 300, fillPnlUnits: 900 },
+      ] },
+      orders: { totalCount: 2, truncated: false, items: [
+        { revisionKey: "revision-old", orderId: "order-old", placedAtMs: 1_500_000, side: "yes", contractsUnits: 100, timeOnBookMs: 500, bookBidPriceUnits: 3_900, bookAskPriceUnits: 4_100, bookMidPriceUnits: 4_000, orderPriceUnits: 4_000, endedState: "Filled" },
+        { revisionKey: "revision-new", orderId: "order-new", placedAtMs: 3_500_000, side: "yes", contractsUnits: 200, timeOnBookMs: 1_000, bookBidPriceUnits: 4_900, bookAskPriceUnits: 5_100, bookMidPriceUnits: 5_000, orderPriceUnits: 5_000, endedState: "Resting" },
+      ] },
+    };
+    const request = vi.spyOn(globalThis, "fetch").mockImplementation(async input => new Response(
+      JSON.stringify(String(input).includes("/activity") ? activity : markets),
+      { status: 200, headers: { "content-type": "application/json" } },
+    ));
+    const sessions: SavedSession[] = [{ id: "session-1", name: "Default", description: "", configuration: {} as SavedSession["configuration"], version: 1, createdAt: 1, updatedAt: 1, selected: true, runCount: 1 }];
+    const initial: MetricsResponse = {
+      generatedAt: 4_000_000,
+      summary: { timesRun: 1, runtimeMs: 60_000, orders: 4, ordersPerMinute: 4, fills: 4, fillsPerMinute: 4, apiCalls: 4, apiErrors: 0, realizedCents: 1, unrealizedCents: 0, totalCents: 1, pnlComplete: true, outcomes: { stopped: 1 }, apiByComponent: { bots: 4 } },
+      runs: [{ id: "run-12345678", sessionId: "session-1", sessionName: "Default", configurationVersion: 1, configuration: {} as SavedSession["configuration"], status: "stopped", createdAt: 1_000_000, startedAt: 1_000_000, endedAt: 4_000_000, artifactPath: "/tmp/run", metrics: { runtimeMs: 3_000_000, orders: 4, fills: 4, totalCents: 1, apiCalls: 4, apiErrors: 0 } }],
+    };
+
+    render(<LiveMetrics initial={initial} sessions={sessions} query="session_id=session-1" filters={{ sessionId: "session-1", status: "", from: "", to: "" }} />);
+    expect(screen.getByLabelText("Total Cost minimum")).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: /Default.*1 run/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Expand run run-12345678/i }));
+    expect(await screen.findByText("NEW")).toBeInTheDocument();
+    const marketRows = () => [...document.querySelectorAll(".market-metrics-table tbody>tr.expandable-position")].map(row => row.textContent ?? "");
+    expect(marketRows()[0]).toContain("NEW");
+    expect(screen.getByRole("columnheader", { name: "Last fill" })).toHaveAttribute("aria-sort", "descending");
+    fireEvent.click(screen.getByRole("button", { name: "Last fill" }));
+    expect(marketRows()[0]).toContain("OLD");
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand NEW" }));
+    expect(await screen.findByText("fill-new")).toBeInTheDocument();
+    const activityTables = () => [...document.querySelectorAll(".market-activity .activity-table table")];
+    const rowTexts = (table: Element) => [...table.querySelectorAll("tbody>tr")].map(row => row.textContent ?? "");
+    expect(rowTexts(activityTables()[0])[0]).toContain("fill-new");
+    expect(rowTexts(activityTables()[1])[0]).toContain("order-new");
+    fireEvent.click(screen.getByRole("button", { name: "Fill time" }));
+    fireEvent.click(screen.getByRole("button", { name: "Order time" }));
+    expect(rowTexts(activityTables()[0])[0]).toContain("fill-old");
+    expect(rowTexts(activityTables()[1])[0]).toContain("order-old");
+
+    const beforeFilters = request.mock.calls.length;
+    fireEvent.change(screen.getByLabelText("Total Cost minimum"), { target: { value: "0.75" } });
+    fireEvent.change(screen.getByLabelText("Total Unrealized P&L minimum"), { target: { value: "0.02" } });
+    expect(screen.queryByText("fill-old")).not.toBeInTheDocument();
+    expect(screen.getByText("fill-new")).toBeInTheDocument();
+    expect(screen.queryByText("order-old")).not.toBeInTheDocument();
+    expect(screen.getByText("order-new")).toBeInTheDocument();
+    expect(screen.getByText("OLD")).toBeInTheDocument();
+    expect(request.mock.calls.length).toBe(beforeFilters);
+
+    fireEvent.change(screen.getByLabelText("Total Cost minimum"), { target: { value: "1.50" } });
+    expect(screen.getByText("No orders match the current filters.")).toBeInTheDocument();
+    expect(request.mock.calls.length).toBe(beforeFilters);
+    fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+    expect(screen.getByText("fill-old")).toBeInTheDocument();
+    expect(screen.getByText("order-old")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand OLD" }));
+    await waitFor(() => expect(screen.getAllByText("fill-new")).toHaveLength(2));
+    const beforeDrag = request.mock.calls.length;
+    const dragData = new Map<string, string>();
+    const dataTransfer = {
+      effectAllowed: "none", dropEffect: "none",
+      setData: (type: string, value: string) => dragData.set(type, value),
+      getData: (type: string) => dragData.get(type) ?? "",
+    } as unknown as DataTransfer;
+    fireEvent.dragStart(screen.getAllByRole("columnheader", { name: "Fill time" })[0], { dataTransfer });
+    expect(dragData.size).toBe(2);
+    fireEvent.dragOver(screen.getAllByRole("columnheader", { name: "Fill ID" })[0], { dataTransfer });
+    fireEvent.drop(screen.getAllByRole("columnheader", { name: "Fill ID" })[0], { dataTransfer });
+    const fillTables = [...document.querySelectorAll(".market-activity")].map(view => view.querySelector(".activity-table") as HTMLElement);
+    expect(fillTables.map(table => table.querySelector("th")?.textContent)).toEqual(["⋮⋮Fill ID↕", "⋮⋮Fill ID↕"]);
+    await waitFor(() => {
+      const stored = JSON.parse(window.localStorage.getItem("kalshi.metrics.columns.v1") ?? "null") as { tables: { fills: Array<{ id: string }> } };
+      expect(stored.tables.fills[0].id).toBe("fillId");
+    });
+    expect(request.mock.calls.length).toBe(beforeDrag);
+  });
+
+  it("sanitizes saved column preferences and enables newly known columns", async () => {
+    class MockEventSource {
+      static OPEN = 1;
+      readyState = 1;
+      onopen: (() => void) | null = null;
+      onerror: (() => void) | null = null;
+      addEventListener() {}
+      close() {}
+    }
+    vi.stubGlobal("EventSource", MockEventSource);
+    window.localStorage.setItem("kalshi.metrics.columns.v1", JSON.stringify({
+      version: 1,
+      tables: {
+        markets: [{ id: "side", enabled: false }, { id: "identity", enabled: false }, { id: "removedColumn", enabled: false }],
+        fills: [{ id: "fillId", enabled: false }],
+        orders: "invalid",
+      },
+    }));
+    const initial: MetricsResponse = {
+      generatedAt: 1,
+      summary: { timesRun: 0, runtimeMs: 0, orders: 0, ordersPerMinute: 0, fills: 0, fillsPerMinute: 0, apiCalls: 0, apiErrors: 0, realizedCents: 0, unrealizedCents: 0, totalCents: 0, pnlComplete: true, outcomes: {}, apiByComponent: {} },
+      runs: [],
+    };
+
+    render(<LiveMetrics initial={initial} sessions={[]} query="" />);
+    await waitFor(() => expect(screen.getByLabelText("Markets: Side")).not.toBeChecked());
+    expect(screen.getByLabelText("Markets: Name / Description / Link / Ticker")).toBeChecked();
+    expect(screen.getByLabelText("Markets: Avg Cost")).toBeChecked();
+    expect(screen.getByLabelText("Fills: Fill ID")).not.toBeChecked();
+    expect(screen.getByLabelText("Fills: Fill Time")).toBeChecked();
+    expect(screen.getByLabelText("Orders: Order Time")).toBeChecked();
+    await waitFor(() => {
+      const stored = window.localStorage.getItem("kalshi.metrics.columns.v1") ?? "";
+      expect(stored).not.toContain("removedColumn");
+      expect(JSON.parse(stored).tables.markets[0]).toEqual({ id: "identity", enabled: true });
+    });
   });
 });
