@@ -10,7 +10,8 @@ import pytest
 
 from bot_manager import BotManager, BotManagerConfig, ManagedBot
 from clients.models import AccountOrder, MarketQuote, Position
-from fleet_models import ScreenerPick, ScreenerUpdate
+from fleet_models import MAX_CONCURRENT_BOTS, ScreenerPick, ScreenerUpdate
+from kalshi_screener import MARKET_SCAN_HARD_LIMIT, screen_markets
 from lip_launcher import ChildProcess
 
 
@@ -68,6 +69,109 @@ def test_screener_diff_inventory_fail_safe_csv_and_last_good(tmp_path, monkeypat
     assert status["lastDurationMs"] is not None
     assert status["lastError"] == "bad refresh"
     assert {item["marketId"] for item in status["picks"]} == {"NEW", "UNKNOWN"}
+
+
+def test_screener_inventory_carryover_consumes_cap_and_displaces_lowest_rank(tmp_path, monkeypatch):
+    pd = pytest.importorskip("pandas")
+    import screener as screener_module
+    from screener import Screener
+
+    frame = pd.DataFrame([
+        {"Rank": 1, "Ticker": "FIRST", "SearchText": "First"},
+        {"Rank": 2, "Ticker": "SECOND", "SearchText": "Second"},
+        {"Rank": 3, "Ticker": "THIRD", "SearchText": "Third"},
+    ])
+    monkeypatch.setattr(screener_module, "screen_markets", lambda source, settings: frame)
+    monkeypatch.setattr(screener_module, "build_export_dataframe", lambda value, settings: value)
+
+    class InventoryClient(FakeScreenClient):
+        def get_positions(self, market_id):
+            return [Position(market_id, 100)]
+
+        def get_market_quote(self, market_id):
+            return MarketQuote(market_id, 5000, 5000)
+
+    screener = Screener(
+        client=InventoryClient(),
+        settings={},
+        output_path=tmp_path / "screen.csv",
+        default_yes_budget_cents=100,
+        default_no_budget_cents=100,
+        max_bots=3,
+        minimum_carryover_value_cents=20,
+    )
+    update = asyncio.run(screener.refresh({"HELD": pick("HELD")}, reason="test"))
+
+    assert update is not None
+    assert [item.market_id for item in update.picks] == ["FIRST", "SECOND", "HELD"]
+    assert update.inventory_carried == ("HELD",)
+    assert len(update.picks) == 3
+    assert any("displacing 1 lower-ranked" in warning for warning in screener.status_snapshot()["warnings"])
+
+
+def test_screener_overflow_prioritizes_unknown_then_largest_inventory(tmp_path, monkeypatch):
+    pd = pytest.importorskip("pandas")
+    import screener as screener_module
+    from screener import Screener
+
+    frame = pd.DataFrame([{"Rank": 1, "Ticker": "SCREEN", "SearchText": "Screen"}])
+    monkeypatch.setattr(screener_module, "screen_markets", lambda source, settings: frame)
+    monkeypatch.setattr(screener_module, "build_export_dataframe", lambda value, settings: value)
+
+    class OverflowClient(FakeScreenClient):
+        def get_positions(self, market_id):
+            if market_id == "UNKNOWN":
+                raise RuntimeError("position temporarily unavailable")
+            return [Position(market_id, 100)]
+
+        def get_market_quote(self, market_id):
+            prices = {"SMALL": 3000, "LARGE": 7000}
+            return MarketQuote(market_id, prices[market_id], 5000)
+
+    screener = Screener(
+        client=OverflowClient(),
+        settings={},
+        output_path=tmp_path / "screen.csv",
+        default_yes_budget_cents=100,
+        default_no_budget_cents=100,
+        max_bots=2,
+        minimum_carryover_value_cents=1,
+    )
+    update = asyncio.run(screener.refresh(
+        {key: pick(key) for key in ("SMALL", "LARGE", "UNKNOWN")}, reason="test"
+    ))
+
+    assert update is not None
+    assert [item.market_id for item in update.picks] == ["UNKNOWN", "LARGE"]
+    assert update.inventory_unknown == ("UNKNOWN",)
+    assert len(update.picks) == 2
+    assert any("omitted 1 lower-priority" in warning for warning in screener.status_snapshot()["warnings"])
+
+
+def test_market_scan_is_hard_capped_and_reports_truncation():
+    class MarketSource:
+        max_total = None
+
+        def list_markets(self, *, status, limit, max_total, mve_filter):
+            self.max_total = max_total
+            return []
+
+    source = MarketSource()
+    frame = screen_markets(source, {
+        "status": "open",
+        "mve_filter": "exclude",
+        "max_markets_to_scan": 600_000,
+        "markout_filter_enabled": False,
+    })
+
+    assert source.max_total == MARKET_SCAN_HARD_LIMIT
+    assert frame.attrs["market_scan"] == {
+        "requestedLimit": 600_000,
+        "effectiveLimit": MARKET_SCAN_HARD_LIMIT,
+        "scannedMarkets": 0,
+        "truncated": True,
+    }
+    assert any("capped" in warning for warning in frame.attrs["warnings"])
 
 
 def manager_config(tmp_path):
@@ -325,5 +429,19 @@ def test_manager_rejects_new_bots_after_shutdown_begins(tmp_path):
         assert await manager.start_bot(pick("LATE")) is None
         event = await manager.events.get()
         assert event.event_type == "start_skipped_shutdown"
+
+    asyncio.run(scenario())
+
+
+def test_manager_never_spawns_past_process_safety_cap(tmp_path):
+    async def scenario():
+        manager = BotManager(manager_config(tmp_path))
+        manager.bots.update({f"MKT-{index}": object() for index in range(MAX_CONCURRENT_BOTS)})
+        manager._spawn_sync = lambda *args: (_ for _ in ()).throw(AssertionError("spawned"))
+
+        assert await manager.start_bot(pick("ONE-TOO-MANY")) is None
+        event = await manager.events.get()
+        assert event.event_type == "start_skipped_capacity"
+        assert event.detail["maximum_bots"] == MAX_CONCURRENT_BOTS
 
     asyncio.run(scenario())

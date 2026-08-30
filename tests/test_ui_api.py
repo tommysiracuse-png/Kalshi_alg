@@ -139,12 +139,19 @@ async def test_portfolio_analytics_endpoints_are_storage_backed():
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app_module.app), base_url="http://test") as client:
             assert (await client.get("/api/v1/portfolio/summary")).status_code == 401
             summary = await client.get("/api/v1/portfolio/summary", headers=headers)
+            week = await client.get("/api/v1/portfolio/summary?window=7d", headers=headers)
+            month = await client.get("/api/v1/portfolio/summary?window=30d", headers=headers)
+            invalid_window = await client.get("/api/v1/portfolio/summary?window=90d", headers=headers)
             positions = await client.get("/api/v1/portfolio/positions", headers=headers)
             fills = await client.get("/api/v1/portfolio/positions/TEST-1/fills?limit=1", headers=headers)
             orders = await client.get("/api/v1/portfolio/orders", headers=headers)
         assert summary.json()["summary"]["totalPortfolioValueUnits"] == 105_100
         assert summary.json()["coverage"]["partial"] is True
+        assert week.status_code == 200
+        assert month.status_code == 200
+        assert invalid_window.status_code == 422
         assert positions.json()["items"][0]["totalFillCount"] == 1
+        assert positions.json()["items"][0]["lastTradeAtMs"] == timestamp - 1_000
         assert positions.json()["items"][0]["marketUrl"] == "https://kalshi.com/markets/test/test-market/test-event"
         assert fills.json()["items"][0]["costInPositionUnits"] == 4_100
         assert orders.json()["summary"]["totalOpenOrders"] == 1

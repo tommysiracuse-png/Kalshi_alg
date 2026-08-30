@@ -71,6 +71,8 @@ class OperationsStore:
         self._position_cache: Dict[str, tuple[int, Dict[str, Any]]] = {}
         self._heartbeat_lock = threading.Lock()
         self._heartbeat_cache: Optional[tuple[int, Dict[str, Any]]] = None
+        self._service_state_lock = threading.Lock()
+        self._service_state_cache: Optional[tuple[int, str]] = None
 
     def position(self, ticker: str) -> Dict[str, Any]:
         """Fetch canonical exchange inventory with a short, explicitly timestamped cache."""
@@ -104,6 +106,63 @@ class OperationsStore:
     def control_socket(self) -> Path:
         return self.settings.runtime_dir / "launcher.sock"
 
+    def _service_state(self) -> str:
+        current = now_ms()
+        with self._service_state_lock:
+            if self._service_state_cache and current - self._service_state_cache[0] < 1_000:
+                return self._service_state_cache[1]
+            completed = subprocess.run(
+                ["systemctl", "--user", "is-active", self.settings.service_name],
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
+            )
+            state = (completed.stdout or completed.stderr or "").strip()
+            self._service_state_cache = (current, state)
+            return state
+
+    @staticmethod
+    def _stopped_status(status: Dict[str, Any]) -> Dict[str, Any]:
+        status = dict(status)
+        launcher = status.get("launcher") if isinstance(status.get("launcher"), dict) else {}
+        status["launcher"] = {
+            **launcher,
+            "lifecycle": "stopped",
+            "nextRefreshAt": None,
+            "pendingAction": None,
+        }
+        counts = status.get("counts") if isinstance(status.get("counts"), dict) else {}
+        status["counts"] = {**counts, "activeBots": 0, "watchdogModes": {}}
+        status["bots"] = [
+            {**item, "botRunning": False, "watchdogRunning": False, "socketHealthy": False}
+            for item in status.get("bots", [])
+            if isinstance(item, dict)
+        ]
+        manager = status.get("manager") if isinstance(status.get("manager"), dict) else {}
+        status["manager"] = {
+            **manager,
+            "running": False,
+            "lifecycle": "stopped",
+            "botsRunning": 0,
+        }
+        status["clients"] = [
+            {
+                **item,
+                "lifecycle": "stopped",
+                "socketHealthy": False,
+                "watchdog": {
+                    **(item.get("watchdog") if isinstance(item.get("watchdog"), dict) else {}),
+                    "running": False,
+                },
+            }
+            for item in status.get("clients", [])
+            if isinstance(item, dict)
+        ]
+        screener = status.get("screener") if isinstance(status.get("screener"), dict) else {}
+        status["screener"] = {**screener, "running": False, "currentStartedAtMs": None}
+        return status
+
     def status(self) -> Dict[str, Any]:
         status = read_json(self.status_path)
         source = freshness(self.status_path)
@@ -111,29 +170,12 @@ class OperationsStore:
         if isinstance(heartbeat, (int, float)):
             source["stale"] = now_ms() - int(heartbeat) > 10_000
         launcher = status.get("launcher") if isinstance(status.get("launcher"), dict) else {}
-        if source.get("stale") and launcher.get("lifecycle") == "stopping":
+        if source.get("stale") and launcher.get("lifecycle") in {"starting", "running", "stopping"}:
             try:
-                completed = subprocess.run(
-                    ["systemctl", "--user", "is-active", self.settings.service_name],
-                    capture_output=True,
-                    text=True,
-                    timeout=3,
-                    check=False,
-                )
-                service_state = (completed.stdout or completed.stderr or "").strip()
+                service_state = self._service_state()
                 source["serviceState"] = service_state
                 if service_state in {"inactive", "failed"}:
-                    status = dict(status)
-                    status["launcher"] = {**launcher, "lifecycle": "stopped"}
-                    counts = status.get("counts") if isinstance(status.get("counts"), dict) else {}
-                    status["counts"] = {**counts, "activeBots": 0}
-                    status["bots"] = [
-                        {**item, "botRunning": False, "watchdogRunning": False}
-                        for item in status.get("bots", [])
-                        if isinstance(item, dict)
-                    ]
-                    manager = status.get("manager") if isinstance(status.get("manager"), dict) else {}
-                    status["manager"] = {**manager, "running": False, "lifecycle": "stopped"}
+                    status = self._stopped_status(status)
             except (OSError, subprocess.SubprocessError):
                 pass
         return {"data": status, "source": source}
@@ -315,9 +357,10 @@ class OperationsStore:
         }
 
     def portfolio_summary(self, window: str = "24h") -> Dict[str, Any]:
-        if window != "24h":
-            raise ValueError("window must be 24h")
-        return self.portfolio_analytics.summary(window_ms=86_400_000)
+        windows = {"24h": 86_400_000, "7d": 7 * 86_400_000, "30d": 30 * 86_400_000}
+        if window not in windows:
+            raise ValueError("window must be one of 24h, 7d, or 30d")
+        return self.portfolio_analytics.summary(window_ms=windows[window])
 
     def portfolio_positions(self) -> Dict[str, Any]:
         result = self.portfolio_analytics.positions(active_run=self.sessions.active_run())

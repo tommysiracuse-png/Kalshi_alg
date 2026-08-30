@@ -96,11 +96,12 @@ export type PortfolioPosition = {
   marketId: string; ticker: string; title: string; seriesTicker?: string; eventTicker?: string; seriesTitle?: string; marketUrl?: string | null; side: "yes" | "no";
   contractsUnits: number; lastPriceUnits?: number | null; bidPriceUnits?: number | null; askPriceUnits?: number | null; midPriceUnits?: number | null;
   costBasisUnits?: number | null; averageCostPriceUnits?: number | null; realizedPnlUnits?: number | null; feesUnits?: number | null;
+  netRealizedPnlUnits?: number | null;
   unrealizedPnlUnits?: number | null; unrealizedReturnBps?: number | null; totalPnlUnits?: number | null; totalReturnBps?: number | null;
   marketUnrealizedPnlUnits?: number | null; marketUnrealizedReturnBps?: number | null; marketTotalPnlUnits?: number | null; marketTotalReturnBps?: number | null;
   totalTradedUnits?: number | null; openOrderCount: number; updatedAtMs?: number | null;
-  liquidationValueUnits?: number | null; unrealizedValueUnits?: number | null;
-  totalFillCount?: number; totalOrderCount?: number; runningInCurrentSession?: boolean;
+  liquidationValueUnits?: number | null; unrealizedValueUnits?: number | null; currentMarketValueUnits?: number | null;
+  totalFillCount?: number; totalOrderCount?: number; lastTradeAtMs?: number | null; runningInCurrentSession?: boolean;
 };
 export type PortfolioOrder = {
   orderId: string; marketId: string; ticker: string; title: string; marketUrl?: string | null; side?: "yes" | "no" | null;

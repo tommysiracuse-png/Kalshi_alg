@@ -1,16 +1,17 @@
 "use client";
 
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import type {
   AccountPortfolio,
   PortfolioFill,
   PortfolioFillsAnalytics,
-  PortfolioHistoryMetric,
   PortfolioOrdersAnalytics,
   PortfolioPositionsAnalytics,
   PortfolioSummaryAnalytics,
 } from "@/lib/types";
-import { MiniChart } from "./mini-chart";
+import { PortfolioHistoryChart, type PortfolioWindow } from "./portfolio-history-chart";
+import { PortfolioMarketsTable } from "./portfolio-markets-table";
 import { StatusBadge, Time } from "./status";
 
 export function moneyUnits(value?: number | null, signed = false) {
@@ -71,21 +72,6 @@ async function fetchJson<T>(path: string): Promise<T> {
   return response.json() as Promise<T>;
 }
 
-function HistoryCard({ label, value, metric }: { label: string; value?: number | null; metric?: PortfolioHistoryMetric }) {
-  const points = metric?.points ?? [];
-  return <article className="portfolio-history-card">
-    <span>{label}</span>
-    <strong>{moneyUnits(value)}</strong>
-    <p className={metric?.changeUnits == null ? "muted" : metric.changeUnits < 0 ? "negative" : metric.changeUnits > 0 ? "positive" : ""}>
-      {metric?.changeUnits == null ? "Change unavailable" : `${moneyUnits(metric.changeUnits, true)} · ${percentBps(metric.changeBps)}`}
-    </p>
-    <div className="portfolio-sparkline">
-      {points.length > 1 ? <MiniChart values={points.map(point => point.valueUnits)} /> : <span>Collecting history</span>}
-    </div>
-    <small>{metric?.partial ? `${duration(metric.actualWindowMs)} partial history` : "24-hour history"}</small>
-  </article>;
-}
-
 type FillPageState = { items: PortfolioFill[]; nextCursor?: string | null; loading: boolean; error?: string };
 
 const emptyPositionFilters = { ticker: "", contractsMin: "", contractsMax: "", valueMin: "", valueMax: "", ordersMin: "", ordersMax: "", currentSession: false };
@@ -95,16 +81,21 @@ export function LivePortfolio({
   initialSummary,
   initialPositions,
   initialOrders,
+  view = "summary",
 }: {
   initialSummary: PortfolioSummaryAnalytics;
   initialPositions: PortfolioPositionsAnalytics;
   initialOrders: PortfolioOrdersAnalytics;
+  view?: "summary" | "markets";
 }) {
   const [summaryData, setSummaryData] = useState(initialSummary);
   const [positionsData, setPositionsData] = useState(initialPositions);
   const [ordersData, setOrdersData] = useState(initialOrders);
   const [connected, setConnected] = useState(false);
   const [clockMs, setClockMs] = useState(initialSummary.generatedAt);
+  const [historyWindow, setHistoryWindow] = useState<PortfolioWindow>("24h");
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [analyticsError, setAnalyticsError] = useState<string | null>(null);
   const [positionFilters, setPositionFilters] = useState(emptyPositionFilters);
   const [orderFilters, setOrderFilters] = useState(emptyOrderFilters);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -139,17 +130,39 @@ export function LivePortfolio({
   }, []);
 
   const refreshAnalytics = useCallback(async () => {
-    const [summary, positions, orders] = await Promise.all([
-      fetchJson<PortfolioSummaryAnalytics>("/api/v1/portfolio/summary?window=24h"),
-      fetchJson<PortfolioPositionsAnalytics>("/api/v1/portfolio/positions"),
-      fetchJson<PortfolioOrdersAnalytics>("/api/v1/portfolio/orders"),
-    ]);
-    snapshotRef.current = summary.snapshotAtMs ?? snapshotRef.current;
-    setSummaryData(summary);
-    setPositionsData(positions);
-    setOrdersData(orders);
-    await Promise.all([...expandedRef.current].map(ticker => loadFills(ticker, "", true)));
-  }, [loadFills]);
+    try {
+      const [summary, positions, orders] = await Promise.all([
+        fetchJson<PortfolioSummaryAnalytics>(`/api/v1/portfolio/summary?window=${historyWindow}`),
+        fetchJson<PortfolioPositionsAnalytics>("/api/v1/portfolio/positions"),
+        fetchJson<PortfolioOrdersAnalytics>("/api/v1/portfolio/orders"),
+      ]);
+      snapshotRef.current = summary.snapshotAtMs ?? snapshotRef.current;
+      setSummaryData(summary);
+      setPositionsData(positions);
+      setOrdersData(orders);
+      setAnalyticsError(null);
+      await Promise.all([...expandedRef.current].map(ticker => loadFills(ticker, "", true)));
+    } catch (error) {
+      setAnalyticsError(error instanceof Error ? error.message : "Could not refresh portfolio analytics");
+    }
+  }, [historyWindow, loadFills]);
+
+  const changeHistoryWindow = useCallback(async (next: PortfolioWindow) => {
+    if (next === historyWindow) return;
+    setHistoryWindow(next);
+    setHistoryLoading(true);
+    try {
+      const summary = await fetchJson<PortfolioSummaryAnalytics>(`/api/v1/portfolio/summary?window=${next}`);
+      snapshotRef.current = summary.snapshotAtMs ?? snapshotRef.current;
+      setSummaryData(summary);
+      setAnalyticsError(null);
+    } catch (error) {
+      setHistoryWindow(historyWindow);
+      setAnalyticsError(error instanceof Error ? error.message : "Could not load portfolio history");
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [historyWindow]);
 
   useEffect(() => {
     const events = new EventSource("/api/backend/api/v1/events");
@@ -195,21 +208,25 @@ export function LivePortfolio({
     if (opening && !fillPages[ticker]) void loadFills(ticker);
   }
 
-  const warnings = [...new Set([...summaryData.warnings, ...positionsData.warnings, ...ordersData.warnings])];
+  const warnings = [...new Set([...summaryData.warnings, ...positionsData.warnings, ...ordersData.warnings, ...(analyticsError ? [analyticsError] : [])])];
   const stale = summaryData.source.stale || positionsData.source.stale || ordersData.source.stale;
   const orderSummary = ordersData.summary;
 
   return <>
     <header className="page-header"><div><span className="eyebrow">ACCOUNT ANALYTICS</span><h1>Portfolio</h1><p>Account-wide inventory, fill history, and open-order analytics from locally persisted snapshots.</p></div><div className="header-status"><StatusBadge value={stale ? "stale" : "current"} /><span className={connected ? "positive" : "negative"}>{connected ? "Live" : "Reconnecting"}</span></div></header>
+    <nav className="portfolio-subnav" aria-label="Portfolio views"><Link href="/portfolio" aria-current={view === "summary" ? "page" : undefined}>Summary</Link><Link href="/portfolio?view=markets" aria-current={view === "markets" ? "page" : undefined}>Markets</Link></nav>
     {(stale || warnings.length > 0) && <section className="warning-panel"><strong>{stale ? "Portfolio analytics may be stale" : "Portfolio analytics notice"}</strong><ul>{warnings.map(item => <li key={item}>{item}</li>)}</ul></section>}
 
+    {view === "markets" ? <PortfolioMarketsTable data={positionsData} /> : <>
     <section className="metrics portfolio-summary-metrics">
-      <HistoryCard label="Available Cash" value={summaryData.summary.availableCashUnits} metric={summaryData.history.availableCash} />
-      <HistoryCard label="Total Portfolio Value" value={summaryData.summary.totalPortfolioValueUnits} metric={summaryData.history.totalPortfolioValue} />
-      <HistoryCard label="Positions Liquidation Value" value={summaryData.summary.positionsLiquidationValueUnits} metric={summaryData.history.positionsLiquidationValue} />
+      <article><span>Available Cash</span><strong>{moneyUnits(summaryData.summary.availableCashUnits)}</strong><p>Cash available to trade</p></article>
+      <article><span>Total Portfolio Value</span><strong>{moneyUnits(summaryData.summary.totalPortfolioValueUnits)}</strong><p>Cash plus midpoint position value</p></article>
+      <article><span>Liquidation Value</span><strong>{moneyUnits(summaryData.summary.positionsLiquidationValueUnits)}</strong><p>Positions marked at same-side bid</p></article>
       <article><span>API Tier</span><strong>{summaryData.summary.apiTier ?? "Unavailable"}</strong><p>{summaryData.summary.readRateLimit?.refillRate ?? "—"} reads/s · {summaryData.summary.writeRateLimit?.refillRate ?? "—"} writes/s</p></article>
       <article><span>Last Snapshot</span><strong className="small-value">{age(summaryData.snapshotAtMs, clockMs)}</strong><p><Time value={summaryData.snapshotAtMs} /></p></article>
     </section>
+
+    <PortfolioHistoryChart data={summaryData} window={historyWindow} loading={historyLoading} onWindowChange={next => void changeHistoryWindow(next)} />
 
     <section className="panel portfolio-section">
       <div className="panel-heading"><div><span className="eyebrow">POSITIONS</span><h2>Account Inventory</h2></div><strong>{visiblePositions.length} of {positionsData.items.length} markets</strong></div>
@@ -283,5 +300,6 @@ export function LivePortfolio({
       </div>
       <div className="table-wrap portfolio-table order-lines-table"><table><thead><tr><th>Market</th><th>Sides / open</th><th>Contracts</th><th>First created / last update</th><th>Time on book</th><th>Orders attempted</th><th>Total fills</th><th>Market value</th></tr></thead><tbody>{visibleOrders.map(order => <tr key={order.ticker}><td>{order.marketUrl ? <a className="external-link" href={order.marketUrl} target="_blank" rel="noreferrer"><strong>{order.title || order.ticker}</strong> ↗</a> : <strong>{order.title || order.ticker}</strong>}<small className="mono">{order.ticker}</small>{order.runningInCurrentSession && <small className="session-tag">Current session</small>}</td><td><div className="side-breakdown">{order.sideBreakdown.map(side => <span key={side.side} className={`side side-${side.side}`}>{side.side.toUpperCase()} {side.openOrderCount} · {priceUnits(side.midPriceUnits)}</span>)}</div><small>{order.openOrderCount} open orders</small></td><td>{contractUnits(order.remainingContractsUnits)} remaining<small>{contractUnits(order.initialContractsUnits)} initial · {contractUnits(order.filledContractsUnits)} filled</small></td><td><Time value={order.firstCreatedAtMs} /><small>Updated <Time value={order.lastUpdatedAtMs} /></small></td><td>{duration(order.totalTimeOnBookMs)}</td><td>{order.ordersAttempted}</td><td>{order.totalFillCount}</td><td>{moneyUnits(order.totalMarketValueUnits)}<small>{order.midPriceUnits == null && order.sideBreakdown.length > 1 ? "Side-specific midpoints" : `${priceUnits(order.midPriceUnits)} midpoint`}</small></td></tr>)}</tbody></table>{visibleOrders.length === 0 && <p className="empty">No open-order lines match the current filters.</p>}</div>
     </section>
+    </>}
   </>;
 }

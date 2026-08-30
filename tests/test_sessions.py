@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from fleet_models import MAX_CONCURRENT_BOTS
 from session_config import default_session_configuration, validate_session_configuration
 from session_store import RunMetricsAccumulator, SessionConflictError, SessionStore
 from top_of_book_bot import build_settings_from_args
@@ -115,6 +116,14 @@ def test_configuration_round_trip_and_unknown_rejection():
     assert len(normalized["bot"]) >= 75
     config["bot"]["not_a_setting"] = 1
     with pytest.raises(ValueError, match="unknown configuration"):
+        validate_session_configuration(config)
+
+
+@pytest.mark.parametrize("value", [0, -1, MAX_CONCURRENT_BOTS + 1])
+def test_configuration_rejects_unsafe_fleet_sizes(value):
+    config = default_session_configuration()
+    config["launcher"]["maxBots"] = value
+    with pytest.raises(ValueError, match=f"between 1 and {MAX_CONCURRENT_BOTS}"):
         validate_session_configuration(config)
 
 

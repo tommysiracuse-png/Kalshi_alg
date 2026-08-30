@@ -20,7 +20,9 @@ def snapshot(at_ms: int, *, cash: int = 100_000, midpoint: int = 10_000, liquida
             "marketId": "TEST-1", "ticker": "TEST-1", "title": "Test market", "side": "yes",
             "contractsUnits": 200, "bidPriceUnits": 5_000, "askPriceUnits": 5_200,
             "midPriceUnits": 5_100, "costBasisUnits": 8_000, "averageCostPriceUnits": 4_000,
-            "liquidationValueUnits": 10_000, "unrealizedValueUnits": 10_200, "openOrderCount": 2,
+            "liquidationValueUnits": 10_000, "unrealizedValueUnits": 10_200,
+            "realizedPnlUnits": 2_000, "feesUnits": 100, "unrealizedPnlUnits": 2_000,
+            "openOrderCount": 2,
         }],
         "orders": {"items": [
             {"ticker": "TEST-1", "marketId": "TEST-1", "title": "Test market", "side": "yes", "midPriceUnits": 5_100, "marketUrl": None},
@@ -57,6 +59,10 @@ def test_persistence_history_fill_math_and_open_order_aggregation(tmp_path):
     positions = restarted.positions(active_run={"startedAt": first_at - 3_500})
     assert positions["items"][0]["totalFillCount"] == 2
     assert positions["items"][0]["totalOrderCount"] == 2
+    assert positions["items"][0]["lastTradeAtMs"] == first_at - 1_500
+    assert positions["items"][0]["currentMarketValueUnits"] == 10_200
+    assert positions["items"][0]["netRealizedPnlUnits"] == 1_900
+    assert positions["items"][0]["totalPnlUnits"] == 3_900
     assert positions["items"][0]["runningInCurrentSession"] is True
 
     fill_page = restarted.fills("TEST-1", limit=1)
@@ -89,6 +95,7 @@ def test_persistence_history_fill_math_and_open_order_aggregation(tmp_path):
 def test_missing_marks_stay_unavailable(tmp_path):
     store = PortfolioAnalyticsStore(tmp_path / "portfolio.sqlite3")
     payload = snapshot(1_000_000)
+    payload["summary"]["midpointPositionValueUnits"] = None
     payload["summary"]["totalPortfolioValueUnits"] = None
     payload["summary"]["positionsLiquidationValueUnits"] = None
     payload["positions"][0]["bidPriceUnits"] = None
@@ -109,3 +116,19 @@ def test_full_window_with_zero_baseline_has_no_percent_change(tmp_path):
     assert result["coverage"]["partial"] is False
     assert cash["changeUnits"] == 10_000
     assert cash["changeBps"] is None
+
+
+def test_summary_retains_35_days_and_limits_chart_points(tmp_path):
+    store = PortfolioAnalyticsStore(tmp_path / "portfolio.sqlite3")
+    day = 86_400_000
+    latest = 40 * day
+    for index in range(300):
+        timestamp = latest - 34 * day + index * (34 * day // 299)
+        store.record_refresh(snapshot(timestamp, cash=index, midpoint=index * 2), [], [], [])
+    store.record_refresh(snapshot(latest, cash=999, midpoint=1), [], [], [])
+
+    result = store.summary(window_ms=30 * day)
+    points = result["history"]["totalPortfolioValue"]["points"]
+    assert len(points) <= 240
+    assert points[0]["timestampMs"] <= latest - 30 * day
+    assert points[-1] == {"timestampMs": latest, "valueUnits": 1_000}

@@ -292,6 +292,51 @@ def test_account_endpoints_paginate_and_normalize_fixed_point_fields():
     assert http.calls[5][2]["params"]["min_ts"] == 2
 
 
+def test_account_order_and_fill_pagination_respects_hard_result_caps():
+    http = FakeHTTP()
+    http.responses = [
+        {
+            "orders": [
+                {"order_id": "o1", "ticker": "MKT"},
+                {"order_id": "o2", "ticker": "MKT"},
+            ],
+            "cursor": "orders-next",
+        },
+        {
+            "orders": [
+                {"order_id": "o3", "ticker": "MKT"},
+                {"order_id": "o4", "ticker": "MKT"},
+            ],
+            "cursor": "orders-never-read",
+        },
+        {
+            "fills": [
+                {"fill_id": "f1", "ticker": "MKT"},
+                {"fill_id": "f2", "ticker": "MKT"},
+            ],
+            "cursor": "fills-next",
+        },
+        {
+            "fills": [
+                {"fill_id": "f3", "ticker": "MKT"},
+                {"fill_id": "f4", "ticker": "MKT"},
+            ],
+            "cursor": "fills-never-read",
+        },
+    ]
+    client = make_client(http=http)
+
+    orders = client.list_account_orders(AccountOrderQuery(page_size=2, max_results=3))
+    fills = client.list_account_fills(AccountFillQuery(page_size=2, max_results=3))
+
+    assert [item.order_id for item in orders] == ["o1", "o2", "o3"]
+    assert [item.fill_id for item in fills] == ["f1", "f2", "f3"]
+    assert http.calls[1][2]["params"]["limit"] == 1
+    assert http.calls[1][2]["params"]["cursor"] == "orders-next"
+    assert http.calls[3][2]["params"]["limit"] == 1
+    assert http.calls[3][2]["params"]["cursor"] == "fills-next"
+
+
 def test_account_direction_accepts_legacy_action_and_side():
     order = KalshiApiClient._account_order({
         "order_id": "legacy", "action": "sell", "side": "yes", "yes_price_dollars": "0.3000"

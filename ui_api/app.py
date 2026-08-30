@@ -98,7 +98,7 @@ async def portfolio(_: str = Depends(authorize)) -> dict:
 
 
 @app.get("/api/v1/portfolio/summary")
-async def portfolio_summary(window: Literal["24h"] = "24h", _: str = Depends(authorize)) -> dict:
+async def portfolio_summary(window: Literal["24h", "7d", "30d"] = "24h", _: str = Depends(authorize)) -> dict:
     return store.portfolio_summary(window)
 
 

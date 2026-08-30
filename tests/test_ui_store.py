@@ -43,6 +43,40 @@ class OperationsStoreTests(unittest.TestCase):
         market = self.store.markets()[0]
         self.assertEqual(market["watchdogMode"], "unknown")
 
+    def test_stale_running_snapshot_is_stopped_when_service_failed(self):
+        heartbeat = int(time.time() * 1000) - 20_000
+        (self.root / "runtime" / "launcher_status.json").write_text(json.dumps({
+            "launcher": {
+                "lifecycle": "running", "heartbeatAt": heartbeat,
+                "nextRefreshAt": heartbeat + 60_000, "pendingAction": {"action": "refresh"},
+            },
+            "counts": {"activeBots": 1, "configuredBots": 1, "watchdogModes": {"normal": 1}},
+            "bots": [{"ticker": "TEST-1", "botRunning": True, "watchdogRunning": True, "socketHealthy": True}],
+            "manager": {"running": True, "lifecycle": "running", "botsRunning": 1},
+            "clients": [{
+                "marketId": "TEST-1", "lifecycle": "running", "socketHealthy": True,
+                "watchdog": {"running": True, "mode": "normal"},
+            }],
+            "screener": {"running": True, "currentStartedAtMs": heartbeat},
+        }))
+        failed = SimpleNamespace(returncode=3, stdout="failed\n", stderr="")
+
+        with patch("ui_api.store.subprocess.run", return_value=failed):
+            result = self.store.status()
+
+        self.assertTrue(result["source"]["stale"])
+        self.assertEqual(result["source"]["serviceState"], "failed")
+        self.assertEqual(result["data"]["launcher"]["lifecycle"], "stopped")
+        self.assertIsNone(result["data"]["launcher"]["nextRefreshAt"])
+        self.assertEqual(result["data"]["counts"]["activeBots"], 0)
+        self.assertEqual(result["data"]["counts"]["watchdogModes"], {})
+        self.assertFalse(result["data"]["bots"][0]["botRunning"])
+        self.assertFalse(result["data"]["bots"][0]["watchdogRunning"])
+        self.assertEqual(result["data"]["manager"]["botsRunning"], 0)
+        self.assertEqual(result["data"]["clients"][0]["lifecycle"], "stopped")
+        self.assertFalse(result["data"]["clients"][0]["watchdog"]["running"])
+        self.assertFalse(result["data"]["screener"]["running"])
+
     def test_start_control_rejects_service_that_exits_immediately(self):
         results = [
             SimpleNamespace(returncode=0, stdout="", stderr=""),

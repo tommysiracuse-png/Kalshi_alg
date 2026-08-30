@@ -151,3 +151,77 @@ def test_analytics_storage_failure_warns_without_losing_live_snapshot(tmp_path):
     snapshot = monitor.status_snapshot()
     assert snapshot["available"] is True
     assert any("analytics storage unavailable" in warning for warning in snapshot["warnings"])
+
+
+def test_history_caches_are_bounded_without_hiding_resting_orders():
+    class LargeHistoryClient(FakePortfolioClient):
+        def __init__(self):
+            super().__init__()
+            self.order_queries = []
+            self.fill_queries = []
+
+        def list_account_orders(self, query):
+            self.calls["orders"] += 1
+            self.order_queries.append(query)
+            if query.status == "resting":
+                return [
+                    AccountOrder(
+                        f"resting-{index}",
+                        "YES",
+                        "yes",
+                        status="resting",
+                        remaining_count_units=100,
+                        price_units=4_000,
+                        created_at_ms=self.now_ms - index,
+                    )
+                    for index in range(3)
+                ]
+            return [
+                AccountOrder(
+                    f"history-{index}",
+                    "YES",
+                    "yes",
+                    created_at_ms=self.now_ms - 1_000 - index,
+                )
+                for index in range(6)
+            ]
+
+        def list_account_fills(self, query):
+            self.calls["fills"] += 1
+            self.fill_queries.append(query)
+            return [
+                AccountFill(
+                    f"fill-{index}",
+                    f"trade-{index}",
+                    f"history-{index}",
+                    "YES",
+                    "yes",
+                    100,
+                    4_000,
+                    created_at_ms=self.now_ms - 500 - index,
+                )
+                for index in range(6)
+            ]
+
+    client = LargeHistoryClient()
+    monitor = PortfolioMonitor(
+        client,
+        PortfolioMonitorConfig(
+            max_cached_orders=2,
+            max_cached_fills=3,
+            max_resting_orders=10,
+        ),
+    )
+
+    assert asyncio.run(monitor.refresh()) is True
+    snapshot = monitor.status_snapshot()
+
+    assert len(monitor._orders) == 2
+    assert len(monitor._fills) == 3
+    assert snapshot["orders"]["summary"]["openOrderCount"] == 3
+    assert len(snapshot["orders"]["items"]) == 3
+    assert client.order_queries[0].max_results == 10
+    assert client.order_queries[1].max_results == 2
+    assert client.fill_queries[0].max_results == 3
+    assert any("order history is truncated" in warning for warning in snapshot["warnings"])
+    assert any("fill history is truncated" in warning for warning in snapshot["warnings"])
