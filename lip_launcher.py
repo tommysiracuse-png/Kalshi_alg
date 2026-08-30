@@ -37,7 +37,7 @@ import requests
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
-from fleet_models import MAX_CONCURRENT_BOTS
+from fleet_models import DEFAULT_MAX_BOTS, MAX_CONCURRENT_BOTS
 from runtime_control import ControlRequest, ControlServer, STATUS_SCHEMA_VERSION
 
 try:
@@ -239,10 +239,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-bots",
         type=int,
-        default=3,
+        default=DEFAULT_MAX_BOTS,
         help=(
             "Maximum number of managed markets to launch "
-            f"(1-{MAX_CONCURRENT_BOTS}; each market also starts a watchdog process)."
+            f"(1-{MAX_CONCURRENT_BOTS}; 25 markets per worker, up to 20 workers)."
         ),
     )
     parser.add_argument(

@@ -6,10 +6,10 @@ import copy
 from dataclasses import asdict, fields
 from typing import Any, Dict, Mapping
 
-from fleet_models import MAX_CONCURRENT_BOTS
+from fleet_models import DEFAULT_MAX_BOTS, DEFAULT_SHARD_SIZE, MAX_CONCURRENT_BOTS, MAX_WORKERS
 
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 _MANAGED_BOT_FIELDS = {
     "market_ticker",
@@ -45,7 +45,7 @@ def default_session_configuration() -> Dict[str, Any]:
         "execution": {"useDemo": False, "dryRun": False, "subaccount": 0},
         "launcher": {
             "fixedTicker": "",
-            "maxBots": 40,
+            "maxBots": DEFAULT_MAX_BOTS,
             "yesBudgetCents": 100,
             "noBudgetCents": 100,
             "launchDelaySeconds": 0.5,
@@ -64,8 +64,34 @@ def default_session_configuration() -> Dict[str, Any]:
             "confidenceFlattenThreshold": 0.55,
             "flattenRetries": 2,
         },
+        "fleetRuntime": {
+            "shardSize": DEFAULT_SHARD_SIZE,
+            "quoteFreshnessSeconds": 20.0,
+            "writeUtilizationLimit": 0.85,
+            "readUtilizationLimit": 0.80,
+            "cashReserveFraction": 0.20,
+            "seriesExposureFraction": 0.10,
+            "workerHeartbeatSeconds": 2.0,
+            "workerStaleSeconds": 5.0,
+            "startupTimeoutSeconds": 300.0,
+        },
         "bot": bot_values,
     }
+
+
+def migrate_session_configuration(value: Mapping[str, Any]) -> Dict[str, Any]:
+    """Return a schema-v2 copy while preserving every schema-v1 setting."""
+
+    if not isinstance(value, Mapping):
+        raise ValueError("configuration must be an object")
+    migrated = copy.deepcopy(dict(value))
+    version = migrated.get("schemaVersion", 1)
+    if version == 1:
+        migrated["schemaVersion"] = SCHEMA_VERSION
+        migrated["fleetRuntime"] = copy.deepcopy(default_session_configuration()["fleetRuntime"])
+    elif version != SCHEMA_VERSION:
+        raise ValueError(f"schemaVersion must be 1 or {SCHEMA_VERSION}")
+    return migrated
 
 
 def _merge_known(defaults: Mapping[str, Any], supplied: Mapping[str, Any], path: str) -> Dict[str, Any]:
@@ -99,7 +125,7 @@ def _require_number(value: Any, name: str, *, integer: bool = False) -> float | 
 def validate_session_configuration(value: Mapping[str, Any]) -> Dict[str, Any]:
     if not isinstance(value, Mapping):
         raise ValueError("configuration must be an object")
-    normalized = _merge_known(default_session_configuration(), value, "configuration")
+    normalized = _merge_known(default_session_configuration(), migrate_session_configuration(value), "configuration")
     if normalized["schemaVersion"] != SCHEMA_VERSION:
         raise ValueError(f"schemaVersion must be {SCHEMA_VERSION}")
 
@@ -122,8 +148,7 @@ def validate_session_configuration(value: Mapping[str, Any]) -> Dict[str, Any]:
     launcher["runScreenerOnStart"] = _require_bool(launcher["runScreenerOnStart"], "launcher.runScreenerOnStart")
     if not 1 <= launcher["maxBots"] <= MAX_CONCURRENT_BOTS:
         raise ValueError(
-            f"launcher.maxBots must be between 1 and {MAX_CONCURRENT_BOTS}; "
-            "each market starts multiple Python processes"
+            f"launcher.maxBots must be between 1 and {MAX_CONCURRENT_BOTS}"
         )
     if launcher["yesBudgetCents"] < 0 or launcher["noBudgetCents"] < 0:
         raise ValueError("launcher budgets must be >= 0")
@@ -142,6 +167,30 @@ def validate_session_configuration(value: Mapping[str, Any]) -> Dict[str, Any]:
         raise ValueError("watchdog intervals and retries must be >= 0")
     if not 0 <= watchdog["confidenceFlattenThreshold"] <= watchdog["confidenceReductionThreshold"] <= 1:
         raise ValueError("watchdog confidence thresholds must satisfy 0 <= flatten <= reduction <= 1")
+
+    fleet = normalized["fleetRuntime"]
+    fleet["shardSize"] = _require_number(fleet["shardSize"], "fleetRuntime.shardSize", integer=True)
+    for key in (
+        "quoteFreshnessSeconds", "writeUtilizationLimit", "readUtilizationLimit",
+        "cashReserveFraction", "seriesExposureFraction", "workerHeartbeatSeconds",
+        "workerStaleSeconds", "startupTimeoutSeconds",
+    ):
+        fleet[key] = _require_number(fleet[key], f"fleetRuntime.{key}")
+    if not 1 <= fleet["shardSize"] <= DEFAULT_SHARD_SIZE:
+        raise ValueError(f"fleetRuntime.shardSize must be between 1 and {DEFAULT_SHARD_SIZE}")
+    if launcher["maxBots"] > fleet["shardSize"] * MAX_WORKERS:
+        raise ValueError("fleetRuntime.shardSize does not provide enough worker capacity for launcher.maxBots")
+    if fleet["quoteFreshnessSeconds"] <= 0:
+        raise ValueError("fleetRuntime.quoteFreshnessSeconds must be > 0")
+    for key in ("writeUtilizationLimit", "readUtilizationLimit", "cashReserveFraction", "seriesExposureFraction"):
+        if not 0 < fleet[key] < 1:
+            raise ValueError(f"fleetRuntime.{key} must be between 0 and 1")
+    if fleet["workerHeartbeatSeconds"] <= 0:
+        raise ValueError("fleetRuntime.workerHeartbeatSeconds must be > 0")
+    if fleet["workerStaleSeconds"] <= fleet["workerHeartbeatSeconds"]:
+        raise ValueError("fleetRuntime.workerStaleSeconds must exceed workerHeartbeatSeconds")
+    if fleet["startupTimeoutSeconds"] <= 0:
+        raise ValueError("fleetRuntime.startupTimeoutSeconds must be > 0")
 
     from top_of_book_bot import BotSettings
 

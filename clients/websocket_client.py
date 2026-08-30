@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, AsyncIterator, Iterable, Mapping, Optional, Union
 
 import websockets
@@ -27,6 +28,7 @@ class WebsocketClient:
         self._connect_factory = connect_factory or websockets.connect
         self._connection_context: Optional[Any] = None
         self._connection: Optional[Any] = None
+        self._send_lock = asyncio.Lock()
         self.activity = ActivityMonitor()
 
     async def subscribe(
@@ -64,8 +66,16 @@ class WebsocketClient:
         self._connection = connection
         self.activity.record_stream("connections")
         for message in messages:
+            await self.send(message, subscription=True)
+
+    async def send(self, message: WebsocketPayload, *, subscription: bool = False) -> None:
+        """Send a command on the current connection without reconnecting it."""
+
+        async with self._send_lock:
+            if self._connection is None:
+                raise RuntimeError("WebsocketClient is not connected")
             await self._connection.send(message)
-            self.activity.record_stream("subscriptionsSent")
+            self.activity.record_stream("subscriptionsSent" if subscription else "commandsSent")
 
     def __aiter__(self) -> AsyncIterator[WebsocketPayload]:
         if self._connection is None:

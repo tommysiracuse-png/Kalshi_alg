@@ -14,7 +14,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
-from typing import AsyncIterator, Iterable, List, Optional
+from typing import AsyncIterator, Iterable, List, Optional, Sequence
 
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
@@ -1017,7 +1017,10 @@ class KalshiApiClient(BaseClient):
             LOGGER.error("WS_ERROR | payload=%s", data)
         return None
 
-    def _subscriptions(self, market_id: str, include_position_updates: bool) -> Iterable[str]:
+    def _subscriptions_many(self, market_ids: Iterable[str], include_position_updates: bool) -> Iterable[str]:
+        market_ids = tuple(dict.fromkeys(str(item) for item in market_ids if str(item)))
+        if not market_ids:
+            raise ValueError("at least one market ticker is required")
         channel_groups = [(1, ["orderbook_delta"]), (2, ["user_orders"]), (3, ["fill"]), (4, ["trade", "ticker"])]
         if include_position_updates:
             channel_groups.append((5, ["market_positions"]))
@@ -1026,13 +1029,66 @@ class KalshiApiClient(BaseClient):
                 {
                     "id": subscription_id,
                     "cmd": "subscribe",
-                    "params": {"channels": channels, "market_tickers": [market_id]},
+                    "params": {"channels": channels, "market_tickers": list(market_ids)},
                 }
             )
 
+    def _subscriptions(self, market_id: str, include_position_updates: bool) -> Iterable[str]:
+        return self._subscriptions_many((market_id,), include_position_updates)
+
     async def stream_events(self, market_id: str, *, include_position_updates: bool = True) -> AsyncIterator[MarketEvent]:
+        async for event in self.stream_events_many((market_id,), include_position_updates=include_position_updates):
+            yield event
+
+    async def _update_subscription(self, market_ids: Iterable[str], action: str, *, channels: Optional[set[str]] = None) -> None:
+        market_ids = tuple(dict.fromkeys(str(item) for item in market_ids if str(item)))
+        if not market_ids:
+            return
+        sids = getattr(self, "_subscription_sids", {})
+        command_id = getattr(self, "_subscription_command_id", 100)
+        matched = [(channel, sid) for channel, sid in sids.items() if channels is None or channel in channels]
+        if not matched:
+            raise RuntimeError("WebSocket subscriptions are not ready")
+        for _channel, sid in matched:
+            command_id += 1
+            await self.websocket_client.send(
+                json.dumps({
+                    "id": command_id,
+                    "cmd": "update_subscription",
+                    "params": {"sids": [sid], "market_tickers": list(market_ids), "action": action},
+                })
+            )
+        self._subscription_command_id = command_id
+
+    async def update_market_subscriptions(self, *, add: Sequence[str], remove: Sequence[str]) -> None:
+        add_set = {str(item) for item in add if str(item)}
+        remove_set = {str(item) for item in remove if str(item)} - add_set
+        assigned = getattr(self, "_stream_market_ids", set())
+        if remove_set:
+            await self._update_subscription(sorted(remove_set), "delete_markets")
+            assigned.difference_update(remove_set)
+        if add_set:
+            await self._update_subscription(sorted(add_set), "add_markets")
+            assigned.update(add_set)
+        unavailable = getattr(self, "_unavailable_books", set())
+        unavailable.difference_update(remove_set)
+        unavailable.update(add_set)
+
+    async def stream_events_many(
+        self,
+        market_ids: Sequence[str],
+        *,
+        include_position_updates: bool = True,
+    ) -> AsyncIterator[MarketEvent]:
         self._require_authentication()
+        normalized = tuple(dict.fromkeys(str(item) for item in market_ids if str(item)))
+        if not normalized:
+            raise ValueError("at least one market ticker is required")
         self._closed = False
+        self._stream_market_ids = set(normalized)
+        self._subscription_sids: dict[str, int] = {}
+        self._subscription_command_id = 100
+        self._unavailable_books = set(normalized)
         backoff = 1
         connected_once = False
         while not self._closed:
@@ -1040,27 +1096,58 @@ class KalshiApiClient(BaseClient):
                 if connected_once:
                     self._record_stream_activity("reconnects")
                 await self.websocket_client.subscribe(
-                    self._subscriptions(market_id, include_position_updates), headers=self.websocket_headers()
+                    self._subscriptions_many(sorted(self._stream_market_ids), include_position_updates), headers=self.websocket_headers()
                 )
                 connected_once = True
                 backoff = 1
-                expected_sequence: Optional[int] = None
-                self._record_stream_activity("event", event_type="reset")
-                yield StreamReset(market_id)
-                LOGGER.info("WS_CONNECTED_AND_SUBSCRIBED")
+                expected_sequences: dict[str, int] = {}
+                self._subscription_sids.clear()
+                self._unavailable_books = set(self._stream_market_ids)
+                for ticker in sorted(self._stream_market_ids):
+                    self._record_stream_activity("event", event_type="reset")
+                    yield StreamReset(ticker)
+                LOGGER.info("WS_CONNECTED_AND_SUBSCRIBED | market_count=%s", len(self._stream_market_ids))
                 async for raw_message in self.websocket_client:
                     if self._closed:
                         return
                     data = json.loads(raw_message)
-                    event = self._event(data, market_id)
+                    if data.get("type") == "subscribed":
+                        message = data.get("msg") or {}
+                        channel = str(message.get("channel") or "")
+                        sid = message.get("sid")
+                        if channel and isinstance(sid, int):
+                            self._subscription_sids[channel] = sid
+                        continue
+                    fallback_market = next(iter(self._stream_market_ids)) if len(self._stream_market_ids) == 1 else ""
+                    event = self._event(data, fallback_market)
+                    if event is not None and event.market_id not in self._stream_market_ids:
+                        continue
                     if isinstance(event, OrderBookSnapshot):
-                        expected_sequence = event.sequence
+                        if event.sequence is not None:
+                            expected_sequences[event.market_id] = event.sequence
+                        self._unavailable_books.discard(event.market_id)
                     elif isinstance(event, OrderBookDelta) and event.sequence is not None:
-                        if expected_sequence is not None and event.sequence != expected_sequence + 1:
+                        expected = expected_sequences.get(event.market_id)
+                        if expected is not None and event.sequence != expected + 1:
                             self._record_stream_activity("sequenceResets")
-                            LOGGER.info("ORDERBOOK_SEQUENCE_GAP | previous_sequence=%s new_sequence=%s", expected_sequence, event.sequence)
-                            break
-                        expected_sequence = event.sequence
+                            LOGGER.info(
+                                "ORDERBOOK_SEQUENCE_GAP | market=%s previous_sequence=%s new_sequence=%s",
+                                event.market_id, expected, event.sequence,
+                            )
+                            expected_sequences.pop(event.market_id, None)
+                            self._unavailable_books.add(event.market_id)
+                            if "orderbook_delta" not in self._subscription_sids:
+                                # Without the server SID a targeted snapshot cannot
+                                # be requested, so use the safe reconnect path.
+                                break
+                            yield StreamReset(event.market_id)
+                            await self._update_subscription(
+                                (event.market_id,), "get_snapshot", channels={"orderbook_delta"}
+                            )
+                            continue
+                        if event.market_id in self._unavailable_books:
+                            continue
+                        expected_sequences[event.market_id] = event.sequence
                     if event is not None:
                         self._record_stream_activity(
                             "event", event_type=type(event).__name__

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import AsyncIterator, Dict, List
+from typing import AsyncIterator, Dict, List, Sequence
 
 from .http_client import HTTPClient
 from .models import (
@@ -99,6 +99,23 @@ class BaseClient(ABC):
 
     @abstractmethod
     def stream_events(self, market_id: str, *, include_position_updates: bool = True) -> AsyncIterator[MarketEvent]: ...
+
+    async def stream_events_many(
+        self,
+        market_ids: Sequence[str],
+        *,
+        include_position_updates: bool = True,
+    ) -> AsyncIterator[MarketEvent]:
+        """Stream multiple markets; adaptors must override for production use."""
+
+        normalized = tuple(dict.fromkeys(str(item) for item in market_ids if str(item)))
+        if len(normalized) != 1:
+            raise NotImplementedError("this adaptor does not support multi-market streaming")
+        async for event in self.stream_events(normalized[0], include_position_updates=include_position_updates):
+            yield event
+
+    async def update_market_subscriptions(self, *, add: Sequence[str], remove: Sequence[str]) -> None:
+        raise NotImplementedError("this adaptor does not support dynamic market subscriptions")
 
     async def close(self) -> None:
         await self.websocket_client.close()

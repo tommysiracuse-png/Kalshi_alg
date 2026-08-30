@@ -79,9 +79,11 @@ export function SessionEditor({ initial, activeRun }: Props) {
   const visibleSections = useMemo(() => {
     if (!draft) return [];
     const needle = search.trim().toLowerCase();
-    return (["execution", "launcher", "watchdog", "bot"] as const).map(section => ({
+    return (["execution", "launcher", "fleetRuntime", "watchdog", "bot"] as const).filter(
+      section => draft.configuration[section] !== undefined
+    ).map(section => ({
       section,
-      entries: Object.entries(draft.configuration[section]).filter(([key]) => !needle || humanize(key).toLowerCase().includes(needle))
+      entries: Object.entries(draft.configuration[section] ?? {}).filter(([key]) => !needle || humanize(key).toLowerCase().includes(needle))
     })).filter(group => group.entries.length);
   }, [draft, search]);
 

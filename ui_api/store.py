@@ -194,6 +194,18 @@ class OperationsStore:
     def disabled(self) -> Dict[str, Any]:
         return read_json(self.settings.workspace / "watchdog_disable_list.json")
 
+    def disabled_page(self, *, limit: int, offset: int = 0) -> Dict[str, Any]:
+        rows = [
+            {"ticker": ticker, **(value if isinstance(value, dict) else {"reason": str(value)})}
+            for ticker, value in sorted(self.disabled().items())
+        ]
+        offset = max(0, int(offset))
+        page = rows[offset:offset + limit]
+        return {
+            "items": page, "totalCount": len(rows),
+            "nextCursor": str(offset + len(page)) if offset + len(page) < len(rows) else None,
+        }
+
     def allowed_tickers(self) -> set[str]:
         rows, _, _ = self.screener()
         tickers = {str(row.get("Ticker") or "").strip() for row in rows}
@@ -235,7 +247,15 @@ class OperationsStore:
         active = self.sessions.active_run()
         candidates = []
         if active:
-            candidates.append(Path(active["artifactPath"]) / "markets" / ticker.replace("/", "_").replace("\\", "_") / "telemetry.sqlite3")
+            artifact = Path(active["artifactPath"])
+            candidates.append(artifact / "markets" / ticker.replace("/", "_").replace("\\", "_") / "telemetry.sqlite3")
+            try:
+                manifest = json.loads((artifact / "fleet_manifest.json").read_text(encoding="utf-8"))
+                worker_id = str((manifest.get("tickerToShard") or {}).get(ticker) or "")
+                if worker_id and "/" not in worker_id and "\\" not in worker_id:
+                    candidates.insert(0, artifact / "shards" / worker_id / "telemetry.sqlite3")
+            except (OSError, ValueError, TypeError):
+                pass
         candidates.extend([
             self.settings.workspace / "telemetry" / f"telemetry_{ticker}.sqlite3",
             self.settings.workspace / f"telemetry_{ticker}.sqlite3",
@@ -288,10 +308,40 @@ class OperationsStore:
         try:
             with sqlite3.connect(uri, uri=True, timeout=0.25) as db:
                 db.row_factory = sqlite3.Row
-                rows = db.execute(f"SELECT * FROM {table} ORDER BY id DESC LIMIT ?", (min(limit, 500),)).fetchall()
+                rows = db.execute(
+                    f"SELECT * FROM {table} WHERE ticker=? ORDER BY id DESC LIMIT ?",
+                    (ticker, min(limit, 500)),
+                ).fetchall()
                 return [dict(row) for row in rows]
         except sqlite3.Error:
             return []
+
+    def telemetry_page(self, ticker: str, table: str, *, limit: int, offset: int = 0) -> Dict[str, Any]:
+        self.require_ticker(ticker)
+        allowed = {"fills", "quotes", "markouts", "market_state", "ticker_updates", "public_trades", "runtime_events"}
+        if table not in allowed:
+            raise ValueError("unsupported telemetry table")
+        path = self.telemetry_path(ticker)
+        if not path.exists():
+            return {"items": [], "totalCount": 0, "nextCursor": None}
+        offset = max(0, int(offset))
+        try:
+            with sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=0.25) as db:
+                db.row_factory = sqlite3.Row
+                if not db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)).fetchone():
+                    return {"items": [], "totalCount": 0, "nextCursor": None}
+                total = int(db.execute(f"SELECT COUNT(*) FROM {table} WHERE ticker=?", (ticker,)).fetchone()[0])
+                rows = db.execute(
+                    f"SELECT * FROM {table} WHERE ticker=? ORDER BY id DESC LIMIT ? OFFSET ?",
+                    (ticker, limit, offset),
+                ).fetchall()
+                items = [dict(row) for row in rows]
+                return {
+                    "items": items, "totalCount": total,
+                    "nextCursor": str(offset + len(items)) if offset + len(items) < total else None,
+                }
+        except sqlite3.Error:
+            return {"items": [], "totalCount": 0, "nextCursor": None}
 
     def market_detail(self, ticker: str) -> Dict[str, Any]:
         self.require_ticker(ticker)
@@ -337,6 +387,10 @@ class OperationsStore:
             "schemaVersion": data.get("schemaVersion"),
             "source": status["source"],
             "manager": data.get("manager") or {},
+            "workers": data.get("workers") or [],
+            "broker": data.get("broker") or {},
+            "capacity": data.get("capacity"),
+            "allocation": data.get("allocation"),
             "clients": clients,
             "screener": data.get("screener") or {},
             "warnings": warnings,
@@ -483,6 +537,18 @@ class OperationsStore:
         suffix = ".watchdog.log" if source == "watchdog" else ".log"
         active = self.sessions.active_run()
         active_path = (Path(active["artifactPath"]) / "logs" / f"{ticker}{suffix}").resolve() if active else None
+        if active:
+            artifact = Path(active["artifactPath"])
+            try:
+                manifest = json.loads((artifact / "fleet_manifest.json").read_text(encoding="utf-8"))
+                worker_id = str((manifest.get("tickerToShard") or {}).get(ticker) or "")
+                shard_log = (artifact / "shards" / worker_id / "worker.log").resolve()
+                shard_root = (artifact / "shards").resolve()
+                shard_log.relative_to(shard_root)
+                if shard_log.exists():
+                    return shard_log
+            except (OSError, ValueError, TypeError):
+                pass
         path = active_path if active_path is not None and active_path.exists() else (self.settings.logs_dir / f"{ticker}{suffix}").resolve()
         allowed_parent = (Path(active["artifactPath"]) / "logs").resolve() if active_path is not None and active_path.exists() else self.settings.logs_dir
         if path.parent != allowed_parent:

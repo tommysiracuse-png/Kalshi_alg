@@ -52,6 +52,7 @@ class FakeWebsocket:
         self.current = []
         self.subscriptions = []
         self.closed = False
+        self.sent = []
 
     async def subscribe(self, messages, *, headers=None):
         self.subscriptions.append((list(messages), headers))
@@ -66,6 +67,9 @@ class FakeWebsocket:
 
     async def close(self):
         self.closed = True
+
+    async def send(self, message, **_kwargs):
+        self.sent.append(message)
 
 
 def make_client(http=None, websocket=None, **overrides):
@@ -218,6 +222,37 @@ def test_sequence_gap_reconnects_and_resubscribes():
     assert len(websocket.subscriptions) == 2
     first_payloads = [json.loads(value) for value in websocket.subscriptions[0][0]]
     assert all("market_positions" not in item["params"]["channels"] for item in first_payloads)
+
+
+def test_multi_market_stream_routes_interleaved_events_and_recovers_only_gapped_book():
+    messages = [
+        json.dumps({"type": "subscribed", "msg": {"channel": "orderbook_delta", "sid": 91}}),
+        json.dumps({"type": "orderbook_snapshot", "seq": 5, "msg": {"market_ticker": "A", "yes": [], "no": []}}),
+        json.dumps({"type": "orderbook_snapshot", "seq": 8, "msg": {"market_ticker": "B", "yes": [], "no": []}}),
+        json.dumps({"type": "orderbook_delta", "seq": 7, "msg": {"market_ticker": "A", "side": "yes", "price": 40, "delta": 1}}),
+        json.dumps({"type": "orderbook_delta", "seq": 9, "msg": {"market_ticker": "B", "side": "no", "price": 50, "delta": 1}}),
+    ]
+    websocket = FakeWebsocket([messages])
+    client = make_client(websocket=websocket)
+
+    async def scenario():
+        stream = client.stream_events_many(("A", "B"), include_position_updates=False)
+        events = [await anext(stream) for _ in range(6)]
+        await client.update_market_subscriptions(add=("C",), remove=("B",))
+        await client.close()
+        await stream.aclose()
+        return events
+
+    events = asyncio.run(scenario())
+    assert [event.market_id for event in events[:2]] == ["A", "B"]
+    assert isinstance(events[2], OrderBookSnapshot) and events[2].market_id == "A"
+    assert isinstance(events[3], OrderBookSnapshot) and events[3].market_id == "B"
+    assert isinstance(events[4], StreamReset) and events[4].market_id == "A"
+    assert isinstance(events[5], OrderBookDelta) and events[5].market_id == "B"
+    commands = [json.loads(item) for item in websocket.sent]
+    assert any(item["params"]["action"] == "get_snapshot" and item["params"]["market_tickers"] == ["A"] for item in commands)
+    assert any(item["params"]["action"] == "delete_markets" for item in commands)
+    assert any(item["params"]["action"] == "add_markets" for item in commands)
 
 
 def test_list_markets_paginates_and_normalizes_screening_fields():

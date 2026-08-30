@@ -28,9 +28,9 @@ The normal fleet lifecycle is:
 1. The launcher loads the selected saved session or command-line configuration.
 2. The screener retrieves open Kalshi markets, applies liquidity, time, spread, expected-value, exclusion, and historical markout filters, and writes `screener_export.csv`.
 3. The launcher reconciles the latest picks with the currently running fleet.
-4. `BotManager` starts one `V1.py` process and one watchdog process per selected ticker.
-5. Each bot consumes REST and WebSocket market/account data, computes inventory-aware quotes, and creates, amends, or cancels only its own tagged orders.
-6. Each watchdog periodically profiles market risk and publishes `normal`, `reduction_only`, or `flatten_only` state for its bot.
+4. `ShardedBotManager` assigns markets to as many as 20 workers, with at most 25 in-process `MarketActor` state machines per worker.
+5. Each worker consumes one multi-market WebSocket and emits immutable quote intents; the execution broker is the only process that writes orders.
+6. Each worker runs staggered pure risk evaluation and publishes `normal`, `reduction_only`, or `flatten_only` state for every actor.
 7. The launcher publishes a consolidated JSON status snapshot and listens on a local Unix control socket.
 8. The loopback FastAPI service reads the snapshots and local databases, executes guarded controls, and serves data to the authenticated Next.js UI.
 
@@ -260,6 +260,7 @@ Saved configuration is versioned by `session_config.py` and divided into:
 - `execution`: demo/production selection, dry-run mode, and subaccount.
 - `launcher`: fixed ticker or screened fleet, bot count, per-side budgets, launch delay, refresh schedule, poll period, and inventory carryover threshold.
 - `watchdog`: profiling cadence, state refresh and staleness thresholds, sample interval, confidence thresholds, and emergency flatten retries.
+- `fleetRuntime`: shard sizing, quote freshness, API utilization, cash reserve, series concentration, heartbeat, and startup gates.
 - `bot`: all remaining `BotSettings` strategy, sizing, fair-value, toxicity, queue, quote, telemetry, and inventory fields.
 
 The canonical defaults and validation rules are in `session_config.py` and the `BotSettings` dataclass in `top_of_book_bot.py`. Unknown fields are rejected, and numeric relationships such as watchdog threshold ordering are validated before a session is saved or launched.
@@ -351,23 +352,23 @@ The launcher is responsible for:
 - applying fixed-ticker mode when configured;
 - reconciling added, changed, retained, and removed markets;
 - carrying markets with material inventory across screener refreshes;
-- starting and monitoring `BotManager`;
+- starting and monitoring the execution broker and sharded workers;
 - refreshing account-wide portfolio state;
 - publishing `runtime/launcher_status.json` atomically;
 - accepting refresh/disable/enable commands on `runtime/launcher.sock`;
 - sampling run metrics and finalizing run status;
-- stopping all children and verifying bot-owned order cancellation.
+- freezing all workers, stopping intent generation, and verifying bot-owned order cancellation twice.
 
-`BotManager` maintains the desired fleet, per-market child processes, restart history, and bot control sockets. Unexpected exits are retried with bounded exponential delay. Watchdog-related exits disable the ticker instead of blindly restarting it.
+`ShardedBotManager` maintains the desired fleet, bounded rendezvous assignments, pushed worker heartbeats, broker capacity, and capital allocation. A worker exit affects at most 25 markets; its exposure-increasing orders are canceled before that shard is restarted.
 
-During a fleet shutdown, the manager freezes live child processes, performs an authoritative account-wide cancellation pass for bot-tagged resting orders, terminates children, and verifies the account again. A shutdown that cannot verify order removal is reported as failed. Filled inventory is never silently flattened merely because the service stopped.
+During a fleet shutdown, the manager freezes workers, performs an authoritative broker-owned cancellation pass for bot-tagged resting orders, stops the workers, and verifies the account again. A shutdown that cannot verify order removal is reported as failed. Filled inventory is never silently flattened merely because the service stopped.
 
 Key launcher controls include:
 
 | Setting | Effect |
 | --- | --- |
 | `fixedTicker` | Runs one explicit ticker instead of the screened fleet |
-| `maxBots` | Maximum concurrent selected markets; `0` means unlimited in the launcher |
+| `maxBots` | Maximum concurrent selected markets, from 1 through 500; default 40 |
 | `yesBudgetCents` / `noBudgetCents` | Default working budget per market side |
 | `runScreenerOnStart` | Refreshes public market selection before launch |
 | `refreshIntervalSeconds` | Periodic screening/reconciliation interval; `0` disables scheduled refresh |
@@ -378,7 +379,7 @@ Key launcher controls include:
 
 ### Top-of-book bot
 
-`V1.py` creates a `KalshiApiClient`, loads market metadata, builds validated `BotSettings`, starts an optional per-bot Unix control socket, and runs `TopOfBookBot` from `top_of_book_bot.py`.
+Production workers create `MarketActor` instances from `top_of_book_bot.py` and drive them from a shared stream. `V1.py` is the single-market development/replay wrapper around that same actor implementation; it is not a production fallback.
 
 The bot uses fixed-point arithmetic internally:
 
@@ -406,7 +407,7 @@ Every order uses a strategy client-order-ID prefix. Cleanup targets only known b
 
 ### Watchdog
 
-Each live bot normally has a separate `market_watchdog_runner.py` process. The runner repeatedly executes `market_risk_profiler.py`, which samples the market and derives timing, volatility, bid-flip, market-family, and confidence signals.
+Production has no persistent per-market watchdog or profiler processes. Each worker evaluates rolling book/trade windows with pure `RiskEvaluator` functions every 60 seconds, staggered deterministically across its markets. Risk becomes stale after 120 seconds, and a failed or stale evaluation can only tighten the current mode.
 
 The normalized modes are:
 
@@ -416,7 +417,7 @@ The normalized modes are:
 
 The bot treats missing or excessively stale watchdog state as a fail-safe condition. The watchdog can also escalate to `flatten_only` when observed future-mid markouts show either poor size-weighted net performance or a configured total session loss. It never uses the bot's own fair-value estimate as ground truth for this circuit breaker.
 
-Watchdog state is atomically written per ticker. A persistent disable list prevents a rejected or risk-exited market from being relaunched until an operator explicitly enables it.
+Risk state is included in each pushed worker heartbeat. A persistent disable list prevents a rejected or risk-exited market from being reassigned until an operator explicitly enables it.
 
 ### Screener and portfolio monitor
 
@@ -443,7 +444,8 @@ The `clients/` package defines a venue-neutral boundary:
 - paginates market/account endpoints;
 - translates normalized YES/NO orders to Kalshi book-side semantics;
 - tracks REST and WebSocket activity;
-- shares a file-backed token-bucket write limiter across bot processes using the same account/subaccount.
+- maintains per-ticker stream sequences, dynamic subscription updates, and isolated snapshot recovery;
+- sends all authenticated REST work through the central execution broker, which maintains separate read/write token buckets and cancellation reserves.
 
 The screener may construct the adaptor in `public_only` mode. Trading, account queries, and authenticated streams require both the API key ID and private key.
 
@@ -483,14 +485,14 @@ The system deliberately separates ephemeral runtime state, durable run history, 
 | --- | --- |
 | `runtime/launcher_status.json` | Atomic consolidated fleet snapshot and heartbeat |
 | `runtime/launcher.sock` | Mode-`0600` local fleet control socket |
-| `runtime/bots/*.sock` | Per-bot status and graceful-shutdown sockets |
 | `runtime/ui_audit.sqlite3` | Operator action, request ID, result, and error audit records |
 | `session_data/sessions.sqlite3` | Saved sessions, selection, immutable runs, metrics, and samples |
 | `session_data/artifacts/<session>/<run>/configuration.json` | Frozen run configuration |
 | `session_data/artifacts/<session>/<run>/launcher.log` | Run-level launcher lifecycle |
-| `session_data/artifacts/<session>/<run>/logs/` | Per-market bot and watchdog logs |
+| `session_data/artifacts/<session>/<run>/fleet_manifest.json` | Ticker-to-shard routing and worker assignments |
+| `session_data/artifacts/<session>/<run>/shards/<worker>/worker.log` | Rotating worker log, 25 MiB with four backups |
+| `session_data/artifacts/<session>/<run>/shards/<worker>/telemetry.sqlite3` | Shared WAL telemetry database for up to 25 markets |
 | `session_data/artifacts/<session>/<run>/markets/<ticker>/settings.json` | Exact generated `BotSettings` payload |
-| `session_data/artifacts/<session>/<run>/markets/<ticker>/telemetry.sqlite3` | Per-market quote/fill/markout/model telemetry |
 | `session_data/artifacts/<session>/<run>/pnl_tracker.jsonl` | Durable fill/P&L events for the run |
 | `session_data/artifacts/<session>/<run>/screener/` | Latest and timestamped screener snapshots |
 | `logs/` | Legacy/non-session bot logs and `pnl_tracker.jsonl` |
@@ -499,9 +501,9 @@ The system deliberately separates ephemeral runtime state, durable run history, 
 | `watchdog_disable_list.json` | Persistent market disable decisions |
 | `screener_export.csv` | Latest human-readable screener export |
 
-Telemetry SQLite tables include fills, quotes, markouts, market state, ticker updates, public trades, and fill-probability attempts. SQLite uses WAL mode for concurrent read/write behavior.
+Telemetry SQLite tables include fills, order revisions, quotes, markouts, market state, ticker updates, public trades, fill-probability attempts, structured runtime events, and one-minute aggregates. Every shard event table is ticker-indexed. Raw quote/market/trade/runtime data is retained seven days; fills, order revisions, markouts, P&L inputs, and minute aggregates remain for the full run.
 
-Session records are mutable and versioned; run records are immutable snapshots. Archiving a session retains its runs and artifacts. The system does not automatically import legacy logs or telemetry into saved sessions, and it does not currently apply automatic artifact retention.
+Session records are mutable and versioned; run records are immutable snapshots. Schema-v1 sessions are migrated to schema v2 on read/save. Archiving a session retains its runs and artifacts, and legacy per-market telemetry remains readable without rewriting it.
 
 Back up SQLite databases while their service is stopped or with SQLite's online backup mechanism. Use log rotation for legacy logs; a typical policy is daily rotation, 14 retained compressed files, and `copytruncate` if the running process cannot reopen logs.
 

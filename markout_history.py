@@ -157,9 +157,9 @@ def _read_fill_economics(
             FROM fills f
             JOIN markouts m
                 ON m.fill_key = f.fill_key AND m.horizon_ms = ?
-            WHERE f.ts_ms >= ?
+            WHERE f.ts_ms >= ? AND f.ticker = ?
             """,
-            (int(horizon_ms), int(cutoff_ts_ms)),
+            (int(horizon_ms), int(cutoff_ts_ms), ticker),
         )
         rows = cur.fetchall()
     except sqlite3.Error as exc:
@@ -221,25 +221,29 @@ def collect_fill_economics(
 
     pattern = os.path.join(workspace_dir, "telemetry_*.sqlite3")
     db_paths = [p for p in glob.glob(pattern) if not p.endswith(("-shm", "-wal"))]
+    shard_pattern = os.path.join(workspace_dir, "session_data", "artifacts", "*", "*", "shards", "*", "telemetry.sqlite3")
+    db_paths.extend(p for p in glob.glob(shard_pattern) if not p.endswith(("-shm", "-wal")))
 
     all_fills: List[FillEconomics] = []
     for path in db_paths:
-        ticker = _ticker_from_db_path(path)
-        if not ticker:
-            continue
         conn = _open_readonly(path)
         if conn is None:
             continue
         try:
-            all_fills.extend(
-                _read_fill_economics(
-                    conn,
-                    ticker=ticker,
-                    horizon_ms=horizon_ms,
-                    cutoff_ts_ms=cutoff_ts_ms,
-                    fee_factor=fee_factor,
+            ticker = _ticker_from_db_path(path)
+            tickers = [ticker] if ticker else [
+                str(row[0]) for row in conn.execute("SELECT DISTINCT ticker FROM fills WHERE ticker<>''")
+            ]
+            for item in tickers:
+                all_fills.extend(
+                    _read_fill_economics(
+                        conn,
+                        ticker=item,
+                        horizon_ms=horizon_ms,
+                        cutoff_ts_ms=cutoff_ts_ms,
+                        fee_factor=fee_factor,
+                    )
                 )
-            )
         finally:
             try:
                 conn.close()

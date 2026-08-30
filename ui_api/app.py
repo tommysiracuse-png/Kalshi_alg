@@ -68,8 +68,39 @@ async def overview(_: str = Depends(authorize)) -> dict:
 
 
 @app.get("/api/v1/markets")
-async def markets(search: str = "", watchdog_mode: str = "", disabled: Optional[bool] = None, sort: str = "rank", _: str = Depends(authorize)) -> dict:
-    return {"generatedAt": now_ms(), "items": store.markets(search=search, watchdog_mode=watchdog_mode, disabled=disabled, sort=sort)}
+async def markets(
+    search: str = "", watchdog_mode: str = "", disabled: Optional[bool] = None, sort: str = "rank",
+    limit: int = Query(100, ge=1, le=500), cursor: int = Query(0, ge=0), _: str = Depends(authorize),
+) -> dict:
+    rows = store.markets(search=search, watchdog_mode=watchdog_mode, disabled=disabled, sort=sort)
+    items = rows[cursor:cursor + limit]
+    return {
+        "generatedAt": now_ms(), "items": items, "totalCount": len(rows),
+        "nextCursor": str(cursor + len(items)) if cursor + len(items) < len(rows) else None,
+    }
+
+
+@app.get("/api/v1/disabled-markets")
+async def disabled_markets(
+    limit: int = Query(100, ge=1, le=500), cursor: int = Query(0, ge=0), _: str = Depends(authorize),
+) -> dict:
+    return {"generatedAt": now_ms(), **store.disabled_page(limit=limit, offset=cursor)}
+
+
+@app.get("/api/v1/markets/{ticker}/telemetry/{table}")
+async def market_telemetry(
+    ticker: str, table: str, limit: int = Query(100, ge=1, le=500),
+    cursor: int = Query(0, ge=0), _: str = Depends(authorize),
+) -> dict:
+    return {"generatedAt": now_ms(), **store.telemetry_page(ticker, table, limit=limit, offset=cursor)}
+
+
+@app.get("/api/v1/runtime-events")
+async def runtime_events(
+    ticker: str, limit: int = Query(100, ge=1, le=500),
+    cursor: int = Query(0, ge=0), _: str = Depends(authorize),
+) -> dict:
+    return {"generatedAt": now_ms(), **store.telemetry_page(ticker, "runtime_events", limit=limit, offset=cursor)}
 
 
 @app.get("/api/v1/markets/{ticker}")
@@ -211,8 +242,17 @@ async def run_detail(run_id: str, _: str = Depends(authorize)) -> dict:
 
 
 @app.get("/api/v1/runs/{run_id}/markets")
-async def run_markets(run_id: str, _: str = Depends(authorize)) -> dict:
-    return store.run_markets(run_id)
+async def run_markets(
+    run_id: str, limit: int = Query(100, ge=1, le=500),
+    cursor: int = Query(0, ge=0), _: str = Depends(authorize),
+) -> dict:
+    payload = store.run_markets(run_id)
+    rows = payload.get("items") or []
+    items = rows[cursor:cursor + limit]
+    return {
+        **payload, "items": items, "totalCount": len(rows),
+        "nextCursor": str(cursor + len(items)) if cursor + len(items) < len(rows) else None,
+    }
 
 
 @app.get("/api/v1/runs/{run_id}/markets/{ticker}/activity")

@@ -4,6 +4,7 @@ export type SessionConfiguration = {
   execution: Record<string, boolean | number | string>;
   launcher: Record<string, boolean | number | string>;
   watchdog: Record<string, boolean | number | string>;
+  fleetRuntime?: Record<string, boolean | number | string>;
   bot: Record<string, boolean | number | string | Array<number | string>>;
 };
 export type SavedSession = {
@@ -89,6 +90,10 @@ export type Monitoring = {
   generatedAt: number; schemaVersion?: number; source: SourceState; warnings: string[];
   manager: { running?: boolean; lifecycle?: string; startedAtMs?: number; runningForMs?: number; botsRunning?: number; portfolio?: { items?: Array<{ marketId: string; title?: string; positionUnits?: number | null; updatedAtMs?: number; stale?: boolean; available?: boolean }>; grossPositionUnits?: number; netPositionUnits?: number; unknownMarkets?: number; staleMarkets?: number }; pnl?: PnlTotals; apiActivity?: ApiActivity };
   clients: ClientMonitoring[];
+  workers?: Array<{ workerId: string; pid?: number; running: boolean; assignedMarkets: number; heartbeatAtMs?: number | null; stale: boolean; memoryRssBytes?: number | null; queueDepth?: number | null; eventLagMs?: number | null }>;
+  broker?: { pid?: number | null; running?: boolean };
+  capacity?: Record<string, unknown> | null;
+  allocation?: Record<string, unknown> | null;
   screener: { running?: boolean; currentReason?: string; currentStartedAtMs?: number; currentDurationMs?: number; lastStartedAtMs?: number; lastCompletedAtMs?: number; lastDurationMs?: number; lastSuccessAtMs?: number; lastError?: string; generationId?: number; generatedAtMs?: number; reason?: string; picks?: Array<{ marketId: string; title: string; yesBudgetCents: number; noBudgetCents: number; selectionReason: string; rank?: number }>; changes?: Record<string, string[]>; apiActivity?: ApiActivity };
 };
 

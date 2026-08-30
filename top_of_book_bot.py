@@ -1061,9 +1061,15 @@ class PendingFillAttempt:
 
 
 class TelemetryStore:
-    def __init__(self, database_path: str, *, enabled: bool) -> None:
+    _shared_connections: Dict[str, Dict[str, object]] = {}
+    _registry_lock = Lock()
+
+    def __init__(self, database_path: str, *, enabled: bool, shard_mode: bool = False) -> None:
         self.enabled = bool(enabled)
-        self.database_path = database_path
+        self.database_path = os.path.abspath(database_path)
+        self._shard_mode = bool(shard_mode)
+        self._ticker_context = ""
+        self._shared_state: Optional[Dict[str, object]] = None
         self._connection: Optional[sqlite3.Connection] = None
         self._lock = Lock()
         self.last_error: Optional[str] = None
@@ -1072,11 +1078,26 @@ class TelemetryStore:
         if not self.enabled:
             return
         try:
-            directory = os.path.dirname(os.path.abspath(database_path))
+            directory = os.path.dirname(self.database_path)
             if directory:
                 os.makedirs(directory, exist_ok=True)
-            self._connection = sqlite3.connect(database_path, check_same_thread=False)
-            self._connection.row_factory = sqlite3.Row
+            if self._shard_mode:
+                with self._registry_lock:
+                    shared = self._shared_connections.get(self.database_path)
+                    if shared is None:
+                        connection = sqlite3.connect(self.database_path, check_same_thread=False)
+                        connection.row_factory = sqlite3.Row
+                        shared = {
+                            "connection": connection, "lock": Lock(), "pending": 0,
+                            "last_commit": time.monotonic(),
+                        }
+                        self._shared_connections[self.database_path] = shared
+                    self._shared_state = shared
+                    self._connection = shared["connection"]  # type: ignore[assignment]
+                    self._lock = shared["lock"]  # type: ignore[assignment]
+            else:
+                self._connection = sqlite3.connect(self.database_path, check_same_thread=False)
+                self._connection.row_factory = sqlite3.Row
             self._connection.execute("PRAGMA journal_mode=WAL")
             self._connection.execute("PRAGMA synchronous=NORMAL")
             self._initialize_schema()
@@ -1259,8 +1280,48 @@ class TelemetryStore:
                     ON order_revisions(order_id, placed_at_ms DESC);
                 CREATE INDEX IF NOT EXISTS idx_order_revisions_time
                     ON order_revisions(placed_at_ms DESC);
+                CREATE TABLE IF NOT EXISTS shard_market_metadata (
+                    ticker TEXT PRIMARY KEY,
+                    title TEXT NOT NULL DEFAULT '',
+                    series_ticker TEXT NOT NULL DEFAULT '',
+                    event_ticker TEXT NOT NULL DEFAULT '',
+                    series_title TEXT NOT NULL DEFAULT '',
+                    market_url TEXT,
+                    updated_at_ms INTEGER NOT NULL
+                );
+                CREATE TABLE IF NOT EXISTS runtime_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts_ms INTEGER NOT NULL,
+                    ticker TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    severity TEXT NOT NULL DEFAULT 'info',
+                    payload_json TEXT NOT NULL DEFAULT '{}'
+                );
+                CREATE TABLE IF NOT EXISTS market_minute_aggregates (
+                    ticker TEXT NOT NULL,
+                    minute_ms INTEGER NOT NULL,
+                    quote_count INTEGER NOT NULL DEFAULT 0,
+                    trade_count INTEGER NOT NULL DEFAULT 0,
+                    fill_count INTEGER NOT NULL DEFAULT 0,
+                    runtime_event_count INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY(ticker, minute_ms)
+                );
+                CREATE INDEX IF NOT EXISTS idx_market_state_ticker_ts ON market_state(ticker, ts_ms);
+                CREATE INDEX IF NOT EXISTS idx_ticker_updates_ticker_ts ON ticker_updates(ticker, ts_ms);
+                CREATE INDEX IF NOT EXISTS idx_public_trades_ticker_ts ON public_trades(ticker, ts_ms);
+                CREATE INDEX IF NOT EXISTS idx_markouts_ticker_ts ON markouts(ticker, ts_ms);
+                CREATE INDEX IF NOT EXISTS idx_fill_prob_ticker_ts ON fill_prob_attempts(ticker, ts_ms);
+                CREATE INDEX IF NOT EXISTS idx_runtime_events_ticker_ts ON runtime_events(ticker, ts_ms);
                 """
             )
+            if self._shard_mode:
+                columns = {row[1] for row in self._connection.execute("PRAGMA table_info(order_revisions)")}
+                if "ticker" not in columns:
+                    self._connection.execute("ALTER TABLE order_revisions ADD COLUMN ticker TEXT NOT NULL DEFAULT ''")
+                self._connection.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_order_revisions_ticker_ts ON order_revisions(ticker, placed_at_ms)"
+                )
             self._connection.commit()
 
     def _execute(self, sql: str, params: Tuple[object, ...]) -> None:
@@ -1271,7 +1332,29 @@ class TelemetryStore:
                 if not self._connection:
                     return
                 self._connection.execute(sql, params)
+                if self._shared_state is None:
+                    self._connection.commit()
+                else:
+                    pending = int(self._shared_state.get("pending", 0)) + 1
+                    last_commit = float(self._shared_state.get("last_commit", 0.0))
+                    if pending >= 100 or time.monotonic() - last_commit >= 0.25:
+                        self._connection.commit()
+                        self._shared_state["pending"] = 0
+                        self._shared_state["last_commit"] = time.monotonic()
+                    else:
+                        self._shared_state["pending"] = pending
+        except (sqlite3.Error, OSError) as exc:
+            self._storage_error(exc)
+
+    def flush(self) -> None:
+        if not self._connection:
+            return
+        try:
+            with self._lock:
                 self._connection.commit()
+                if self._shared_state is not None:
+                    self._shared_state["pending"] = 0
+                    self._shared_state["last_commit"] = time.monotonic()
         except (sqlite3.Error, OSError) as exc:
             self._storage_error(exc)
 
@@ -1280,14 +1363,13 @@ class TelemetryStore:
             return []
         try:
             with self._lock:
-                cursor = self._connection.execute(
-                    """
+                sql = """
                     SELECT side, horizon_ms, adverse_units, bucket_key,
                            fill_price_units, future_mid_yes_units
-                    FROM markouts ORDER BY id DESC LIMIT ?
-                    """,
-                    (int(limit),),
-                )
+                    FROM markouts {where} ORDER BY id DESC LIMIT ?
+                    """.format(where="WHERE ticker=?" if self._shard_mode else "")
+                params = (self._ticker_context, int(limit)) if self._shard_mode else (int(limit),)
+                cursor = self._connection.execute(sql, params)
                 return list(cursor.fetchall())
         except (sqlite3.Error, OSError) as exc:
             self._storage_error(exc)
@@ -1298,15 +1380,15 @@ class TelemetryStore:
             return []
         try:
             with self._lock:
-                cursor = self._connection.execute(
-                    """
+                sql = """
                     SELECT bucket_key, filled_30s
                     FROM fill_prob_attempts
+                    {where}
                     ORDER BY id DESC
                     LIMIT ?
-                    """,
-                    (int(limit),),
-                )
+                    """.format(where="WHERE ticker=?" if self._shard_mode else "")
+                params = (self._ticker_context, int(limit)) if self._shard_mode else (int(limit),)
+                cursor = self._connection.execute(sql, params)
                 return list(cursor.fetchall())
         except (sqlite3.Error, OSError) as exc:
             self._storage_error(exc)
@@ -1317,10 +1399,12 @@ class TelemetryStore:
             return []
         try:
             with self._lock:
-                cursor = self._connection.execute(
-                    "SELECT price_units, size_units, fee_units FROM fills WHERE fee_units IS NOT NULL ORDER BY id DESC LIMIT ?",
-                    (int(limit),),
-                )
+                sql = "SELECT price_units, size_units, fee_units FROM fills WHERE fee_units IS NOT NULL"
+                params: Tuple[object, ...] = ()
+                if self._shard_mode:
+                    sql += " AND ticker=?"
+                    params = (self._ticker_context,)
+                cursor = self._connection.execute(sql + " ORDER BY id DESC LIMIT ?", (*params, int(limit)))
                 return list(cursor.fetchall())
         except (sqlite3.Error, OSError) as exc:
             self._storage_error(exc)
@@ -1412,6 +1496,22 @@ class TelemetryStore:
         series_title: str = "",
         market_url: Optional[str] = None,
     ) -> None:
+        self._ticker_context = ticker
+        if self._shard_mode:
+            self._execute(
+                """
+                INSERT INTO shard_market_metadata(
+                    ticker,title,series_ticker,event_ticker,series_title,market_url,updated_at_ms
+                ) VALUES(?,?,?,?,?,?,?)
+                ON CONFLICT(ticker) DO UPDATE SET
+                    title=excluded.title,series_ticker=excluded.series_ticker,event_ticker=excluded.event_ticker,
+                    series_title=CASE WHEN excluded.series_title<>'' THEN excluded.series_title ELSE shard_market_metadata.series_title END,
+                    market_url=COALESCE(excluded.market_url,shard_market_metadata.market_url),
+                    updated_at_ms=excluded.updated_at_ms
+                """,
+                (ticker, title, series_ticker, event_ticker, series_title, market_url, now_ms()),
+            )
+            return
         self._execute(
             """
             INSERT INTO market_metadata(
@@ -1442,6 +1542,20 @@ class TelemetryStore:
         book_ask_units: Optional[int],
         book_mid_units: Optional[int],
     ) -> None:
+        if self._shard_mode:
+            self._execute(
+                """
+                INSERT OR IGNORE INTO order_revisions(
+                    revision_key,action,order_id,client_order_id,side,placed_at_ms,size_units,
+                    price_units,book_bid_units,book_ask_units,book_mid_units,ended_state,ticker
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,'Resting',?)
+                """,
+                (
+                    revision_key, action, order_id, client_order_id, side, int(placed_at_ms), int(size_units),
+                    price_units, book_bid_units, book_ask_units, book_mid_units, self._ticker_context,
+                ),
+            )
+            return
         self._execute(
             """
             INSERT OR IGNORE INTO order_revisions(
@@ -1712,6 +1826,55 @@ class TelemetryStore:
                 trade.taker_side,
             ),
         )
+
+    def record_runtime_event(
+        self, *, ticker: str, source: str, event_type: str,
+        payload: Optional[Mapping[str, object]] = None, severity: str = "info", timestamp_ms: Optional[int] = None,
+    ) -> None:
+        self._execute(
+            "INSERT INTO runtime_events(ts_ms,ticker,source,event_type,severity,payload_json) VALUES(?,?,?,?,?,?)",
+            (
+                int(timestamp_ms or now_ms()), ticker, source, event_type, severity,
+                json.dumps(dict(payload or {}), separators=(",", ":"), default=str),
+            ),
+        )
+
+    def apply_retention(self, *, now_timestamp_ms: Optional[int] = None, raw_days: int = 7) -> None:
+        if not self._connection:
+            return
+        cutoff = int(now_timestamp_ms or now_ms()) - max(1, int(raw_days)) * 86_400_000
+        try:
+            with self._lock:
+                self._connection.execute(
+                    """
+                    INSERT INTO market_minute_aggregates(
+                        ticker,minute_ms,quote_count,trade_count,fill_count,runtime_event_count
+                    )
+                    SELECT ticker,(ts_ms/60000)*60000,COUNT(*),0,0,0 FROM quotes WHERE ts_ms<?
+                    GROUP BY ticker,(ts_ms/60000)*60000
+                    ON CONFLICT(ticker,minute_ms) DO UPDATE SET quote_count=excluded.quote_count
+                    """,
+                    (cutoff,),
+                )
+                for table, count_column in (
+                    ("public_trades", "trade_count"),
+                    ("fills", "fill_count"),
+                    ("runtime_events", "runtime_event_count"),
+                ):
+                    self._connection.execute(
+                        f"""
+                        INSERT INTO market_minute_aggregates(ticker,minute_ms,{count_column})
+                        SELECT ticker,(ts_ms/60000)*60000,COUNT(*) FROM {table} WHERE ts_ms<?
+                        GROUP BY ticker,(ts_ms/60000)*60000
+                        ON CONFLICT(ticker,minute_ms) DO UPDATE SET {count_column}=excluded.{count_column}
+                        """,
+                        (cutoff,),
+                    )
+                for table in ("quotes", "market_state", "ticker_updates", "public_trades", "runtime_events"):
+                    self._connection.execute(f"DELETE FROM {table} WHERE ts_ms<?", (cutoff,))
+                self._connection.commit()
+        except (sqlite3.Error, OSError) as exc:
+            self._storage_error(exc)
 
 
 class FeeModel:
@@ -2264,11 +2427,35 @@ class FillProbabilityModel:
 # ---------------------------------------------------------------------------
 
 
-class TopOfBookBot:
-    def __init__(self, settings: BotSettings, api_client: BaseClient, market: MarketMetadata) -> None:
+class MarketActor:
+    """One market's strategy state machine.
+
+    The actor can be driven by a shared worker stream through ``handle_event``.
+    ``run`` remains the single-market development wrapper around the same actor.
+    """
+
+    def __init__(
+        self,
+        settings: BotSettings,
+        api_client: BaseClient,
+        market: MarketMetadata,
+        *,
+        owns_api_client: bool = True,
+        quote_freshness_seconds: float = 20.0,
+        quoting_enabled: bool = True,
+        telemetry_store: Optional[TelemetryStore] = None,
+    ) -> None:
         self.settings = settings
         self.api_client = api_client
         self.market = market
+        self.owns_api_client = owns_api_client
+        self.quote_freshness_seconds = max(1.0, float(quote_freshness_seconds))
+        self.quoting_enabled = bool(quoting_enabled)
+        self.allowed_quote_sides: set[str] = {"yes", "no"}
+        self.fleet_risk_mode = "normal"
+        self.fleet_risk_reason = "startup"
+        self.fleet_risk_generated_at_ms = 0
+        self.last_quote_decision_at_ms = 0
 
         self.book_yes: Dict[int, int] = {}
         self.book_no: Dict[int, int] = {}
@@ -2282,7 +2469,9 @@ class TopOfBookBot:
         self.known_strategy_order_sides: Dict[str, str] = {}
         safe_ticker = self.settings.market_ticker.replace("/", "_").replace("\\", "_")
         telemetry_path = self.settings.telemetry_sqlite_path or os.path.join(os.getcwd(), "telemetry", f"telemetry_{safe_ticker}.sqlite3")
-        self.telemetry_store = TelemetryStore(telemetry_path, enabled=self.settings.enable_sqlite_telemetry)
+        self.telemetry_store = telemetry_store or TelemetryStore(
+            telemetry_path, enabled=self.settings.enable_sqlite_telemetry
+        )
         self.telemetry_store.record_market_metadata(
             ticker=self.market.ticker,
             title=self.market.title,
@@ -2305,6 +2494,7 @@ class TopOfBookBot:
         self.last_orderbook_sequence: Optional[int] = None
         self.last_fill_timestamp_ms = 0
         self.last_market_event_timestamp_ms = 0
+        self.last_orderbook_event_timestamp_ms = 0
         self.last_requote_action_timestamp_ms = 0
         self.market_wide_queue_cooldown_until_ms = 0
         self.recent_liquidity_pull_events: Dict[str, Deque[Tuple[int, int]]] = {
@@ -4572,7 +4762,23 @@ class TopOfBookBot:
             if self.shutdown_requested:
                 return
 
-            if not self.book_ready:
+            current_ms = now_ms()
+            market_data_stale = (
+                not self.last_orderbook_event_timestamp_ms
+                or current_ms - self.last_orderbook_event_timestamp_ms > self.quote_freshness_seconds * 1000
+            )
+            risk_stale = (
+                not self.fleet_risk_generated_at_ms
+                or current_ms - self.fleet_risk_generated_at_ms > 120_000
+            )
+            if not self.quoting_enabled or not self.book_ready or market_data_stale or risk_stale:
+                if any(state.has_active_resting_order for state in self.orders.values()):
+                    try:
+                        await self.emergency_cancel_all_quotes(
+                            reason="quoting_disabled" if not self.quoting_enabled else "stale_or_unavailable_state"
+                        )
+                    except Exception as exc:
+                        log_event("FRESHNESS_CANCEL_ERROR", error=str(exc))
                 continue
 
             milliseconds_since_last_requote = now_ms() - self.last_requote_action_timestamp_ms
@@ -4585,6 +4791,19 @@ class TopOfBookBot:
                 if self.shutdown_requested:
                     return
                 desired_yes_units, desired_no_units = self.desired_quote_prices()
+                if "yes" not in self.allowed_quote_sides:
+                    desired_yes_units = None
+                if "no" not in self.allowed_quote_sides:
+                    desired_no_units = None
+                if self.fleet_risk_mode != "normal":
+                    # Buying the opposite outcome reduces signed binary inventory.
+                    if self.net_position_units > 0:
+                        desired_yes_units = None
+                    elif self.net_position_units < 0:
+                        desired_no_units = None
+                    else:
+                        desired_yes_units = desired_no_units = None
+                self.last_quote_decision_at_ms = now_ms()
                 try:
                     await self.ensure_side_quote("yes", desired_yes_units)
                     await self.ensure_side_quote("no", desired_no_units)
@@ -4634,6 +4853,31 @@ class TopOfBookBot:
             except Exception as exc:
                 log_event("MODEL_REFRESH_ERROR", error=str(exc))
             await asyncio.sleep(refresh_interval_seconds)
+
+    async def quote_freshness_worker(self) -> None:
+        interval = min(1.0, self.quote_freshness_seconds / 4.0)
+        while not self.shutdown_requested:
+            self.requote_event.set()
+            await asyncio.sleep(interval)
+
+    def set_fleet_risk(self, mode: str, *, reason: str, generated_at_ms: Optional[int] = None) -> None:
+        if mode not in {"normal", "reduction_only", "flatten_only"}:
+            raise ValueError(f"invalid fleet risk mode: {mode}")
+        self.fleet_risk_mode = mode
+        self.fleet_risk_reason = reason
+        self.fleet_risk_generated_at_ms = int(generated_at_ms or now_ms())
+        self.requote_event.set()
+
+    def set_quoting_enabled(self, enabled: bool) -> None:
+        self.quoting_enabled = bool(enabled)
+        self.requote_event.set()
+
+    def set_allowed_quote_sides(self, sides: Iterable[str]) -> None:
+        normalized = {str(side) for side in sides}
+        if not normalized <= {"yes", "no"}:
+            raise ValueError("quote sides must contain only yes/no")
+        self.allowed_quote_sides = normalized
+        self.requote_event.set()
 
     def sync_position_from_rest(self) -> int:
         positions = self.api_client.get_positions(self.settings.market_ticker)
@@ -4706,7 +4950,8 @@ class TopOfBookBot:
                     self.shutdown_cancel_error = str(exc)
                     log_event("SHUTDOWN_CANCEL_ERROR", error=str(exc))
                     raise
-            await self.api_client.close()
+            if self.owns_api_client:
+                await self.api_client.close()
         return {
             "shutdownRequested": True,
             "ordersCanceled": self.shutdown_canceled_order_count,
@@ -4889,6 +5134,41 @@ class TopOfBookBot:
 
             await asyncio.sleep(refresh_interval_seconds)
 
+    def handle_event(self, event: MarketEvent) -> None:
+        """Apply one immutable venue event without owning the event source."""
+
+        if event.market_id != self.settings.market_ticker:
+            raise ValueError(
+                f"event for {event.market_id!r} cannot be routed to actor {self.settings.market_ticker!r}"
+            )
+        self.last_market_event_timestamp_ms = now_ms()
+        if isinstance(event, StreamReset):
+            self.book_ready = False
+            self.last_orderbook_sequence = None
+            self.last_orderbook_event_timestamp_ms = 0
+            self.requote_event.set()
+        elif isinstance(event, OrderBookSnapshot):
+            self.last_orderbook_sequence = event.sequence
+            self.last_orderbook_event_timestamp_ms = now_ms()
+            self.apply_orderbook_snapshot(event)
+            self.requote_event.set()
+        elif isinstance(event, OrderBookDelta):
+            self.last_orderbook_sequence = event.sequence
+            self.last_orderbook_event_timestamp_ms = now_ms()
+            self.apply_orderbook_delta(event)
+            self.requote_event.set()
+        elif isinstance(event, OrderUpdate):
+            self.handle_user_order_update(event)
+        elif isinstance(event, Fill):
+            self.handle_fill_update(event)
+        elif isinstance(event, PublicTrade):
+            self.handle_trade_update(event)
+        elif isinstance(event, TickerUpdate):
+            self.handle_ticker_update(event)
+        elif isinstance(event, PositionUpdate):
+            self.handle_market_position_update(event)
+            self.requote_event.set()
+
     async def market_event_main(self) -> None:
         async for event in self.api_client.stream_events(
             self.settings.market_ticker,
@@ -4896,30 +5176,49 @@ class TopOfBookBot:
         ):
             if self.shutdown_requested:
                 return
-            self.last_market_event_timestamp_ms = now_ms()
-            if isinstance(event, StreamReset):
-                self.book_ready = False
-                self.last_orderbook_sequence = None
-            elif isinstance(event, OrderBookSnapshot):
-                self.last_orderbook_sequence = event.sequence
-                self.apply_orderbook_snapshot(event)
-                self.requote_event.set()
+            self.handle_event(event)
 
-            elif isinstance(event, OrderBookDelta):
-                self.last_orderbook_sequence = event.sequence
-                self.apply_orderbook_delta(event)
-                self.requote_event.set()
-            elif isinstance(event, OrderUpdate):
-                self.handle_user_order_update(event)
-            elif isinstance(event, Fill):
-                self.handle_fill_update(event)
-            elif isinstance(event, PublicTrade):
-                self.handle_trade_update(event)
-            elif isinstance(event, TickerUpdate):
-                self.handle_ticker_update(event)
-            elif isinstance(event, PositionUpdate):
-                self.handle_market_position_update(event)
-                self.requote_event.set()
+    async def start(self) -> None:
+        """Initialize an actor and start its internal timers without a stream."""
+
+        log_event(
+            "START",
+            venue=self.api_client.venue_name,
+            environment=self.api_client.environment_name,
+            ticker=self.settings.market_ticker,
+            yes_budget_cents=self.settings.yes_order_budget_cents,
+            no_budget_cents=self.settings.no_order_budget_cents,
+            maximum_projected_contracts_per_line=self.settings.maximum_projected_contracts_per_line,
+            price_structure=self.market.price_level_structure or "unknown",
+            fractional_trading=self.market.fractional_trading_enabled,
+            dry_run=self.api_client.dry_run,
+            reprice_ms=self.settings.minimum_milliseconds_between_requotes,
+            expiration_seconds=self.settings.resting_order_expiration_seconds,
+            same_side_reentry_cooldown_ms=self.settings.same_side_reentry_cooldown_ms,
+            queue_guard=self.settings.enable_queue_abandonment_guard,
+            runtime="market_actor",
+        )
+        self.load_startup_position()
+        self.cancel_owned_resting_quotes_on_startup()
+        await asyncio.to_thread(self.refresh_external_models)
+        self.background_tasks = [
+            asyncio.create_task(self.requote_worker()),
+            asyncio.create_task(self.queue_position_worker()),
+            asyncio.create_task(self.model_refresh_worker()),
+            asyncio.create_task(self.quote_freshness_worker()),
+        ]
+
+    async def stop(self, *, verify_orders: bool = True) -> Dict[str, object]:
+        self.shutdown_requested = True
+        self.requote_event.set()
+        for task in self.background_tasks:
+            task.cancel()
+        if self.background_tasks:
+            await asyncio.gather(*self.background_tasks, return_exceptions=True)
+        self.background_tasks = []
+        if verify_orders:
+            return await self._complete_shutdown()
+        return {"shutdownRequested": True, "ordersVerifiedAbsent": False}
 
     def status_snapshot(self) -> Dict[str, object]:
         price_units, price_source, price_at_ms = self.current_market_price()
@@ -4944,6 +5243,7 @@ class TopOfBookBot:
             "bookReady": self.book_ready,
             "lastFillAtMs": self.last_fill_timestamp_ms or None,
             "lastMarketEventAtMs": self.last_market_event_timestamp_ms or None,
+            "lastOrderbookEventAtMs": self.last_orderbook_event_timestamp_ms or None,
             "orders": active_orders,
             "risk": {
                 "maximumProjectedContractsPerLine": self.settings.maximum_projected_contracts_per_line,
@@ -5017,11 +5317,13 @@ class TopOfBookBot:
         self.load_startup_position()
         self.cancel_owned_resting_quotes_on_startup()
         await asyncio.to_thread(self.refresh_external_models)
+        self.set_fleet_risk("normal", reason="single_market_wrapper")
 
         self.background_tasks = [
             asyncio.create_task(self.requote_worker()),
             asyncio.create_task(self.queue_position_worker()),
             asyncio.create_task(self.model_refresh_worker()),
+            asyncio.create_task(self.quote_freshness_worker()),
         ]
         if self.settings.watchdog_state_file.strip():
             self.background_tasks.append(asyncio.create_task(self.watchdog_worker()))
@@ -5042,6 +5344,11 @@ class TopOfBookBot:
 
         if self.shutdown_exit_code is not None:
             raise SystemExit(self.shutdown_exit_code)
+
+
+# Backwards-compatible name used by the V1 CLI and replay tests. Production
+# workers instantiate MarketActor directly and feed it the shared shard stream.
+TopOfBookBot = MarketActor
 
 
 # ---------------------------------------------------------------------------

@@ -92,7 +92,7 @@ class SessionStore:
 
     @staticmethod
     def _configuration(row: sqlite3.Row) -> Dict[str, Any]:
-        return json.loads(row["configuration_json"])
+        return validate_session_configuration(json.loads(row["configuration_json"]))
 
     def bootstrap_default(self) -> None:
         with self._connect() as db:
@@ -338,7 +338,9 @@ class SessionStore:
 
     @staticmethod
     def _finalize_order_revisions(artifact_path: Path, ended_at_ms: int) -> None:
-        for path in artifact_path.glob("markets/*/telemetry.sqlite3"):
+        paths = list(artifact_path.glob("markets/*/telemetry.sqlite3"))
+        paths.extend(artifact_path.glob("shards/*/telemetry.sqlite3"))
+        for path in dict.fromkeys(paths):
             try:
                 # A sqlite3 connection's context manager controls only the
                 # transaction; it does not close the connection. Explicitly
@@ -523,9 +525,24 @@ class SessionStore:
             candidate.relative_to(root)
         except ValueError as exc:
             raise KeyError(ticker) from exc
-        if not candidate.exists():
+        if candidate.exists():
+            return candidate
+        try:
+            manifest = json.loads((artifact / "fleet_manifest.json").read_text(encoding="utf-8"))
+            worker_id = str((manifest.get("tickerToShard") or {}).get(ticker) or "")
+        except (OSError, ValueError, TypeError):
+            worker_id = ""
+        if not worker_id or "/" in worker_id or "\\" in worker_id:
             raise KeyError(ticker)
-        return candidate
+        shard_root = (artifact / "shards").resolve()
+        shard = (shard_root / worker_id / "telemetry.sqlite3").resolve()
+        try:
+            shard.relative_to(shard_root)
+        except ValueError as exc:
+            raise KeyError(ticker) from exc
+        if not shard.exists():
+            raise KeyError(ticker)
+        return shard
 
     def _artifact_for_run(self, run: Mapping[str, Any]) -> Path:
         artifact = Path(str(run["artifactPath"])).resolve()
@@ -710,6 +727,11 @@ class SessionStore:
             db.row_factory = sqlite3.Row
             has_orders = self._table_exists(db, "order_revisions")
             has_metadata = self._table_exists(db, "market_metadata")
+            has_shard_metadata = self._table_exists(db, "shard_market_metadata")
+            order_columns = {
+                str(row[1]) for row in db.execute("PRAGMA table_info(order_revisions)")
+            } if has_orders else set()
+            shard_orders = "ticker" in order_columns
             fill = db.execute(
                 """SELECT COUNT(*) AS fill_count,
                     COALESCE(SUM(CASE WHEN side='yes' THEN size_units ELSE 0 END),0) AS yes_units,
@@ -721,13 +743,24 @@ class SessionStore:
                     COALESCE(SUM(CASE WHEN fee_units IS NULL THEN 1 ELSE 0 END),0) AS missing_fees,
                     COALESCE(SUM(fee_units),0) AS fee_units,
                     MIN(ts_ms) AS first_fill_at_ms,MAX(ts_ms) AS last_fill_at_ms
-                    FROM fills"""
+                    FROM fills WHERE ticker=?""",
+                (ticker,),
             ).fetchone()
-            order_count = int(db.execute("SELECT COUNT(*) FROM order_revisions").fetchone()[0]) if has_orders else int(legacy_metric.get("orderPlacementsAttempted") or 0)
+            order_count = int(db.execute(
+                "SELECT COUNT(*) FROM order_revisions WHERE ticker=?" if shard_orders else "SELECT COUNT(*) FROM order_revisions",
+                (ticker,) if shard_orders else (),
+            ).fetchone()[0]) if has_orders else int(legacy_metric.get("orderPlacementsAttempted") or 0)
             order_sides = {
-                str(row[0]) for row in db.execute("SELECT DISTINCT side FROM order_revisions")
+                str(row[0]) for row in db.execute(
+                    "SELECT DISTINCT side FROM order_revisions WHERE ticker=?" if shard_orders else "SELECT DISTINCT side FROM order_revisions",
+                    (ticker,) if shard_orders else (),
+                )
             } if has_orders else set()
-            metadata = db.execute("SELECT * FROM market_metadata WHERE singleton=1").fetchone() if has_metadata else None
+            metadata = (
+                db.execute("SELECT * FROM shard_market_metadata WHERE ticker=?", (ticker,)).fetchone()
+                if has_shard_metadata else
+                db.execute("SELECT * FROM market_metadata WHERE singleton=1").fetchone() if has_metadata else None
+            )
         yes_units, no_units = int(fill["yes_units"]), int(fill["no_units"])
         yes_prices_complete = not int(fill["yes_missing_prices"])
         no_prices_complete = not int(fill["no_missing_prices"])
@@ -838,6 +871,11 @@ class SessionStore:
             if not signatures:
                 legacy_paths = sorted((artifact / "markets").glob("*/telemetry.sqlite3"))
                 candidates.update(path.parent.name for path in legacy_paths)
+                try:
+                    manifest = json.loads((artifact / "fleet_manifest.json").read_text(encoding="utf-8"))
+                    candidates.update(str(item) for item in (manifest.get("tickerToShard") or {}))
+                except (OSError, ValueError, TypeError):
+                    pass
             if not signatures and candidates:
                 warnings.append(
                     "Per-market activity counters are unavailable for this legacy run; telemetry was scanned once and coverage may be incomplete."
@@ -936,15 +974,16 @@ class SessionStore:
         current = now_ms()
         with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1)) as db:
             db.row_factory = sqlite3.Row
-            all_fills = list(db.execute("SELECT * FROM fills ORDER BY ts_ms,id"))
+            all_fills = list(db.execute("SELECT * FROM fills WHERE ticker=? ORDER BY ts_ms,id", (ticker,)))
             fill_total = len(all_fills)
             fills = list(reversed(all_fills[-int(fill_limit):]))
             latest_bids: Dict[str, Optional[int]] = {"yes": None, "no": None}
             if self._table_exists(db, "market_state"):
                 latest_state = db.execute(
                     """SELECT best_yes_bid_units,best_no_bid_units FROM market_state
-                       WHERE best_yes_bid_units IS NOT NULL OR best_no_bid_units IS NOT NULL
-                       ORDER BY ts_ms DESC,id DESC LIMIT 1"""
+                       WHERE ticker=? AND (best_yes_bid_units IS NOT NULL OR best_no_bid_units IS NOT NULL)
+                       ORDER BY ts_ms DESC,id DESC LIMIT 1""",
+                    (ticker,),
                 ).fetchone()
                 if latest_state:
                     latest_bids["yes"] = (
@@ -964,11 +1003,24 @@ class SessionStore:
                     if latest_bids["yes"] is not None and latest_bids["no"] is not None:
                         break
             has_orders = self._table_exists(db, "order_revisions")
-            order_total = int(db.execute("SELECT COUNT(*) FROM order_revisions").fetchone()[0]) if has_orders else int(market["orderCount"])
-            orders = list(db.execute("SELECT * FROM order_revisions ORDER BY placed_at_ms DESC,id DESC LIMIT ?", (int(order_limit),))) if has_orders else []
+            order_columns = {str(row[1]) for row in db.execute("PRAGMA table_info(order_revisions)")} if has_orders else set()
+            shard_orders = "ticker" in order_columns
+            order_total = int(db.execute(
+                "SELECT COUNT(*) FROM order_revisions WHERE ticker=?" if shard_orders else "SELECT COUNT(*) FROM order_revisions",
+                (ticker,) if shard_orders else (),
+            ).fetchone()[0]) if has_orders else int(market["orderCount"])
+            orders = list(db.execute(
+                "SELECT * FROM order_revisions WHERE ticker=? ORDER BY placed_at_ms DESC,id DESC LIMIT ?" if shard_orders else "SELECT * FROM order_revisions ORDER BY placed_at_ms DESC,id DESC LIMIT ?",
+                (ticker, int(order_limit)) if shard_orders else (int(order_limit),),
+            )) if has_orders else []
             order_times: Dict[str, list[int]] = {}
             if has_orders:
-                for row in db.execute("SELECT order_id,placed_at_ms FROM order_revisions WHERE order_id IS NOT NULL ORDER BY placed_at_ms"):
+                query = (
+                    "SELECT order_id,placed_at_ms FROM order_revisions WHERE ticker=? AND order_id IS NOT NULL ORDER BY placed_at_ms"
+                    if shard_orders else
+                    "SELECT order_id,placed_at_ms FROM order_revisions WHERE order_id IS NOT NULL ORDER BY placed_at_ms"
+                )
+                for row in db.execute(query, (ticker,) if shard_orders else ()):
                     order_times.setdefault(str(row[0]), []).append(int(row[1]))
         pnl_by_fill, pnl_warnings = self._fill_pnl_breakdown(all_fills, latest_bids=latest_bids)
         fill_items = []

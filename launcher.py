@@ -14,7 +14,8 @@ from pathlib import Path
 from typing import Dict, Optional
 
 from adaptors.kalshi import KalshiApiClient, KalshiClientConfig
-from bot_manager import BotManager, BotManagerConfig
+from bot_manager import BotManagerConfig
+from fleet_runtime.manager import ShardedBotManager
 from fleet_models import ScreenerPick, ScreenerUpdate
 from kalshi_screener import build_parser as build_screener_parser
 from kalshi_screener import build_settings_from_args as build_screener_settings
@@ -28,6 +29,7 @@ from lip_launcher import (
 from runtime_control import ControlRequest, ControlServer, STATUS_SCHEMA_VERSION
 from screener import Screener
 from portfolio_monitor import PortfolioMonitor, PortfolioMonitorConfig
+from session_config import default_session_configuration, validate_session_configuration
 
 
 LOGGER = logging.getLogger(__name__)
@@ -38,7 +40,26 @@ class Launcher:
         self.arguments = arguments
         self.session_store = session_store
         self.session_run = session_run
-        self.session_configuration = session_run["configuration"] if session_run else None
+        if session_run:
+            self.session_configuration = validate_session_configuration(session_run["configuration"])
+        else:
+            direct_configuration = default_session_configuration()
+            direct_configuration["execution"].update(
+                useDemo=bool(arguments.use_demo), dryRun=bool(arguments.dry_run),
+                subaccount=int(arguments.subaccount or 0),
+            )
+            direct_configuration["launcher"].update(
+                fixedTicker=str(getattr(arguments, "fixed_ticker", "") or ""),
+                maxBots=int(arguments.max_bots),
+                yesBudgetCents=int(arguments.yes_budget_cents),
+                noBudgetCents=int(arguments.no_budget_cents),
+                launchDelaySeconds=float(arguments.launch_delay_seconds),
+                runScreenerOnStart=bool(arguments.run_screener_on_start),
+                refreshIntervalSeconds=float(arguments.refresh_interval_seconds),
+                pollSeconds=float(arguments.poll_seconds),
+                minimumCarryoverValueCents=float(arguments.minimum_carryover_value_cents),
+            )
+            self.session_configuration = validate_session_configuration(direct_configuration)
         self.run_id = session_run["id"] if session_run else None
         self.run_artifact_path = Path(session_run["artifactPath"]) if session_run else None
         self.api_key_id = api_key_id
@@ -110,7 +131,7 @@ class Launcher:
             no_budget_column=arguments.no_budget_column,
             disabled_market_ids=lambda: set(load_disable_list(self.watchdog_disable_file)),
         )
-        self.manager = BotManager(
+        self.manager = ShardedBotManager(
             BotManagerConfig(
                 bot_script_path=self.bot_script_path,
                 logs_directory=self.logs_directory,
@@ -134,7 +155,7 @@ class Launcher:
                 watchdog_confidence_reduction_threshold=arguments.watchdog_confidence_reduction_threshold,
                 watchdog_confidence_flatten_threshold=arguments.watchdog_confidence_flatten_threshold,
                 session_configuration=self.session_configuration,
-                bot_artifacts_root=(self.run_artifact_path / "markets") if self.run_artifact_path else None,
+                bot_artifacts_root=self.run_artifact_path,
             ),
             cleanup_client=self.client if api_key_id and private_key_path else None,
         )
@@ -207,11 +228,15 @@ class Launcher:
             },
             "counts": counts,
             "bots": manager_status["bots"],
+            "workers": manager_status.get("workers", []),
+            "broker": manager_status.get("broker", {}),
+            "capacity": manager_status.get("capacity"),
+            "allocation": manager_status.get("allocation"),
             "manager": manager_monitoring,
             "clients": manager_status.get("clients", []),
             "screener": self.screener.status_snapshot(),
             "portfolio": self.portfolio.status_snapshot(),
-            "disabled": disabled,
+            "disabledSummary": {"count": len(disabled)},
         }
         if self.session_run:
             result["session"] = {
