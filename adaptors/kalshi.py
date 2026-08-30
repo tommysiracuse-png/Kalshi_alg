@@ -1100,7 +1100,15 @@ class KalshiApiClient(BaseClient):
                 )
                 connected_once = True
                 backoff = 1
-                expected_sequences: dict[str, int] = {}
+                # Kalshi sequences messages per subscription (sid), not per
+                # market.  An orderbook subscription can contain many markets,
+                # so updates for A and B legitimately look like 10/A, 11/B,
+                # 12/A.  Treating A's 10 -> 12 as a gap causes a false reset and
+                # immediately cancels otherwise valid quotes.
+                expected_sequences_by_sid: dict[int, int] = {}
+                # Older fixtures/compatible venues may omit sid.  Keep the
+                # single-market behavior for that case only.
+                legacy_expected_sequences: dict[str, int] = {}
                 self._subscription_sids.clear()
                 self._unavailable_books = set(self._stream_market_ids)
                 for ticker in sorted(self._stream_market_ids):
@@ -1122,32 +1130,55 @@ class KalshiApiClient(BaseClient):
                     event = self._event(data, fallback_market)
                     if event is not None and event.market_id not in self._stream_market_ids:
                         continue
+                    is_orderbook_event = isinstance(event, (OrderBookSnapshot, OrderBookDelta))
+                    raw_sid = data.get("sid")
+                    raw_sequence = data.get("seq")
+                    orderbook_sid = self._subscription_sids.get("orderbook_delta")
+                    sequence_gap = False
+                    previous_sequence: Optional[int] = None
+                    affected_markets: set[str] = set()
+                    if (
+                        isinstance(raw_sid, int)
+                        and isinstance(raw_sequence, int)
+                        and (raw_sid == orderbook_sid or is_orderbook_event)
+                    ):
+                        previous_sequence = expected_sequences_by_sid.get(raw_sid)
+                        sequence_gap = previous_sequence is not None and raw_sequence != previous_sequence + 1
+                        expected_sequences_by_sid[raw_sid] = raw_sequence
+                        if sequence_gap:
+                            # A missing message on a shared orderbook sid may
+                            # belong to any subscribed ticker.  Re-snapshot all
+                            # books on that sid before allowing new exposure.
+                            affected_markets = set(self._stream_market_ids)
+                    elif is_orderbook_event and event.sequence is not None:
+                        previous_sequence = legacy_expected_sequences.get(event.market_id)
+                        sequence_gap = previous_sequence is not None and event.sequence != previous_sequence + 1
+                        legacy_expected_sequences[event.market_id] = event.sequence
+                        if sequence_gap:
+                            affected_markets = {event.market_id}
+
+                    if sequence_gap:
+                        self._record_stream_activity("sequenceResets")
+                        LOGGER.info(
+                            "ORDERBOOK_SEQUENCE_GAP | sid=%s affected_markets=%s previous_sequence=%s new_sequence=%s",
+                            raw_sid, len(affected_markets), previous_sequence, raw_sequence,
+                        )
+                        self._unavailable_books.update(affected_markets)
+                        if "orderbook_delta" not in self._subscription_sids:
+                            # Without the server SID a targeted snapshot cannot
+                            # be requested, so use the safe reconnect path.
+                            break
+                        await self._update_subscription(
+                            tuple(sorted(affected_markets)), "get_snapshot", channels={"orderbook_delta"}
+                        )
+                        for ticker in sorted(affected_markets):
+                            yield StreamReset(ticker)
+                        continue
+
                     if isinstance(event, OrderBookSnapshot):
-                        if event.sequence is not None:
-                            expected_sequences[event.market_id] = event.sequence
                         self._unavailable_books.discard(event.market_id)
-                    elif isinstance(event, OrderBookDelta) and event.sequence is not None:
-                        expected = expected_sequences.get(event.market_id)
-                        if expected is not None and event.sequence != expected + 1:
-                            self._record_stream_activity("sequenceResets")
-                            LOGGER.info(
-                                "ORDERBOOK_SEQUENCE_GAP | market=%s previous_sequence=%s new_sequence=%s",
-                                event.market_id, expected, event.sequence,
-                            )
-                            expected_sequences.pop(event.market_id, None)
-                            self._unavailable_books.add(event.market_id)
-                            if "orderbook_delta" not in self._subscription_sids:
-                                # Without the server SID a targeted snapshot cannot
-                                # be requested, so use the safe reconnect path.
-                                break
-                            yield StreamReset(event.market_id)
-                            await self._update_subscription(
-                                (event.market_id,), "get_snapshot", channels={"orderbook_delta"}
-                            )
-                            continue
-                        if event.market_id in self._unavailable_books:
-                            continue
-                        expected_sequences[event.market_id] = event.sequence
+                    elif isinstance(event, OrderBookDelta) and event.market_id in self._unavailable_books:
+                        continue
                     if event is not None:
                         self._record_stream_activity(
                             "event", event_type=type(event).__name__
