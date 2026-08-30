@@ -265,6 +265,13 @@ class FleetWorkerProcess(mp.Process):
                         risk_age_ms=(now - actor.fleet_risk_generated_at_ms) if actor.fleet_risk_generated_at_ms else None,
                         resting_order_count=sum(1 for item in actor.orders.values() if item.has_active_resting_order),
                         position_units=actor.net_position_units,
+                        started_at_ms=actor.started_at_ms,
+                        fill_count=actor.session_fill_count,
+                        order_activity={
+                            action: {name: int(value) for name, value in counters.items()}
+                            for action, counters in actor.order_activity.items()
+                        },
+                        pnl=actor.session_pnl_snapshot(),
                     )
                     for ticker, actor in actors.items()
                 }

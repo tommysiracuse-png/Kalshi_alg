@@ -91,6 +91,36 @@ def test_reduction_only_drops_new_exposure_and_expired_intents():
     assert queue.pop(now_ms=4, reduction_only=True) is None
 
 
+def test_shard_telemetry_views_share_one_writer_without_disabling_each_other(tmp_path: Path):
+    path = tmp_path / "shards" / "worker-00" / "telemetry.sqlite3"
+    first = TelemetryStore(str(path), enabled=True, shard_mode=True)
+    first.record_market_metadata(
+        ticker="A", title="Market A", series_ticker="SERIES", event_ticker="EVENT-A"
+    )
+    # The first metadata write intentionally leaves a batched transaction open.
+    # Creating the second ticker view must not reapply connection PRAGMAs.
+    second = TelemetryStore(str(path), enabled=True, shard_mode=True)
+    second.record_market_metadata(
+        ticker="B", title="Market B", series_ticker="SERIES", event_ticker="EVENT-B"
+    )
+    for telemetry, ticker in ((first, "A"), (second, "B")):
+        telemetry.start_order_revision(
+            revision_key=f"revision-{ticker}", action="create", side="yes",
+            client_order_id=f"mm:yes:{ticker}", order_id=f"order-{ticker}",
+            placed_at_ms=1_000, size_units=100, price_units=4_000,
+            book_bid_units=3_900, book_ask_units=4_100, book_mid_units=4_000,
+        )
+    first.flush()
+
+    assert first.health_snapshot()["available"] is True
+    assert second.health_snapshot()["available"] is True
+    import sqlite3
+    with sqlite3.connect(path) as db:
+        assert dict(db.execute(
+            "SELECT ticker,COUNT(*) FROM order_revisions GROUP BY ticker"
+        )) == {"A": 1, "B": 1}
+
+
 def test_risk_staleness_tightens_but_does_not_restore():
     healthy = evaluate_risk(
         [RiskSample(1_000, 4_000, 5_000)], now_ms=1_100,

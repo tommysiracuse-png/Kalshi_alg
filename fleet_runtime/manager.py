@@ -104,6 +104,10 @@ class ShardedBotManager:
         self._desired: dict[str, ScreenerPick] = {}
         self._assignments: dict[str, tuple[str, ...]] = {}
         self._market_to_worker: dict[str, str] = {}
+        # Run artifacts must continue resolving markets removed by later
+        # screener generations.  This map is append-only for the run while
+        # _market_to_worker remains the current live assignment.
+        self._market_shard_history: dict[str, str] = {}
         self._workers: dict[str, ManagedWorker] = {}
         self._started = False
         self._shutdown_started = False
@@ -259,6 +263,7 @@ class ShardedBotManager:
         self._market_to_worker = {
             ticker: worker_id for worker_id, tickers in assignments.items() for ticker in tickers
         }
+        self._market_shard_history.update(self._market_to_worker)
         self._desired = dict(desired)
         self.bots = {ticker: ManagedMarket(pick, self._market_to_worker[ticker]) for ticker, pick in desired.items()}
         for worker_id, managed in self._workers.items():
@@ -282,7 +287,8 @@ class ShardedBotManager:
             "schemaVersion": 1,
             "generatedAtMs": int(time.time() * 1000),
             "workers": {worker_id: list(tickers) for worker_id, tickers in assignments.items()},
-            "tickerToShard": self._market_to_worker,
+            "tickerToShard": self._market_shard_history,
+            "activeTickerToShard": self._market_to_worker,
         }
         target = self._artifact_root() / "fleet_manifest.json"
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -474,8 +480,17 @@ class ShardedBotManager:
                         "currentPositionUnits": item.position_units if item else None,
                         "updatedAtMs": heartbeat.generated_at_ms if heartbeat else None,
                     },
-                    "fills": {"count": 0, "recent": []},
-                    "orderActivity": {"byAction": {}, "active": {}, "recent": []},
+                    "runtime": {
+                        "startedAtMs": item.started_at_ms if item else None,
+                        "runningForMs": max(0, now - item.started_at_ms) if item and item.started_at_ms else None,
+                    },
+                    "pnl": dict(item.pnl) if item else {},
+                    "fills": {"count": item.fill_count if item else 0, "recent": []},
+                    "orderActivity": {
+                        "byAction": dict(item.order_activity) if item else {},
+                        "active": {}, "recent": [],
+                    },
+                    "apiActivity": {"rest": {}},
                     "watchdog": {
                         "running": managed.process.is_alive(), "mode": risk_mode,
                         "reason": item.error if item and item.error else None,

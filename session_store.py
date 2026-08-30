@@ -532,9 +532,23 @@ class SessionStore:
             worker_id = str((manifest.get("tickerToShard") or {}).get(ticker) or "")
         except (OSError, ValueError, TypeError):
             worker_id = ""
-        if not worker_id or "/" in worker_id or "\\" in worker_id:
-            raise KeyError(ticker)
         shard_root = (artifact / "shards").resolve()
+        if not worker_id or "/" in worker_id or "\\" in worker_id:
+            # Older manifests were overwritten on each screener refresh and
+            # therefore forgot removed markets.  Each immutable market settings
+            # snapshot retains the exact shard database path, so use it as the
+            # compatibility index for those runs.
+            try:
+                settings = json.loads(
+                    (artifact / "markets" / ticker / "settings.json").read_text(encoding="utf-8")
+                )
+                persisted = Path(str(settings.get("telemetry_sqlite_path") or "")).resolve()
+                persisted.relative_to(shard_root)
+                if persisted.exists():
+                    return persisted
+            except (OSError, ValueError, TypeError):
+                pass
+            raise KeyError(ticker)
         shard = (shard_root / worker_id / "telemetry.sqlite3").resolve()
         try:
             shard.relative_to(shard_root)
@@ -865,9 +879,11 @@ class SessionStore:
 
             # Counters are trusted for current-format runs. A missing counter map
             # is a legacy coverage gap, scanned only on the first cached access.
-            candidates = {
-                ticker for ticker, signature in signatures.items() if any(signature)
-            }
+            # The metrics tab is a run-market view, not only an activity view.
+            # A newly admitted market legitimately has zero orders and fills;
+            # retaining every counter signature lets it appear immediately and
+            # then refresh incrementally when activity starts.
+            candidates = set(signatures)
             if not signatures:
                 legacy_paths = sorted((artifact / "markets").glob("*/telemetry.sqlite3"))
                 candidates.update(path.parent.name for path in legacy_paths)
@@ -897,9 +913,8 @@ class SessionStore:
                         fallback_url=links.get(ticker),
                         legacy_metric=legacy.get(ticker) if isinstance(legacy.get(ticker), Mapping) else {},
                     )
-                    if item["fillCount"] or item["orderCount"]:
-                        items_by_ticker[ticker] = item
-                except (sqlite3.Error, OSError) as exc:
+                    items_by_ticker[ticker] = item
+                except (KeyError, sqlite3.Error, OSError) as exc:
                     failed.append(ticker)
                     failed_errors.append(f"{ticker}: {exc}")
                     if previous:

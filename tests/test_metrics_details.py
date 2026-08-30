@@ -351,6 +351,71 @@ def test_incremental_market_cache_reopens_only_changed_market(tmp_path: Path, mo
     assert opened == ["TEST-1", "TEST-2", "TEST-1"]
 
 
+def test_current_run_lists_admitted_market_before_first_order(tmp_path: Path):
+    store = SessionStore(tmp_path / "sessions")
+    run = store.prepare_run()
+    artifact = Path(run["artifactPath"])
+    path = artifact / "shards" / "worker-00" / "telemetry.sqlite3"
+    telemetry = TelemetryStore(str(path), enabled=True, shard_mode=True)
+    telemetry.record_market_metadata(
+        ticker="TEST-1", title="Waiting for first quote", series_ticker="TEST",
+        event_ticker="TEST-EVENT",
+    )
+    telemetry.flush()
+    (artifact / "fleet_manifest.json").write_text(json.dumps({
+        "tickerToShard": {"TEST-1": "worker-00"},
+        "workers": {"worker-00": ["TEST-1"]},
+    }))
+    store.record_metrics(run["id"], {
+        "markets": {
+            "TEST-1": {"orders": 0, "orderPlacementsAttempted": 0, "fills": 0},
+        },
+    }, sample=False)
+
+    response = store.run_markets(run["id"])
+    assert len(response["items"]) == 1
+    assert response["items"][0]["ticker"] == "TEST-1"
+    assert response["items"][0]["orderCount"] == 0
+    assert response["items"][0]["fillCount"] == 0
+
+
+def test_removed_market_resolves_from_immutable_settings_after_manifest_refresh(tmp_path: Path):
+    store = SessionStore(tmp_path / "sessions")
+    run = store.prepare_run()
+    artifact = Path(run["artifactPath"])
+    shard_path = artifact / "shards" / "worker-02" / "telemetry.sqlite3"
+    telemetry = TelemetryStore(str(shard_path), enabled=True, shard_mode=True)
+    telemetry.record_market_metadata(
+        ticker="REMOVED", title="Removed after refresh", series_ticker="TEST",
+        event_ticker="TEST-EVENT",
+    )
+    telemetry.start_order_revision(
+        revision_key="removed-order", action="create", side="no",
+        client_order_id="mm:no:removed", order_id="order-removed",
+        placed_at_ms=1_000, size_units=100, price_units=4_000,
+        book_bid_units=3_900, book_ask_units=4_100, book_mid_units=4_000,
+    )
+    telemetry.flush()
+    market_dir = artifact / "markets" / "REMOVED"
+    market_dir.mkdir(parents=True)
+    (market_dir / "settings.json").write_text(json.dumps({
+        "telemetry_sqlite_path": str(shard_path),
+    }))
+    # Simulate a later screener generation overwriting the legacy manifest and
+    # retaining only currently active markets.
+    (artifact / "fleet_manifest.json").write_text(json.dumps({
+        "tickerToShard": {"ACTIVE": "worker-00"},
+    }))
+    store.record_metrics(run["id"], {
+        "markets": {"REMOVED": {"orders": 1, "orderPlacementsAttempted": 1, "fills": 0}},
+    }, sample=False)
+
+    response = store.run_markets(run["id"])
+    assert response["source"]["available"] is True
+    assert response["items"][0]["ticker"] == "REMOVED"
+    assert response["items"][0]["orderCount"] == 1
+
+
 def test_market_cache_retains_last_summary_on_read_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     store = SessionStore(tmp_path / "sessions")
     run = store.prepare_run()

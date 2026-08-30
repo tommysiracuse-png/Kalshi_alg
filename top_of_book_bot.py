@@ -1081,6 +1081,7 @@ class TelemetryStore:
             directory = os.path.dirname(self.database_path)
             if directory:
                 os.makedirs(directory, exist_ok=True)
+            initialize_connection = True
             if self._shard_mode:
                 with self._registry_lock:
                     shared = self._shared_connections.get(self.database_path)
@@ -1092,15 +1093,23 @@ class TelemetryStore:
                             "last_commit": time.monotonic(),
                         }
                         self._shared_connections[self.database_path] = shared
+                    else:
+                        initialize_connection = False
                     self._shared_state = shared
                     self._connection = shared["connection"]  # type: ignore[assignment]
                     self._lock = shared["lock"]  # type: ignore[assignment]
             else:
                 self._connection = sqlite3.connect(self.database_path, check_same_thread=False)
                 self._connection.row_factory = sqlite3.Row
-            self._connection.execute("PRAGMA journal_mode=WAL")
-            self._connection.execute("PRAGMA synchronous=NORMAL")
-            self._initialize_schema()
+            # A shard has several ticker-scoped TelemetryStore views sharing one
+            # connection.  Reapplying connection PRAGMAs/schema from every view
+            # can occur while the shared writer has a batched transaction open
+            # ("Safety level may not be changed inside a transaction") and the
+            # resulting error closes telemetry for the entire worker.
+            if initialize_connection:
+                self._connection.execute("PRAGMA journal_mode=WAL")
+                self._connection.execute("PRAGMA synchronous=NORMAL")
+                self._initialize_schema()
         except (sqlite3.Error, OSError) as exc:
             self._storage_error(exc)
 

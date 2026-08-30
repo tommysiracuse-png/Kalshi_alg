@@ -66,6 +66,10 @@ class MarketHealth:
     resting_order_count: int = 0
     position_units: int = 0
     error: str = ""
+    started_at_ms: int = 0
+    fill_count: int = 0
+    order_activity: Mapping[str, Mapping[str, int]] = field(default_factory=dict)
+    pnl: Mapping[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
