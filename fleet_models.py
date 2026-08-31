@@ -70,6 +70,7 @@ class MarketHealth:
     fill_count: int = 0
     order_activity: Mapping[str, Mapping[str, int]] = field(default_factory=dict)
     pnl: Mapping[str, object] = field(default_factory=dict)
+    markouts: Mapping[str, Mapping[str, object]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

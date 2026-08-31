@@ -15,6 +15,14 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Dict, Iterable, Iterator, Mapping, Optional
 
+from markout_metrics import (
+    MARKOUT_HORIZONS_MS,
+    add_observation,
+    combine_markout_maps,
+    empty_markout_aggregate,
+    finalize_aggregate,
+    monetary_markout_units,
+)
 from session_config import default_session_configuration, validate_session_configuration
 
 
@@ -246,13 +254,28 @@ class SessionStore:
     def claim_run(self, run_id: Optional[str] = None) -> Dict[str, Any]:
         with self._connect() as db:
             timestamp = now_ms()
-            interrupted_artifacts = [
-                Path(item[0]) for item in db.execute(
-                    "SELECT artifact_path FROM runs WHERE status IN ('starting','running')"
-                ).fetchall()
-            ]
-            for artifact in interrupted_artifacts:
+            interrupted_runs = db.execute(
+                """SELECT id,artifact_path,heartbeat_at_ms,metrics_json FROM runs
+                   WHERE status IN ('starting','running')"""
+            ).fetchall()
+            for interrupted in interrupted_runs:
+                artifact = Path(interrupted["artifact_path"])
                 self._finalize_order_revisions(artifact, timestamp)
+                totals, markets, warnings = self._summarize_markouts(
+                    artifact, active=False,
+                    as_of_ms=int(interrupted["heartbeat_at_ms"] or timestamp),
+                )
+                metrics = json.loads(interrupted["metrics_json"] or "{}")
+                metrics["markoutsByHorizon"] = totals
+                metrics["markoutWarnings"] = warnings
+                market_metrics = dict(metrics.get("markets") or {})
+                for ticker, values in markets.items():
+                    market_metrics.setdefault(ticker, {})["markoutsByHorizon"] = values
+                metrics["markets"] = market_metrics
+                db.execute(
+                    "UPDATE runs SET metrics_json=? WHERE id=?",
+                    (json.dumps(metrics, separators=(",", ":")), interrupted["id"]),
+                )
             db.execute("UPDATE runs SET status='interrupted',ended_at_ms=COALESCE(heartbeat_at_ms,?),error=COALESCE(error,'launcher exited without finalizing') WHERE status IN ('starting','running')", (timestamp,))
             row = db.execute("SELECT * FROM runs WHERE id=? AND status='pending'", (run_id,)).fetchone() if run_id else db.execute("SELECT * FROM runs WHERE status='pending' ORDER BY created_at_ms LIMIT 1").fetchone()
             if not row:
@@ -289,6 +312,7 @@ class SessionStore:
                     "runtimeMs", "orders", "orderSuccesses", "orderPlacementsAttempted",
                     "orderErrors", "fills", "apiCalls", "apiErrors", "apiByComponent",
                     "feesCents", "realizedCents", "unrealizedCents", "totalCents", "pnlComplete",
+                    "markoutsByHorizon",
                 )
                 sample_payload = json.dumps(
                     {key: metrics[key] for key in sample_fields if key in metrics},
@@ -333,6 +357,15 @@ class SessionStore:
                         netPosition=item["netPosition"], lastFairCents=item["lastFairCents"],
                     )
                 final_metrics["markets"] = markets
+            markouts, market_markouts, markout_warnings = self._summarize_markouts(
+                Path(row["artifact_path"]), active=False, as_of_ms=finished_at
+            )
+            final_metrics["markoutsByHorizon"] = markouts
+            final_metrics["markoutWarnings"] = markout_warnings
+            markets = dict(final_metrics.get("markets") or {})
+            for ticker, values in market_markouts.items():
+                markets.setdefault(ticker, {})["markoutsByHorizon"] = values
+            final_metrics["markets"] = markets
         if final_metrics:
             self.record_metrics(run_id, final_metrics, sample=False)
 
@@ -358,6 +391,134 @@ class SessionStore:
                         )
             except sqlite3.Error:
                 continue
+
+    @staticmethod
+    def _telemetry_paths(artifact_path: Path) -> list[Path]:
+        paths = list(artifact_path.glob("markets/*/telemetry.sqlite3"))
+        paths.extend(artifact_path.glob("shards/*/telemetry.sqlite3"))
+        unique: dict[str, Path] = {}
+        for path in paths:
+            try:
+                unique[str(path.resolve())] = path.resolve()
+            except OSError:
+                unique[str(path)] = path
+        return list(unique.values())
+
+    @classmethod
+    def _summarize_markouts(
+        cls,
+        artifact_path: Path,
+        *,
+        active: bool,
+        as_of_ms: int,
+    ) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Dict[str, Dict[str, Any]]], list[str]]:
+        fills: Dict[tuple[str, str], Dict[str, Any]] = {}
+        markouts: Dict[tuple[str, str, int], tuple[tuple[int, int], Dict[str, Any]]] = {}
+        warnings: list[str] = []
+        for path in cls._telemetry_paths(artifact_path):
+            try:
+                with closing(sqlite3.connect(f"file:{path}?mode=ro", uri=True, timeout=1)) as db:
+                    db.row_factory = sqlite3.Row
+                    tables = {str(row[0]) for row in db.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table'"
+                    )}
+                    if "fills" not in tables:
+                        continue
+                    for row in db.execute(
+                        "SELECT fill_key,ts_ms,ticker,side,price_units,size_units,fee_units FROM fills"
+                    ):
+                        key = (str(row["ticker"]), str(row["fill_key"]))
+                        fills[key] = dict(row)
+                    if "markouts" not in tables:
+                        continue
+                    for row in db.execute(
+                        """SELECT id,fill_key,ts_ms,ticker,side,horizon_ms,fill_price_units,
+                                  future_mid_yes_units FROM markouts"""
+                    ):
+                        key = (str(row["ticker"]), str(row["fill_key"]), int(row["horizon_ms"]))
+                        revision = (int(row["ts_ms"]), int(row["id"]))
+                        if key not in markouts or revision > markouts[key][0]:
+                            markouts[key] = (revision, dict(row))
+            except (sqlite3.Error, OSError) as exc:
+                warnings.append(f"Could not read markouts from {path}: {exc}")
+
+        tickers = sorted({ticker for ticker, _ in fills})
+        market_results: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        for ticker in tickers:
+            ticker_fills = {key: value for key, value in fills.items() if key[0] == ticker}
+            horizon_results: Dict[str, Dict[str, Any]] = {}
+            for horizon_ms in MARKOUT_HORIZONS_MS:
+                aggregate = empty_markout_aggregate(horizon_ms)
+                pending = 0
+                for (fill_ticker, fill_key), fill in ticker_fills.items():
+                    markout_entry = markouts.get((fill_ticker, fill_key, horizon_ms))
+                    if markout_entry is None:
+                        if active and int(fill["ts_ms"]) + horizon_ms > as_of_ms:
+                            pending += 1
+                        continue
+                    markout = markout_entry[1]
+                    if (
+                        markout.get("future_mid_yes_units") is None
+                        or fill.get("price_units") is None
+                        or fill.get("size_units") is None
+                        or fill.get("fee_units") is None
+                    ):
+                        continue
+                    fill_price = int(fill["price_units"])
+                    future_mid_yes = int(markout["future_mid_yes_units"])
+                    signed = (
+                        future_mid_yes - fill_price
+                        if str(fill["side"]) == "yes"
+                        else 10_000 - future_mid_yes - fill_price
+                    )
+                    add_observation(
+                        aggregate,
+                        signed_price_units=signed,
+                        size_units=int(fill["size_units"]),
+                        fee_units=int(fill["fee_units"]),
+                    )
+                horizon_results[str(horizon_ms)] = finalize_aggregate(
+                    aggregate,
+                    total_fill_count=len(ticker_fills),
+                    pending_fill_count=pending,
+                )
+            market_results[ticker] = horizon_results
+        totals = combine_markout_maps(market_results.values())
+        for horizon_ms in MARKOUT_HORIZONS_MS:
+            totals.setdefault(str(horizon_ms), empty_markout_aggregate(horizon_ms))
+        return totals, market_results, warnings
+
+    def backfill_markouts(self, *, include_active: bool = False) -> Dict[str, Any]:
+        statuses = "" if include_active else "WHERE status NOT IN ('pending','starting','running')"
+        with self._connect() as db:
+            rows = db.execute(f"SELECT id,status,artifact_path,ended_at_ms,metrics_json FROM runs {statuses}").fetchall()
+        report = {"runsProcessed": 0, "runsWithWarnings": 0, "runs": [], "warnings": []}
+        for row in rows:
+            active = str(row["status"]) in ACTIVE_RUN_STATES
+            totals, markets, warnings = self._summarize_markouts(
+                Path(row["artifact_path"]),
+                active=active,
+                as_of_ms=now_ms() if active else int(row["ended_at_ms"] or now_ms()),
+            )
+            metrics = json.loads(row["metrics_json"] or "{}")
+            metrics["markoutsByHorizon"] = totals
+            metrics["markoutWarnings"] = warnings
+            market_metrics = dict(metrics.get("markets") or {})
+            for ticker, values in markets.items():
+                market_metrics.setdefault(ticker, {})["markoutsByHorizon"] = values
+            metrics["markets"] = market_metrics
+            self.record_metrics(str(row["id"]), metrics, sample=False)
+            report["runsProcessed"] += 1
+            report["runs"].append({
+                "runId": str(row["id"]),
+                "status": str(row["status"]),
+                "horizons": totals,
+                "warnings": warnings,
+            })
+            if warnings:
+                report["runsWithWarnings"] += 1
+                report["warnings"].extend(f"{row['id']}: {warning}" for warning in warnings)
+        return report
 
     def fail_pending_run(self, run_id: str, error: str) -> None:
         with self._connect() as db:
@@ -423,7 +584,9 @@ class SessionStore:
             "timesRun": len(runs), "runtimeMs": 0, "orders": 0, "fills": 0,
             "apiCalls": 0, "apiErrors": 0, "realizedCents": 0.0, "unrealizedCents": 0.0,
             "totalCents": 0.0, "pnlComplete": True, "outcomes": {}, "apiByComponent": {},
+            "markoutsByHorizon": {},
         }
+        run_markouts: list[Mapping[str, Any]] = []
         for run in runs:
             metric = run["metrics"] or {}
             duration = int(metric.get("runtimeMs") or ((run["endedAt"] or now_ms()) - (run["startedAt"] or run["createdAt"])))
@@ -436,6 +599,7 @@ class SessionStore:
             totals["unrealizedCents"] += float(metric.get("unrealizedCents") or 0)
             totals["totalCents"] += float(metric.get("totalCents") or 0)
             totals["pnlComplete"] = totals["pnlComplete"] and bool(metric.get("pnlComplete", True))
+            run_markouts.append(metric.get("markoutsByHorizon") or {})
             totals["outcomes"][run["status"]] = totals["outcomes"].get(run["status"], 0) + 1
             for component, count in (metric.get("apiByComponent") or {}).items():
                 totals["apiByComponent"][component] = totals["apiByComponent"].get(component, 0) + int(count)
@@ -444,21 +608,29 @@ class SessionStore:
         totals["fillsPerMinute"] = round(totals["fills"] / minutes, 4) if minutes else 0.0
         for key in ("realizedCents", "unrealizedCents", "totalCents"):
             totals[key] = round(totals[key], 4)
+        totals["markoutsByHorizon"] = combine_markout_maps(run_markouts)
+        for horizon_ms in MARKOUT_HORIZONS_MS:
+            totals["markoutsByHorizon"].setdefault(
+                str(horizon_ms), empty_markout_aggregate(horizon_ms)
+            )
         return {"generatedAt": now_ms(), "summary": totals, "runs": runs}
 
     @staticmethod
-    def _market_counter_signatures(metrics: Mapping[str, Any]) -> Dict[str, tuple[int, int, int]]:
-        signatures: Dict[str, tuple[int, int, int]] = {}
+    def _market_counter_signatures(metrics: Mapping[str, Any]) -> Dict[str, tuple[int, ...]]:
+        signatures: Dict[str, tuple[int, ...]] = {}
         markets = metrics.get("markets") if isinstance(metrics, Mapping) else None
         if not isinstance(markets, Mapping):
             return signatures
         for ticker, value in markets.items():
             if not ticker or not isinstance(value, Mapping):
                 continue
+            markouts = value.get("markoutsByHorizon") or {}
             signatures[str(ticker)] = (
                 int(value.get("orders") or 0),
                 int(value.get("orderPlacementsAttempted") or 0),
                 int(value.get("fills") or 0),
+                *(int((markouts.get(str(horizon)) or {}).get("coveredFillCount") or 0)
+                  for horizon in MARKOUT_HORIZONS_MS),
             )
         return signatures
 
@@ -484,6 +656,7 @@ class SessionStore:
         summary_fields = (
             "runtimeMs", "orders", "fills", "totalCents", "realizedCents",
             "unrealizedCents", "apiCalls", "apiErrors", "pnlComplete",
+            "markoutsByHorizon",
         )
         return {
             "generatedAt": generated,
@@ -821,6 +994,7 @@ class SessionStore:
             "totalCostUnits": total_cost,
             "realizedPnlUnits": realized,
             "realizedReturnBps": int(round(realized * 10_000 / total_cost)) if realized is not None and total_cost else None,
+            "markoutsByHorizon": dict(legacy_metric.get("markoutsByHorizon") or {}),
             "fillCount": int(fill["fill_count"]),
             "orderCount": order_count,
             "firstFillAtMs": fill["first_fill_at_ms"],
@@ -1037,6 +1211,12 @@ class SessionStore:
                 )
                 for row in db.execute(query, (ticker,) if shard_orders else ()):
                     order_times.setdefault(str(row[0]), []).append(int(row[1]))
+            latest_markouts: Dict[tuple[str, int], sqlite3.Row] = {}
+            if self._table_exists(db, "markouts"):
+                for markout in db.execute(
+                    "SELECT * FROM markouts WHERE ticker=? ORDER BY ts_ms,id", (ticker,)
+                ):
+                    latest_markouts[(str(markout["fill_key"]), int(markout["horizon_ms"]))] = markout
         pnl_by_fill, pnl_warnings = self._fill_pnl_breakdown(all_fills, latest_bids=latest_bids)
         fill_items = []
         for row in fills:
@@ -1055,6 +1235,28 @@ class SessionStore:
             unrealized = self._value_units(count, midpoint)
             placements = order_times.get(str(row["order_id"] or ""), [])
             placed = max((value for value in placements if value <= int(row["ts_ms"])), default=None)
+            fill_markouts: Dict[str, Dict[str, Any]] = {}
+            for horizon_ms in MARKOUT_HORIZONS_MS:
+                markout = latest_markouts.get((str(row["fill_key"]), horizon_ms))
+                if (
+                    markout is None
+                    or markout["future_mid_yes_units"] is None
+                    or price is None
+                    or fee is None
+                ):
+                    continue
+                future_mid_yes = int(markout["future_mid_yes_units"])
+                signed = future_mid_yes - price if side == "yes" else 10_000 - future_mid_yes - price
+                gross = monetary_markout_units(signed, count)
+                fill_markouts[str(horizon_ms)] = {
+                    "horizonMs": horizon_ms,
+                    "capturedAtMs": int(markout["ts_ms"]),
+                    "futureMidYesUnits": future_mid_yes,
+                    "signedMarkoutPriceUnits": signed,
+                    "grossMarkoutUnits": gross,
+                    "feeUnits": fee,
+                    "netMarkoutUnits": gross - fee,
+                }
             fill_items.append({
                 "fillId": str(row["trade_id"] or row["fill_key"]),
                 "orderId": row["order_id"],
@@ -1065,6 +1267,7 @@ class SessionStore:
                 "totalPaidUnits": total_paid,
                 "liquidationValueUnits": liquidation,
                 "unrealizedValueUnits": unrealized,
+                "markoutsByHorizon": fill_markouts,
                 **pnl_by_fill.get(int(row["id"]), {
                     "matchedContractsUnits": 0,
                     "openContractsUnits": count,
@@ -1140,6 +1343,7 @@ class RunMetricsAccumulator:
                 "apiErrors": int(rest.get("errors") or 0), "realizedCents": float(pnl.get("realizedCents") or 0),
                 "unrealizedCents": float(pnl.get("unrealizedCents") or 0), "totalCents": float(pnl.get("totalCents") or 0),
                 "pnlComplete": not pnl.get("sessionPositionUnits") or pnl.get("markPriceUnits") is not None,
+                "markoutsByHorizon": client.get("markouts") or {},
             }
         for component in ("screener", "portfolio"):
             rest = ((status.get(component) or {}).get("apiActivity") or {}).get("rest") or {}
@@ -1147,11 +1351,14 @@ class RunMetricsAccumulator:
             current["total"] = max(current["total"], int(rest.get("total") or 0))
             current["errors"] = max(current["errors"], int(rest.get("errors") or 0))
         for value in self.processes.values():
-            market = per_market.setdefault(str(value["marketId"]), {"orders": 0, "orderPlacementsAttempted": 0, "fills": 0, "totalCents": 0.0, "apiCalls": 0})
+            market = per_market.setdefault(str(value["marketId"]), {"orders": 0, "orderPlacementsAttempted": 0, "fills": 0, "totalCents": 0.0, "apiCalls": 0, "markoutsByHorizon": {}})
             for name in ("orders", "fills", "apiCalls"):
                 market[name] += value[name]
             market["orderPlacementsAttempted"] += value["orderPlacementsAttempted"]
             market["totalCents"] += value["totalCents"]
+            market["markoutsByHorizon"] = combine_markout_maps([
+                market["markoutsByHorizon"], value["markoutsByHorizon"]
+            ])
         values = list(self.processes.values())
         bot_api = sum(item["apiCalls"] for item in values)
         bot_errors = sum(item["apiErrors"] for item in values)
@@ -1167,4 +1374,7 @@ class RunMetricsAccumulator:
             "unrealizedCents": round(sum(item["unrealizedCents"] for item in values), 4),
             "totalCents": round(sum(item["totalCents"] for item in values), 4),
             "pnlComplete": all(item["pnlComplete"] for item in values), "markets": per_market,
+            "markoutsByHorizon": combine_markout_maps(
+                item["markoutsByHorizon"] for item in values
+            ),
         }

@@ -272,6 +272,7 @@ class FleetWorkerProcess(mp.Process):
                             for action, counters in actor.order_activity.items()
                         },
                         pnl=actor.session_pnl_snapshot(),
+                        markouts=actor.session_markout_snapshot(current_ms=now),
                     )
                     for ticker, actor in actors.items()
                 }

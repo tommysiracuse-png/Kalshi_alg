@@ -8,6 +8,8 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
   const status = typeof params.status === "string" ? params.status : "";
   const from = typeof params.from === "string" ? params.from : "";
   const to = typeof params.to === "string" ? params.to : "";
+  const requestedHorizon = typeof params.markout_horizon_ms === "string" ? Number(params.markout_horizon_ms) : 30_000;
+  const markoutHorizonMs = [1_000, 5_000, 30_000, 120_000].includes(requestedHorizon) ? requestedHorizon : 30_000;
   const query = new URLSearchParams();
   if (sessionId) query.set("session_id", sessionId);
   if (status) query.set("status", status);
@@ -17,5 +19,5 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
     apiGet<MetricsResponse>(`/api/v1/metrics?${query}`),
     apiGet<{ items: SavedSession[] }>("/api/v1/sessions?include_archived=true"),
   ]);
-  return <LiveMetrics initial={data} sessions={sessionData.items} query={query.toString()} filters={{ sessionId, status, from, to }} />;
+  return <LiveMetrics initial={data} sessions={sessionData.items} query={query.toString()} markoutHorizonMs={markoutHorizonMs} filters={{ sessionId, status, from, to }} />;
 }

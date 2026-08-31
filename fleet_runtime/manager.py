@@ -485,6 +485,7 @@ class ShardedBotManager:
                         "runningForMs": max(0, now - item.started_at_ms) if item and item.started_at_ms else None,
                     },
                     "pnl": dict(item.pnl) if item else {},
+                    "markouts": dict(item.markouts) if item else {},
                     "fills": {"count": item.fill_count if item else 0, "recent": []},
                     "orderActivity": {
                         "byAction": dict(item.order_activity) if item else {},

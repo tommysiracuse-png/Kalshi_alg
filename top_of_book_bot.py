@@ -63,6 +63,7 @@ from clients.models import (
     TickerUpdate,
 )
 from kalshi_urls import canonical_market_url
+from markout_metrics import MARKOUT_HORIZONS_MS, add_observation, empty_markout_aggregate, finalize_aggregate
 
 
 # ---------------------------------------------------------------------------
@@ -1283,6 +1284,8 @@ class TelemetryStore:
                     ON fill_prob_attempts(bucket_key, ts_ms);
                 CREATE INDEX IF NOT EXISTS idx_markouts_fill_key ON markouts(fill_key);
                 CREATE INDEX IF NOT EXISTS idx_markouts_bucket ON markouts(bucket_key, horizon_ms);
+                CREATE INDEX IF NOT EXISTS idx_markouts_fill_horizon_latest
+                    ON markouts(fill_key, horizon_ms, id DESC);
                 CREATE INDEX IF NOT EXISTS idx_fills_ticker_ts ON fills(ticker, ts_ms);
                 CREATE INDEX IF NOT EXISTS idx_quotes_ticker_ts ON quotes(ticker, ts_ms);
                 CREATE INDEX IF NOT EXISTS idx_order_revisions_order
@@ -2540,6 +2543,8 @@ class MarketActor:
         self.session_no_cost_units = 0
         self.session_fee_units = 0
         self.session_fill_count = 0
+        self.session_fill_timestamps_ms: List[int] = []
+        self.session_markouts_by_horizon: Dict[str, Dict[str, object]] = {}
         self.recent_fill_activity: Deque[Dict[str, object]] = deque(maxlen=20)
         self.order_activity: Dict[str, Dict[str, int]] = {
             action: {"attempts": 0, "successes": 0, "errors": 0}
@@ -2677,6 +2682,29 @@ class MarketActor:
             "markSource": mark_source,
             "markAtMs": mark_at_ms,
         }
+
+    def session_markout_snapshot(self, *, current_ms: Optional[int] = None) -> Dict[str, Dict[str, object]]:
+        current = int(current_ms if current_ms is not None else now_ms())
+        result: Dict[str, Dict[str, object]] = {}
+        horizons_ms = sorted(set(MARKOUT_HORIZONS_MS).union(
+            int(value) * 1000 for value in self.settings.markout_horizons_seconds
+        ))
+        for horizon_ms in horizons_ms:
+            key = str(horizon_ms)
+            aggregate = dict(
+                self.session_markouts_by_horizon.get(key)
+                or empty_markout_aggregate(horizon_ms)
+            )
+            pending = sum(
+                1 for timestamp_ms in self.session_fill_timestamps_ms
+                if timestamp_ms + horizon_ms > current
+            )
+            result[key] = finalize_aggregate(
+                aggregate,
+                total_fill_count=self.session_fill_count,
+                pending_fill_count=pending,
+            )
+        return result
 
     def cancel_owned_resting_quotes_on_startup(self) -> None:
         if not self.settings.cancel_strategy_quotes_on_startup:
@@ -4481,6 +4509,8 @@ class MarketActor:
         fill_key: str,
         side: str,
         fill_price_units: int,
+        fill_size_units: int,
+        fill_fee_units: Optional[int],
         fill_timestamp_ms: int,
         fill_context: MarketContext,
     ) -> None:
@@ -4489,6 +4519,8 @@ class MarketActor:
                 fill_key=fill_key,
                 side=side,
                 fill_price_units=fill_price_units,
+                fill_size_units=fill_size_units,
+                fill_fee_units=fill_fee_units,
                 fill_timestamp_ms=fill_timestamp_ms,
                 fill_context=fill_context,
             )
@@ -4500,11 +4532,16 @@ class MarketActor:
         fill_key: str,
         side: str,
         fill_price_units: int,
+        fill_size_units: int,
+        fill_fee_units: Optional[int],
         fill_timestamp_ms: int,
         fill_context: MarketContext,
     ) -> None:
-        for horizon_seconds in self.settings.markout_horizons_seconds:
-            target_timestamp_ms = fill_timestamp_ms + int(horizon_seconds) * 1000
+        horizons_ms = sorted(set(MARKOUT_HORIZONS_MS).union(
+            int(value) * 1000 for value in self.settings.markout_horizons_seconds
+        ))
+        for horizon_ms in horizons_ms:
+            target_timestamp_ms = fill_timestamp_ms + horizon_ms
             sleep_seconds = max(0.0, (target_timestamp_ms - now_ms()) / 1000.0)
             if sleep_seconds > 0:
                 await asyncio.sleep(sleep_seconds)
@@ -4527,7 +4564,7 @@ class MarketActor:
             bucket_key = self.toxicity_model.record_markout(
                 side=side,
                 context=fill_context,
-                horizon_ms=int(horizon_seconds) * 1000,
+                horizon_ms=horizon_ms,
                 adverse_units=adverse_units,
                 signed_drift_units=signed_drift_units,
             )
@@ -4536,13 +4573,24 @@ class MarketActor:
                 ts_ms=now_ms(),
                 ticker=self.market.ticker,
                 side=side,
-                horizon_ms=int(horizon_seconds) * 1000,
+                horizon_ms=horizon_ms,
                 fill_price_units=fill_price_units,
                 future_mid_yes_units=future_context.mid_yes_units,
                 future_fair_yes_units=future_fair.fair_yes_units,
                 adverse_units=adverse_units,
                 bucket_key=bucket_key,
             )
+            if fill_fee_units is not None:
+                key = str(horizon_ms)
+                aggregate = self.session_markouts_by_horizon.setdefault(
+                    key, empty_markout_aggregate(horizon_ms)
+                )
+                add_observation(
+                    aggregate,
+                    signed_price_units=signed_drift_units,
+                    size_units=fill_size_units,
+                    fee_units=fill_fee_units,
+                )
 
     def handle_fill_update(self, fill: Fill) -> None:
         if fill.market_id != self.settings.market_ticker:
@@ -4600,6 +4648,7 @@ class MarketActor:
         self.last_fill_timestamp_ms = fill_timestamp_ms
 
         self.session_fill_count += 1
+        self.session_fill_timestamps_ms.append(fill_timestamp_ms)
         if side == "yes":
             self.session_yes_quantity_units += count_units
             if price_units is not None:
@@ -4669,6 +4718,8 @@ class MarketActor:
                 fill_key=fill_key,
                 side=side,
                 fill_price_units=price_units,
+                fill_size_units=count_units,
+                fill_fee_units=fee_units,
                 fill_timestamp_ms=fill_timestamp_ms,
                 fill_context=context_before,
             )
@@ -5286,6 +5337,7 @@ class MarketActor:
                     "updatedAtMs": self.last_position_update_at_ms,
                 },
                 "pnl": self.session_pnl_snapshot(),
+                "markouts": self.session_markout_snapshot(),
                 "fills": {
                     "count": self.session_fill_count,
                     "quantityUnits": self.session_yes_quantity_units + self.session_no_quantity_units,

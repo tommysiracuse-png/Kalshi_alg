@@ -16,17 +16,27 @@ export type HistoricalRun = {
   status: string; createdAt: number; startedAt?: number | null; endedAt?: number | null; heartbeatAt?: number | null;
   artifactPath: string; artifactBytes?: number; error?: string | null; metrics: Record<string, unknown>;
 };
+export type MarkoutAggregate = {
+  horizonMs: number; grossMarkoutUnits: number; feeUnits: number; netMarkoutUnits: number;
+  averageNetMarkoutPriceUnits?: number | null; coveredFillCount: number; coveredContractsUnits: number;
+  totalFillCount: number; pendingFillCount: number; unavailableFillCount: number; complete: boolean;
+};
+export type FillMarkout = {
+  horizonMs: number; capturedAtMs: number; futureMidYesUnits: number; signedMarkoutPriceUnits: number;
+  grossMarkoutUnits: number; feeUnits: number; netMarkoutUnits: number;
+};
 export type MetricsSummary = {
   timesRun: number; runtimeMs: number; orders: number; ordersPerMinute: number; fills: number; fillsPerMinute: number;
   apiCalls: number; apiErrors: number; realizedCents: number; unrealizedCents: number; totalCents: number;
   pnlComplete: boolean; outcomes: Record<string, number>; apiByComponent: Record<string, number>;
+  markoutsByHorizon?: Record<string, MarkoutAggregate>;
 };
 export type MetricsResponse = { generatedAt: number; summary: MetricsSummary; runs: HistoricalRun[] };
 export type MetricsHeartbeat = {
   generatedAt: number; source: SourceState;
   activeRun?: {
     id: string; sessionId: string; status: string; heartbeatAt?: number | null;
-    activityRevision: string; summary: Partial<Pick<MetricsSummary, "runtimeMs" | "orders" | "fills" | "apiCalls" | "apiErrors" | "realizedCents" | "unrealizedCents" | "totalCents" | "pnlComplete">>;
+    activityRevision: string; summary: Partial<Pick<MetricsSummary, "runtimeMs" | "orders" | "fills" | "apiCalls" | "apiErrors" | "realizedCents" | "unrealizedCents" | "totalCents" | "pnlComplete" | "markoutsByHorizon">>;
     source: SourceState;
   } | null;
 };
@@ -34,6 +44,7 @@ export type RunMarketMetrics = {
   ticker: string; description: string; marketUrl?: string | null; side: "YES" | "NO" | "BOTH" | "—";
   yesContractsUnits: number; noContractsUnits: number; yesAverageCostPriceUnits?: number | null; noAverageCostPriceUnits?: number | null;
   totalCostUnits?: number | null; realizedPnlUnits?: number | null; realizedReturnBps?: number | null;
+  markoutsByHorizon?: Record<string, MarkoutAggregate>;
   fillCount: number; orderCount: number; firstFillAtMs?: number | null; lastFillAtMs?: number | null;
   coverage: { fillsComplete: boolean; ordersComplete: boolean; fillPricesComplete?: boolean; fillFeesComplete?: boolean; descriptionComplete?: boolean; marketLinkAvailable?: boolean }; warnings: string[];
 };
@@ -46,6 +57,7 @@ export type RunFillActivity = {
   timeToFillMs?: number | null; totalPaidUnits?: number | null;
   liquidationValueUnits?: number | null; unrealizedValueUnits?: number | null; fillPnlUnits?: number | null;
   realizedPnlUnits?: number | null; unrealizedPnlUnits?: number | null;
+  markoutsByHorizon?: Record<string, FillMarkout>;
 };
 export type RunOrderRevision = {
   revisionKey: string; orderId?: string | null; placedAtMs: number; side: "yes" | "no"; contractsUnits: number;

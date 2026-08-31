@@ -3,6 +3,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   HistoricalRun,
+  MarkoutAggregate,
   MetricsHeartbeat,
   MetricsResponse,
   RunFillActivity,
@@ -12,13 +13,14 @@ import type {
   RunOrderRevision,
   SavedSession,
 } from "@/lib/types";
-import { duration, moneyUnits, percentBps, priceUnits, contractUnits } from "./live-portfolio";
-import { Money, StatusBadge, Time } from "./status";
+import { duration, moneyUnits, priceUnits, contractUnits } from "./live-portfolio";
+import { StatusBadge, Time } from "./status";
 
 const LIMITS = [25, 50, 100, 250, 500] as const;
+const MARKOUT_HORIZONS = [1_000, 5_000, 30_000, 120_000] as const;
 const ACTIVE_STATES = new Set(["pending", "starting", "running"]);
 const COLUMN_STORAGE_KEY = "kalshi.metrics.columns.v1";
-const COLUMN_STORAGE_VERSION = 1;
+const COLUMN_STORAGE_VERSION = 2;
 const COLUMN_DRAG_TYPE = "application/x-kalshi-metrics-column";
 
 type TableKind = "markets" | "fills" | "orders";
@@ -42,12 +44,12 @@ type ColumnDragRef = React.MutableRefObject<{ kind: TableKind; id: string } | nu
 type MetricsFilters = {
   activityFrom: string;
   activityTo: string;
-  realizedMin: string;
-  realizedMax: string;
+  markoutMin: string;
+  markoutMax: string;
   costMin: string;
   costMax: string;
-  unrealizedMin: string;
-  unrealizedMax: string;
+  averageMarkoutMin: string;
+  averageMarkoutMax: string;
   contractsMin: string;
   contractsMax: string;
 };
@@ -55,9 +57,9 @@ type MetricsFilters = {
 type ParsedRange = { active: boolean; valid: boolean; minimum?: number; maximum?: number };
 type ParsedFilters = {
   activity: ParsedRange;
-  realized: ParsedRange;
+  markout: ParsedRange;
   cost: ParsedRange;
-  unrealized: ParsedRange;
+  averageMarkout: ParsedRange;
   contracts: ParsedRange;
 };
 
@@ -68,7 +70,7 @@ const COLUMN_OPTIONS: Record<TableKind, Array<{ id: string; label: string; locke
     { id: "contracts", label: "Contracts" },
     { id: "averageCost", label: "Avg Cost" },
     { id: "totalCost", label: "Total Cost" },
-    { id: "realizedValue", label: "Realized Value" },
+    { id: "markout", label: "Net Markout" },
     { id: "activityCount", label: "Amount of Fills / Orders" },
     { id: "firstFill", label: "First Fill Time" },
     { id: "lastFill", label: "Last Fill Time" },
@@ -80,9 +82,10 @@ const COLUMN_OPTIONS: Record<TableKind, Array<{ id: string; label: string; locke
     { id: "contracts", label: "Contracts (Matched and Open)" },
     { id: "timeToFill", label: "Time to Fill" },
     { id: "totalPaid", label: "Total Paid" },
-    { id: "realizedPnl", label: "Realized P&L" },
-    { id: "unrealizedPnl", label: "Unrealized P&L" },
-    { id: "fillPnl", label: "Fill P&L" },
+    { id: "signedMarkout", label: "Signed Markout" },
+    { id: "futureMidpoint", label: "Future Midpoint" },
+    { id: "fee", label: "Fee" },
+    { id: "netMarkout", label: "Net Markout" },
   ],
   orders: [
     { id: "orderTime", label: "Order Time" },
@@ -98,9 +101,9 @@ const COLUMN_OPTIONS: Record<TableKind, Array<{ id: string; label: string; locke
 
 const EMPTY_METRICS_FILTERS: MetricsFilters = {
   activityFrom: "", activityTo: "",
-  realizedMin: "", realizedMax: "",
+  markoutMin: "", markoutMax: "",
   costMin: "", costMax: "",
-  unrealizedMin: "", unrealizedMax: "",
+  averageMarkoutMin: "", averageMarkoutMax: "",
   contractsMin: "", contractsMax: "",
 };
 
@@ -165,9 +168,9 @@ function parseDateRange(from: string, to: string): ParsedRange {
 function parseFilters(filters: MetricsFilters): ParsedFilters {
   return {
     activity: parseDateRange(filters.activityFrom, filters.activityTo),
-    realized: parseNumericRange(filters.realizedMin, filters.realizedMax, 10_000),
+    markout: parseNumericRange(filters.markoutMin, filters.markoutMax, 10_000),
     cost: parseNumericRange(filters.costMin, filters.costMax, 10_000),
-    unrealized: parseNumericRange(filters.unrealizedMin, filters.unrealizedMax, 10_000),
+    averageMarkout: parseNumericRange(filters.averageMarkoutMin, filters.averageMarkoutMax, 100),
     contracts: parseNumericRange(filters.contractsMin, filters.contractsMax, 100),
   };
 }
@@ -178,18 +181,54 @@ function matchesRange(value: number | null | undefined, range: ParsedRange) {
   return (range.minimum == null || value >= range.minimum) && (range.maximum == null || value <= range.maximum);
 }
 
-function marketMatchesFilters(market: RunMarketMetrics, filters: ParsedFilters) {
+function selectedMarkout(values: Record<string, MarkoutAggregate> | undefined, horizonMs: number) {
+  return values?.[String(horizonMs)];
+}
+
+function runMarkout(run: HistoricalRun, horizonMs: number) {
+  const values = run.metrics.markoutsByHorizon;
+  return selectedMarkout(
+    values && typeof values === "object" ? values as Record<string, MarkoutAggregate> : undefined,
+    horizonMs,
+  );
+}
+
+function aggregateRunMarkouts(runs: HistoricalRun[]) {
+  const output: Record<string, MarkoutAggregate> = {};
+  for (const horizonMs of MARKOUT_HORIZONS) {
+    const rows = runs.map(run => runMarkout(run, horizonMs)).filter((row): row is MarkoutAggregate => Boolean(row));
+    const sum = (field: keyof MarkoutAggregate) => rows.reduce((total, row) => total + Number(row[field] ?? 0), 0);
+    const contracts = sum("coveredContractsUnits");
+    const net = sum("netMarkoutUnits");
+    const pending = sum("pendingFillCount");
+    const unavailable = sum("unavailableFillCount");
+    output[String(horizonMs)] = {
+      horizonMs,
+      grossMarkoutUnits: sum("grossMarkoutUnits"), feeUnits: sum("feeUnits"), netMarkoutUnits: net,
+      averageNetMarkoutPriceUnits: contracts ? Math.round(net * 100 / contracts) : null,
+      coveredFillCount: sum("coveredFillCount"), coveredContractsUnits: contracts,
+      totalFillCount: sum("totalFillCount"), pendingFillCount: pending,
+      unavailableFillCount: unavailable, complete: pending === 0 && unavailable === 0,
+    };
+  }
+  return output;
+}
+
+function marketMatchesFilters(market: RunMarketMetrics, filters: ParsedFilters, horizonMs: number) {
+  const markout = selectedMarkout(market.markoutsByHorizon, horizonMs);
   return matchesRange(market.lastFillAtMs, filters.activity)
-    && matchesRange(market.realizedPnlUnits, filters.realized)
+    && matchesRange(markout?.netMarkoutUnits, filters.markout)
     && matchesRange(market.totalCostUnits, filters.cost)
+    && matchesRange(markout?.averageNetMarkoutPriceUnits, filters.averageMarkout)
     && matchesRange(market.yesContractsUnits + market.noContractsUnits, filters.contracts);
 }
 
-function fillMatchesFilters(fill: RunFillActivity, filters: ParsedFilters) {
+function fillMatchesFilters(fill: RunFillActivity, filters: ParsedFilters, horizonMs: number) {
+  const markout = fill.markoutsByHorizon?.[String(horizonMs)];
   return matchesRange(fill.filledAtMs, filters.activity)
-    && matchesRange(fill.realizedPnlUnits, filters.realized)
+    && matchesRange(markout?.netMarkoutUnits, filters.markout)
     && matchesRange(fill.totalPaidUnits, filters.cost)
-    && matchesRange(fill.unrealizedPnlUnits, filters.unrealized)
+    && matchesRange(markout?.signedMarkoutPriceUnits, filters.averageMarkout)
     && matchesRange(fill.contractsUnits, filters.contracts);
 }
 
@@ -342,9 +381,9 @@ function MetricsFilterPanel({ value, enabled, onChange, onClear }: {
         <label><span>From</span><input aria-label="Last activity from" type="datetime-local" value={value.activityFrom} onChange={event => update("activityFrom", event.target.value)} /></label>
         <label><span>To</span><input aria-label="Last activity to" type="datetime-local" value={value.activityTo} onChange={event => update("activityTo", event.target.value)} /></label>
       </div>
-      <NumericFilterGroup label="Total Realized P&L" minimum={value.realizedMin} maximum={value.realizedMax} valid={parsed.realized.valid} onMinimum={next => update("realizedMin", next)} onMaximum={next => update("realizedMax", next)} />
+      <NumericFilterGroup label="Net Markout" minimum={value.markoutMin} maximum={value.markoutMax} valid={parsed.markout.valid} onMinimum={next => update("markoutMin", next)} onMaximum={next => update("markoutMax", next)} />
       <NumericFilterGroup label="Total Cost" minimum={value.costMin} maximum={value.costMax} valid={parsed.cost.valid} onMinimum={next => update("costMin", next)} onMaximum={next => update("costMax", next)} />
-      <NumericFilterGroup label="Total Unrealized P&L" minimum={value.unrealizedMin} maximum={value.unrealizedMax} valid={parsed.unrealized.valid} onMinimum={next => update("unrealizedMin", next)} onMaximum={next => update("unrealizedMax", next)} />
+      <NumericFilterGroup label="Average Markout" minimum={value.averageMarkoutMin} maximum={value.averageMarkoutMax} valid={parsed.averageMarkout.valid} onMinimum={next => update("averageMarkoutMin", next)} onMaximum={next => update("averageMarkoutMax", next)} units="cents" />
       <NumericFilterGroup label="Total Contracts" minimum={value.contractsMin} maximum={value.contractsMax} valid={parsed.contracts.valid} onMinimum={next => update("contractsMin", next)} onMaximum={next => update("contractsMax", next)} units="contracts" />
       <button className="button metrics-filter-clear" type="button" onClick={onClear}>Clear filters</button>
     </fieldset>
@@ -359,13 +398,13 @@ function NumericFilterGroup({ label, minimum, maximum, valid, onMinimum, onMaxim
   valid: boolean;
   onMinimum: (value: string) => void;
   onMaximum: (value: string) => void;
-  units?: "dollars" | "contracts";
+  units?: "dollars" | "contracts" | "cents";
 }) {
   const step = units === "dollars" ? "0.01" : "0.01";
   return <div className={`metrics-filter-group${valid ? "" : " invalid"}`}>
     <strong>{label}</strong>
-    <label><span>Min {units === "dollars" ? "$" : ""}</span><input aria-label={`${label} minimum`} type="number" step={step} value={minimum} onChange={event => onMinimum(event.target.value)} /></label>
-    <label><span>Max {units === "dollars" ? "$" : ""}</span><input aria-label={`${label} maximum`} type="number" step={step} value={maximum} onChange={event => onMaximum(event.target.value)} /></label>
+    <label><span>Min {units === "dollars" ? "$" : units === "cents" ? "¢" : ""}</span><input aria-label={`${label} minimum`} type="number" step={step} value={minimum} onChange={event => onMinimum(event.target.value)} /></label>
+    <label><span>Max {units === "dollars" ? "$" : units === "cents" ? "¢" : ""}</span><input aria-label={`${label} maximum`} type="number" step={step} value={maximum} onChange={event => onMaximum(event.target.value)} /></label>
   </div>;
 }
 
@@ -435,7 +474,7 @@ function Limits({ fillLimit, orderLimit, onChange }: { fillLimit: number; orderL
   </div>;
 }
 
-export function LiveMetrics({ initial, sessions, query, filters = { sessionId: "", status: "", from: "", to: "" } }: { initial: MetricsResponse; sessions: SavedSession[]; query: string; filters?: { sessionId: string; status: string; from: string; to: string } }) {
+export function LiveMetrics({ initial, sessions, query, markoutHorizonMs = 30_000, filters = { sessionId: "", status: "", from: "", to: "" } }: { initial: MetricsResponse; sessions: SavedSession[]; query: string; markoutHorizonMs?: number; filters?: { sessionId: string; status: string; from: string; to: string } }) {
   const [data, setData] = useState(initial);
   const [connected, setConnected] = useState(false);
   const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set());
@@ -448,6 +487,7 @@ export function LiveMetrics({ initial, sessions, query, filters = { sessionId: "
   const [columnPreferences, setColumnPreferences] = useState<ColumnPreferences>(defaultColumnPreferences);
   const [columnsHydrated, setColumnsHydrated] = useState(false);
   const [metricFilters, setMetricFilters] = useState<MetricsFilters>(EMPTY_METRICS_FILTERS);
+  const [selectedHorizonMs, setSelectedHorizonMs] = useState(markoutHorizonMs);
   const [marketSort, setMarketSort] = useState<SortState>({ id: "lastFill", direction: "desc" });
   const [fillSort, setFillSort] = useState<SortState>({ id: "fillTime", direction: "desc" });
   const [orderSort, setOrderSort] = useState<SortState>({ id: "orderTime", direction: "desc" });
@@ -462,6 +502,13 @@ export function LiveMetrics({ initial, sessions, query, filters = { sessionId: "
   useEffect(() => { expandedRunsRef.current = expandedRuns; }, [expandedRuns]);
   useEffect(() => { expandedMarketsRef.current = expandedMarkets; }, [expandedMarkets]);
   useEffect(() => { dataRef.current = data; }, [data]);
+  const changeHorizon = (value: number) => {
+    const horizon = MARKOUT_HORIZONS.includes(value as typeof MARKOUT_HORIZONS[number]) ? value : 30_000;
+    setSelectedHorizonMs(horizon);
+    const params = new URLSearchParams(window.location.search);
+    params.set("markout_horizon_ms", String(horizon));
+    window.history.replaceState(null, "", `${window.location.pathname}?${params.toString()}`);
+  };
   useEffect(() => {
     const storedFill = Number(window.localStorage.getItem("kalshi.metrics.fillLimit"));
     const storedOrder = Number(window.localStorage.getItem("kalshi.metrics.orderLimit"));
@@ -543,6 +590,7 @@ export function LiveMetrics({ initial, sessions, query, filters = { sessionId: "
         const minutes = summary.runtimeMs / 60_000;
         summary.ordersPerMinute = minutes ? summary.orders / minutes : 0;
         summary.fillsPerMinute = minutes ? summary.fills / minutes : 0;
+        summary.markoutsByHorizon = aggregateRunMarkouts(runs);
         summary.pnlComplete = runs.every(run => run.metrics.pnlComplete !== false);
         if (priorRun.status !== active.status) {
           summary.outcomes = { ...summary.outcomes };
@@ -654,11 +702,13 @@ export function LiveMetrics({ initial, sessions, query, filters = { sessionId: "
   };
 
   const summary = data.summary;
+  const summaryMarkout = selectedMarkout(summary.markoutsByHorizon, selectedHorizonMs);
+  const horizonLabel = `${selectedHorizonMs / 1000}s`;
   return <>
-    <header className="page-header"><div><span className="eyebrow">SESSION PERFORMANCE</span><h1>Metrics</h1><p>Live and completed run telemetry from local storage. This view makes no exchange requests.</p></div><div className="metrics-header-actions"><div className="header-status"><strong>{summary.timesRun} runs</strong><span className={connected ? "positive" : "negative"}>{connected ? "Live" : "Reconnecting"}</span></div><ColumnChooser preferences={columnPreferences} onToggle={toggleColumn} onMove={moveColumn} /></div></header>
-    <form className="filters"><label>Session<select name="session_id" defaultValue={filters.sessionId}><option value="">All sessions</option>{sessions.map(item => <option key={item.id} value={item.id}>{item.name}{item.archivedAt ? " (archived)" : ""}</option>)}</select></label><label>Status<select name="status" defaultValue={filters.status}><option value="">All outcomes</option>{["pending", "starting", "running", "stopped", "failed", "shutdown_failed", "interrupted"].map(item => <option key={item}>{item}</option>)}</select></label><label>From<input type="date" name="from" defaultValue={filters.from} /></label><label>To<input type="date" name="to" defaultValue={filters.to} /></label><button className="button">Apply</button></form>
-    {!summary.pnlComplete && <section className="warning-panel"><strong>P&amp;L is incomplete</strong><p>At least one open position had no durable end-of-run mark; unknown value remains explicitly unavailable.</p></section>}
-    <section className="metrics order-metrics"><article><span>Strategy P&amp;L</span><strong><Money cents={summary.totalCents} signed /></strong><p>{summary.pnlComplete ? "Complete marks" : "Incomplete marks"}</p></article><article><span>Orders / min</span><strong>{summary.ordersPerMinute.toFixed(2)}</strong><p>{summary.orders} attempts</p></article><article><span>Fills / min</span><strong>{summary.fillsPerMinute.toFixed(2)}</strong><p>{summary.fills} fills</p></article><article><span>Runtime</span><strong className="small-value">{duration(summary.runtimeMs)}</strong><p>{summary.timesRun} launches</p></article><article><span>API calls</span><strong>{summary.apiCalls}</strong><p>{summary.apiErrors} errors</p></article></section>
+    <header className="page-header"><div><span className="eyebrow">POST-TRADE EXECUTION QUALITY</span><h1>Metrics</h1><p>Size-weighted venue-midpoint markouts from local telemetry. This view makes no exchange requests.</p></div><div className="metrics-header-actions"><label>Markout horizon<select aria-label="Markout horizon" value={selectedHorizonMs} onChange={event => changeHorizon(Number(event.target.value))}>{MARKOUT_HORIZONS.map(value => <option key={value} value={value}>{value / 1000}s</option>)}</select></label><div className="header-status"><strong>{summary.timesRun} runs</strong><span className={connected ? "positive" : "negative"}>{connected ? "Live" : "Reconnecting"}</span></div><ColumnChooser preferences={columnPreferences} onToggle={toggleColumn} onMove={moveColumn} /></div></header>
+    <form className="filters"><input type="hidden" name="markout_horizon_ms" value={selectedHorizonMs} /><label>Session<select name="session_id" defaultValue={filters.sessionId}><option value="">All sessions</option>{sessions.map(item => <option key={item.id} value={item.id}>{item.name}{item.archivedAt ? " (archived)" : ""}</option>)}</select></label><label>Status<select name="status" defaultValue={filters.status}><option value="">All outcomes</option>{["pending", "starting", "running", "stopped", "failed", "shutdown_failed", "interrupted"].map(item => <option key={item}>{item}</option>)}</select></label><label>From<input type="date" name="from" defaultValue={filters.from} /></label><label>To<input type="date" name="to" defaultValue={filters.to} /></label><button className="button">Apply</button></form>
+    {summaryMarkout && !summaryMarkout.complete && <section className="warning-panel"><strong>Markout coverage is incomplete</strong><p>{summaryMarkout.unavailableFillCount} unavailable and {summaryMarkout.pendingFillCount} pending fills are excluded from the {horizonLabel} result.</p></section>}
+    <section className="metrics order-metrics"><article><span>{horizonLabel} Net Markout</span><strong className={(summaryMarkout?.netMarkoutUnits ?? 0) < 0 ? "negative" : (summaryMarkout?.netMarkoutUnits ?? 0) > 0 ? "positive" : ""}>{moneyUnits(summaryMarkout?.netMarkoutUnits, true)}</strong><p>{priceUnits(summaryMarkout?.averageNetMarkoutPriceUnits)} per covered contract · {summaryMarkout?.coveredFillCount ?? 0}/{summaryMarkout?.totalFillCount ?? 0} fills</p></article><article><span>Orders / min</span><strong>{summary.ordersPerMinute.toFixed(2)}</strong><p>{summary.orders} attempts</p></article><article><span>Fills / min</span><strong>{summary.fillsPerMinute.toFixed(2)}</strong><p>{summary.fills} fills</p></article><article><span>Runtime</span><strong className="small-value">{duration(summary.runtimeMs)}</strong><p>{summary.timesRun} launches</p></article><article><span>API calls</span><strong>{summary.apiCalls}</strong><p>{summary.apiErrors} errors</p></article></section>
     <MetricsFilterPanel value={metricFilters} enabled={Boolean(filters.sessionId)} onChange={setMetricFilters} onClear={() => setMetricFilters(EMPTY_METRICS_FILTERS)} />
     <section className="panel"><div className="panel-heading"><div><span className="eyebrow">EXCHANGE REST</span><h2>API calls by component</h2></div></div><div className="source-list">{Object.entries(summary.apiByComponent).map(([name, count]) => <div key={name}><strong>{name}</strong><span>{count}</span></div>)}</div></section>
     <div className="metrics-table-toolbar"><div><span className="eyebrow">SESSIONS → RUNS → MARKETS</span><h2>Trading activity</h2></div><Limits fillLimit={fillLimit} orderLimit={orderLimit} onChange={changeLimit} /></div>
@@ -668,15 +718,20 @@ export function LiveMetrics({ initial, sessions, query, filters = { sessionId: "
         const runtime = runs.reduce((total, run) => total + metric(run, "runtimeMs"), 0);
         const orders = runs.reduce((total, run) => total + metric(run, "orders"), 0);
         const fills = runs.reduce((total, run) => total + metric(run, "fills"), 0);
-        const pnl = runs.reduce((total, run) => total + metric(run, "totalCents"), 0);
+        const sessionMarkouts = runs
+          .map((run) => runMarkout(run, selectedHorizonMs))
+          .filter((aggregate): aggregate is MarkoutAggregate => aggregate !== undefined);
+        const sessionMarkout = sessionMarkouts.length
+          ? sessionMarkouts.reduce((total, aggregate) => total + aggregate.netMarkoutUnits, 0)
+          : undefined;
         return <section className="metrics-session" key={session.id}>
-          <button className="metrics-session-row" type="button" aria-expanded={open} onClick={() => toggleSet(setExpandedSessions, session.id)}><span className="tree-chevron">{open ? "−" : "+"}</span><span><strong>{session.name}</strong><small>{runs.length} run{runs.length === 1 ? "" : "s"}</small></span><span><small>Runtime</small>{duration(runtime)}</span><span><small>Orders / fills</small>{orders} / {fills}</span><span><small>P&amp;L</small><Money cents={pnl} signed /></span></button>
-          {open && <div className="metrics-runs table-wrap"><table><thead><tr><th>Run</th><th>Status</th><th>Started / runtime</th><th>Orders / fills</th><th>P&amp;L</th><th>API</th><th>Artifacts</th></tr></thead><tbody>
+          <button className="metrics-session-row" type="button" aria-expanded={open} onClick={() => toggleSet(setExpandedSessions, session.id)}><span className="tree-chevron">{open ? "−" : "+"}</span><span><strong>{session.name}</strong><small>{runs.length} run{runs.length === 1 ? "" : "s"}</small></span><span><small>Runtime</small>{duration(runtime)}</span><span><small>Orders / fills</small>{orders} / {fills}</span><span><small>{horizonLabel} net markout</small>{moneyUnits(sessionMarkout, true)}</span></button>
+          {open && <div className="metrics-runs table-wrap"><table><thead><tr><th>Run</th><th>Status</th><th>Started / runtime</th><th>Orders / fills</th><th>{horizonLabel} net markout</th><th>API</th><th>Artifacts</th></tr></thead><tbody>
             {runs.map(run => {
               const runOpen = expandedRuns.has(run.id);
               const state = runMarkets[run.id];
-              return <Fragment key={run.id}><tr className="expandable-position" onClick={() => { toggleSet(setExpandedRuns, run.id); if (!runOpen && !state?.data) void loadRunMarkets(run.id); }}><td><div className="market-cell"><button type="button" className="row-toggle" aria-label={`${runOpen ? "Collapse" : "Expand"} run ${run.id}`} aria-expanded={runOpen}>{runOpen ? "−" : "+"}</button><span className="mono">{run.id.slice(0, 8)}{ACTIVE_STATES.has(run.status) && <small className="session-tag">Live run</small>}</span></div></td><td><StatusBadge value={run.status} /></td><td><Time value={run.startedAt ?? run.createdAt} /><small>{duration(metric(run, "runtimeMs"))}</small></td><td>{metric(run, "orders")} / {metric(run, "fills")}</td><td><Money cents={metric(run, "totalCents")} signed /></td><td>{metric(run, "apiCalls")}<small>{metric(run, "apiErrors")} errors</small></td><td>{bytes(run.artifactBytes)}</td></tr>
-                {runOpen && <tr className="metrics-nested-row"><td colSpan={7}><RunMarkets run={run} state={state} expandedMarkets={expandedMarkets} activity={marketActivity} columnPreferences={columnPreferences} filters={parsedMetricFilters} marketSort={marketSort} fillSort={fillSort} orderSort={orderSort} columnDragRef={columnDragRef} onMarketSort={column => selectSort(setMarketSort, column)} onFillSort={column => selectSort(setFillSort, column)} onOrderSort={column => selectSort(setOrderSort, column)} onColumnReorder={reorderColumn} onToggle={(ticker, isOpen) => { const key = `${run.id}:${ticker}`; toggleSet(setExpandedMarkets, key); if (!isOpen && !marketActivity[key]?.data) void loadActivity(run.id, ticker); }} /></td></tr>}
+              return <Fragment key={run.id}><tr className="expandable-position" onClick={() => { toggleSet(setExpandedRuns, run.id); if (!runOpen && !state?.data) void loadRunMarkets(run.id); }}><td><div className="market-cell"><button type="button" className="row-toggle" aria-label={`${runOpen ? "Collapse" : "Expand"} run ${run.id}`} aria-expanded={runOpen}>{runOpen ? "−" : "+"}</button><span className="mono">{run.id.slice(0, 8)}{ACTIVE_STATES.has(run.status) && <small className="session-tag">Live run</small>}</span></div></td><td><StatusBadge value={run.status} /></td><td><Time value={run.startedAt ?? run.createdAt} /><small>{duration(metric(run, "runtimeMs"))}</small></td><td>{metric(run, "orders")} / {metric(run, "fills")}</td><td>{moneyUnits(runMarkout(run, selectedHorizonMs)?.netMarkoutUnits, true)}</td><td>{metric(run, "apiCalls")}<small>{metric(run, "apiErrors")} errors</small></td><td>{bytes(run.artifactBytes)}</td></tr>
+                {runOpen && <tr className="metrics-nested-row"><td colSpan={7}><RunMarkets run={run} state={state} horizonMs={selectedHorizonMs} expandedMarkets={expandedMarkets} activity={marketActivity} columnPreferences={columnPreferences} filters={parsedMetricFilters} marketSort={marketSort} fillSort={fillSort} orderSort={orderSort} columnDragRef={columnDragRef} onMarketSort={column => selectSort(setMarketSort, column)} onFillSort={column => selectSort(setFillSort, column)} onOrderSort={column => selectSort(setOrderSort, column)} onColumnReorder={reorderColumn} onToggle={(ticker, isOpen) => { const key = `${run.id}:${ticker}`; toggleSet(setExpandedMarkets, key); if (!isOpen && !marketActivity[key]?.data) void loadActivity(run.id, ticker); }} /></td></tr>}
               </Fragment>;
             })}
           </tbody></table></div>}
@@ -687,9 +742,10 @@ export function LiveMetrics({ initial, sessions, query, filters = { sessionId: "
   </>;
 }
 
-function RunMarkets({ run, state, expandedMarkets, activity, columnPreferences, filters, marketSort, fillSort, orderSort, columnDragRef, onMarketSort, onFillSort, onOrderSort, onColumnReorder, onToggle }: {
+function RunMarkets({ run, state, horizonMs, expandedMarkets, activity, columnPreferences, filters, marketSort, fillSort, orderSort, columnDragRef, onMarketSort, onFillSort, onOrderSort, onColumnReorder, onToggle }: {
   run: HistoricalRun;
   state?: LoadState<RunMarketsResponse>;
+  horizonMs: number;
   expandedMarkets: Set<string>;
   activity: Record<string, LoadState<RunMarketActivityResponse>>;
   columnPreferences: ColumnPreferences;
@@ -717,13 +773,13 @@ function RunMarkets({ run, state, expandedMarkets, activity, columnPreferences, 
     { id: "contracts", header: "Contracts", initialDirection: "desc", sortValue: market => market.yesContractsUnits + market.noContractsUnits, render: market => <><span>YES {contractUnits(market.yesContractsUnits)}</span><small>NO {contractUnits(market.noContractsUnits)}</small></> },
     { id: "averageCost", header: "Avg cost", initialDirection: "desc", sortValue: marketAverageCost, render: market => <><span>YES {priceUnits(market.yesAverageCostPriceUnits)}</span><small>NO {priceUnits(market.noAverageCostPriceUnits)}</small></> },
     { id: "totalCost", header: "Total cost", initialDirection: "desc", sortValue: market => market.totalCostUnits, render: market => moneyUnits(market.totalCostUnits) },
-    { id: "realizedValue", header: "Realized value", initialDirection: "desc", sortValue: market => market.realizedPnlUnits, render: market => <span className={market.realizedPnlUnits == null ? "muted" : market.realizedPnlUnits < 0 ? "negative" : market.realizedPnlUnits > 0 ? "positive" : ""}>{moneyUnits(market.realizedPnlUnits, true)}<small>{percentBps(market.realizedReturnBps)}</small></span> },
+    { id: "markout", header: `${horizonMs / 1000}s net markout`, initialDirection: "desc", sortValue: market => selectedMarkout(market.markoutsByHorizon, horizonMs)?.netMarkoutUnits, render: market => { const markout = selectedMarkout(market.markoutsByHorizon, horizonMs); return <span className={markout == null ? "muted" : markout.netMarkoutUnits < 0 ? "negative" : markout.netMarkoutUnits > 0 ? "positive" : ""}>{moneyUnits(markout?.netMarkoutUnits, true)}<small>{priceUnits(markout?.averageNetMarkoutPriceUnits)} / contract · {markout?.coveredFillCount ?? 0}/{markout?.totalFillCount ?? market.fillCount} fills</small></span>; } },
     { id: "activityCount", header: "Fills / orders", initialDirection: "desc", sortValue: market => market.fillCount + market.orderCount, render: market => `${market.fillCount} / ${market.orderCount}` },
     { id: "firstFill", header: "First fill", initialDirection: "desc", sortValue: market => market.firstFillAtMs, render: market => <Time value={market.firstFillAtMs} /> },
     { id: "lastFill", header: "Last fill", initialDirection: "desc", sortValue: market => market.lastFillAtMs, render: market => <Time value={market.lastFillAtMs} /> },
   ];
   const visibleColumns = enabledColumns(marketColumns, columnPreferences.markets);
-  const visibleMarkets = sortRows((state?.data?.items ?? []).filter(market => marketMatchesFilters(market, filters)), marketColumns, marketSort, market => market.ticker);
+  const visibleMarkets = sortRows((state?.data?.items ?? []).filter(market => marketMatchesFilters(market, filters, horizonMs)), marketColumns, marketSort, market => market.ticker);
   if (state?.loading && !state.data) return <p className="empty">Loading markets…</p>;
   if (state?.error && !state.data) return <p className="error">{state.error}</p>;
   if (!state?.data?.items.length) return <p className="empty">No markets with recorded order or fill activity.</p>;
@@ -737,15 +793,16 @@ function RunMarkets({ run, state, expandedMarkets, activity, columnPreferences, 
         const open = expandedMarkets.has(key);
         return <Fragment key={market.ticker}>
           <tr className="expandable-position" onClick={() => onToggle(market.ticker, open)}>{visibleColumns.map(column => <td key={column.id}>{column.render(market)}</td>)}</tr>
-          {open && <tr className="metrics-nested-row"><td colSpan={visibleColumns.length}><MarketActivity state={activity[key]} columnPreferences={columnPreferences} filters={filters} fillSort={fillSort} orderSort={orderSort} columnDragRef={columnDragRef} onFillSort={onFillSort} onOrderSort={onOrderSort} onColumnReorder={onColumnReorder} /></td></tr>}
+          {open && <tr className="metrics-nested-row"><td colSpan={visibleColumns.length}><MarketActivity state={activity[key]} horizonMs={horizonMs} columnPreferences={columnPreferences} filters={filters} fillSort={fillSort} orderSort={orderSort} columnDragRef={columnDragRef} onFillSort={onFillSort} onOrderSort={onOrderSort} onColumnReorder={onColumnReorder} /></td></tr>}
         </Fragment>;
       })}
     </tbody></table>{visibleMarkets.length === 0 && <p className="empty">No markets match the current filters.</p>}</div>
   </div>;
 }
 
-function MarketActivity({ state, columnPreferences, filters, fillSort, orderSort, columnDragRef, onFillSort, onOrderSort, onColumnReorder }: {
+function MarketActivity({ state, horizonMs, columnPreferences, filters, fillSort, orderSort, columnDragRef, onFillSort, onOrderSort, onColumnReorder }: {
   state?: LoadState<RunMarketActivityResponse>;
+  horizonMs: number;
   columnPreferences: ColumnPreferences;
   filters: ParsedFilters;
   fillSort: SortState;
@@ -766,9 +823,10 @@ function MarketActivity({ state, columnPreferences, filters, fillSort, orderSort
     { id: "contracts", header: "Contracts", initialDirection: "desc", sortValue: fill => fill.contractsUnits, render: fill => <>{contractUnits(fill.contractsUnits)}<small>{contractUnits(fill.matchedContractsUnits)} matched · {contractUnits(fill.openContractsUnits)} open</small></> },
     { id: "timeToFill", header: "Time to fill", initialDirection: "desc", sortValue: fill => fill.timeToFillMs, render: fill => duration(fill.timeToFillMs) },
     { id: "totalPaid", header: "Total paid", initialDirection: "desc", sortValue: fill => fill.totalPaidUnits, render: fill => moneyUnits(fill.totalPaidUnits) },
-    { id: "realizedPnl", header: "Realized P&L", initialDirection: "desc", sortValue: fill => fill.realizedPnlUnits, render: fill => <span className={fill.realizedPnlUnits == null ? "muted" : fill.realizedPnlUnits < 0 ? "negative" : fill.realizedPnlUnits > 0 ? "positive" : ""}>{moneyUnits(fill.realizedPnlUnits, true)}</span> },
-    { id: "unrealizedPnl", header: "Unrealized P&L", initialDirection: "desc", sortValue: fill => fill.unrealizedPnlUnits, render: fill => <span className={fill.unrealizedPnlUnits == null ? "muted" : fill.unrealizedPnlUnits < 0 ? "negative" : fill.unrealizedPnlUnits > 0 ? "positive" : ""}>{moneyUnits(fill.unrealizedPnlUnits, true)}</span> },
-    { id: "fillPnl", header: "Fill P&L", initialDirection: "desc", sortValue: fill => fill.fillPnlUnits, render: fill => <span className={fill.fillPnlUnits == null ? "muted" : fill.fillPnlUnits < 0 ? "negative" : fill.fillPnlUnits > 0 ? "positive" : ""}>{moneyUnits(fill.fillPnlUnits, true)}</span> },
+    { id: "signedMarkout", header: "Signed markout", initialDirection: "desc", sortValue: fill => fill.markoutsByHorizon?.[String(horizonMs)]?.signedMarkoutPriceUnits, render: fill => priceUnits(fill.markoutsByHorizon?.[String(horizonMs)]?.signedMarkoutPriceUnits) },
+    { id: "futureMidpoint", header: "Future midpoint", initialDirection: "desc", sortValue: fill => fill.markoutsByHorizon?.[String(horizonMs)]?.futureMidYesUnits, render: fill => priceUnits(fill.markoutsByHorizon?.[String(horizonMs)]?.futureMidYesUnits) },
+    { id: "fee", header: "Fee", initialDirection: "desc", sortValue: fill => fill.markoutsByHorizon?.[String(horizonMs)]?.feeUnits, render: fill => moneyUnits(fill.markoutsByHorizon?.[String(horizonMs)]?.feeUnits) },
+    { id: "netMarkout", header: `${horizonMs / 1000}s net markout`, initialDirection: "desc", sortValue: fill => fill.markoutsByHorizon?.[String(horizonMs)]?.netMarkoutUnits, render: fill => { const value = fill.markoutsByHorizon?.[String(horizonMs)]?.netMarkoutUnits; return <span className={value == null ? "muted" : value < 0 ? "negative" : value > 0 ? "positive" : ""}>{moneyUnits(value, true)}</span>; } },
   ];
   const orderColumns: ColumnDefinition<RunOrderRevision>[] = [
     { id: "orderTime", header: "Order time", initialDirection: "desc", sortValue: order => order.placedAtMs, render: order => <Time value={order.placedAtMs} /> },
@@ -782,7 +840,7 @@ function MarketActivity({ state, columnPreferences, filters, fillSort, orderSort
   ];
   const visibleFillColumns = enabledColumns(fillColumns, columnPreferences.fills);
   const visibleOrderColumns = enabledColumns(orderColumns, columnPreferences.orders);
-  const visibleFills = sortRows(fills.items.filter(fill => fillMatchesFilters(fill, filters)), fillColumns, fillSort, fill => `${fill.filledAtMs}:${fill.fillId}`);
+  const visibleFills = sortRows(fills.items.filter(fill => fillMatchesFilters(fill, filters, horizonMs)), fillColumns, fillSort, fill => `${fill.filledAtMs}:${fill.fillId}`);
   const visibleOrders = sortRows(orders.items.filter(order => orderMatchesFilters(order, filters)), orderColumns, orderSort, order => `${order.placedAtMs}:${order.revisionKey}`);
   const fillCount = visibleFills.length !== fills.items.length
     ? `Showing ${visibleFills.length} of ${fills.items.length} loaded${fills.truncated ? ` · ${fills.totalCount} total` : ""}`

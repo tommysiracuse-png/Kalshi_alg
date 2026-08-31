@@ -3,6 +3,17 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MetricsResponse, RunMarketActivityResponse, RunMarketsResponse, SavedSession } from "@/lib/types";
 import { LiveMetrics } from "./live-metrics";
 
+const aggregate = (netMarkoutUnits: number, fills = 1, averageNetMarkoutPriceUnits = 100) => ({
+  horizonMs: 30_000, grossMarkoutUnits: netMarkoutUnits + 10, feeUnits: 10, netMarkoutUnits,
+  averageNetMarkoutPriceUnits, coveredFillCount: fills, coveredContractsUnits: fills * 100,
+  totalFillCount: fills, pendingFillCount: 0, unavailableFillCount: 0, complete: true,
+});
+
+const fillMarkout = (netMarkoutUnits: number, signedMarkoutPriceUnits: number) => ({
+  horizonMs: 30_000, capturedAtMs: 2_030_000, futureMidYesUnits: 5_100,
+  signedMarkoutPriceUnits, grossMarkoutUnits: netMarkoutUnits + 10, feeUnits: 10, netMarkoutUnits,
+});
+
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
@@ -32,12 +43,13 @@ describe("LiveMetrics", () => {
         ticker: "TEST-1", description: "Test market", marketUrl: "https://kalshi.com/markets/test/test-market/test-event", side: "BOTH",
         yesContractsUnits: 100, noContractsUnits: 100, yesAverageCostPriceUnits: 4_000, noAverageCostPriceUnits: 5_000,
         totalCostUnits: 9_100, realizedPnlUnits: 900, realizedReturnBps: 989, fillCount: 2, orderCount: 2,
+        markoutsByHorizon: { "30000": aggregate(890, 2, 445) },
         firstFillAtMs: 1_999_000, lastFillAtMs: 2_000_000, coverage: { fillsComplete: true, ordersComplete: true }, warnings: [],
       }],
     };
     const activity: RunMarketActivityResponse = {
       generatedAt: 2_000_000, runId: "run-12345678", market: markets.items[0], source, warnings: [],
-      fills: { totalCount: 125, truncated: true, items: [{ fillId: "fill-1", orderId: "order-1", filledAtMs: 2_000_000, side: "yes", contractsUnits: 100, matchedContractsUnits: 50, openContractsUnits: 50, timeToFillMs: 1_000, totalPaidUnits: 4_100, liquidationValueUnits: 5_000, unrealizedValueUnits: 5_100, realizedPnlUnits: 600, unrealizedPnlUnits: 300, fillPnlUnits: 900 }] },
+      fills: { totalCount: 125, truncated: true, items: [{ fillId: "fill-1", orderId: "order-1", filledAtMs: 2_000_000, side: "yes", contractsUnits: 100, matchedContractsUnits: 50, openContractsUnits: 50, timeToFillMs: 1_000, totalPaidUnits: 4_100, liquidationValueUnits: 5_000, unrealizedValueUnits: 5_100, realizedPnlUnits: 600, unrealizedPnlUnits: 300, fillPnlUnits: 900, markoutsByHorizon: { "30000": fillMarkout(290, 300) } }] },
       orders: { totalCount: 70, truncated: true, items: [{ revisionKey: "revision-1", orderId: "order-1", placedAtMs: 1_999_000, side: "yes", contractsUnits: 100, timeOnBookMs: 1_000, bookBidPriceUnits: 4_000, bookAskPriceUnits: 4_200, bookMidPriceUnits: 4_100, orderPriceUnits: 4_000, endedState: "Filled" }] },
     };
     const request = vi.spyOn(globalThis, "fetch").mockImplementation(async input => {
@@ -48,11 +60,16 @@ describe("LiveMetrics", () => {
     const sessions: SavedSession[] = [{ id: "session-1", name: "Default", description: "", configuration: {} as SavedSession["configuration"], version: 1, createdAt: 1, updatedAt: 1, selected: true, runCount: 1 }];
     const initial: MetricsResponse = {
       generatedAt: 2_000_000,
-      summary: { timesRun: 1, runtimeMs: 60_000, orders: 2, ordersPerMinute: 2, fills: 2, fillsPerMinute: 2, apiCalls: 4, apiErrors: 0, realizedCents: 1, unrealizedCents: 0, totalCents: 1, pnlComplete: true, outcomes: { running: 1 }, apiByComponent: { bots: 4 } },
-      runs: [{ id: "run-12345678", sessionId: "session-1", sessionName: "Default", configurationVersion: 1, configuration: {} as SavedSession["configuration"], status: "running", createdAt: 1_900_000, startedAt: 1_900_000, heartbeatAt: 2_000_000, artifactPath: "/tmp/run", metrics: { runtimeMs: 100_000, orders: 2, fills: 2, totalCents: 1, apiCalls: 4, apiErrors: 0 } }],
+      summary: { timesRun: 1, runtimeMs: 60_000, orders: 2, ordersPerMinute: 2, fills: 2, fillsPerMinute: 2, apiCalls: 4, apiErrors: 0, realizedCents: 1, unrealizedCents: 0, totalCents: 1, pnlComplete: true, outcomes: { running: 1 }, apiByComponent: { bots: 4 }, markoutsByHorizon: { "30000": aggregate(890, 2, 445) } },
+      runs: [{ id: "run-12345678", sessionId: "session-1", sessionName: "Default", configurationVersion: 1, configuration: {} as SavedSession["configuration"], status: "running", createdAt: 1_900_000, startedAt: 1_900_000, heartbeatAt: 2_000_000, artifactPath: "/tmp/run", metrics: { runtimeMs: 100_000, orders: 2, fills: 2, totalCents: 1, apiCalls: 4, apiErrors: 0, markoutsByHorizon: { "30000": aggregate(890, 2, 445) } } }],
     };
 
     render(<LiveMetrics initial={initial} sessions={sessions} query="" />);
+    expect(screen.getByLabelText("Markout horizon")).toHaveValue("30000");
+    expect(screen.getByText("30s Net Markout")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Markout horizon"), { target: { value: "5000" } });
+    expect(window.location.search).toContain("markout_horizon_ms=5000");
+    fireEvent.change(screen.getByLabelText("Markout horizon"), { target: { value: "30000" } });
     await waitFor(() => expect(screen.getByLabelText("Fills")).toHaveValue("25"));
     expect(screen.getByLabelText("Orders")).toHaveValue("50");
     expect(screen.getByLabelText("Total Cost minimum")).toBeDisabled();
@@ -64,8 +81,8 @@ describe("LiveMetrics", () => {
     fireEvent.click(screen.getByRole("button", { name: "Expand TEST-1" }));
     expect(await screen.findByText("Newest 1 of 125")).toBeInTheDocument();
     expect(screen.getByText("Newest 1 of 70")).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "Realized P&L" })).toBeInTheDocument();
-    expect(screen.getByRole("columnheader", { name: "Unrealized P&L" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Signed markout" })).toBeInTheDocument();
+    expect(screen.getAllByRole("columnheader", { name: "30s net markout" })).toHaveLength(3);
     expect(screen.queryByRole("columnheader", { name: "Liquidation value" })).not.toBeInTheDocument();
     expect(screen.getByText("0.50 matched · 0.50 open")).toBeInTheDocument();
     const activityView = screen.getByText("Newest 1 of 125").closest(".market-activity");
@@ -103,7 +120,7 @@ describe("LiveMetrics", () => {
     fireEvent.drop(contractsHeader, { dataTransfer });
     expect(screen.queryByRole("columnheader", { name: "Fill ID" })).not.toBeInTheDocument();
     const fillHeaders = [...((activityView as HTMLElement).querySelector(".activity-table") as HTMLElement).querySelectorAll("th")].map(item => item.textContent);
-    expect(fillHeaders).toEqual(["⋮⋮Fill time↓", "⋮⋮Side↕", "⋮⋮Contracts↕", "⋮⋮Total paid↕", "⋮⋮Time to fill↕", "⋮⋮Realized P&L↕", "⋮⋮Unrealized P&L↕", "⋮⋮Fill P&L↕"]);
+    expect(fillHeaders).toEqual(["⋮⋮Fill time↓", "⋮⋮Side↕", "⋮⋮Contracts↕", "⋮⋮Total paid↕", "⋮⋮Time to fill↕", "⋮⋮Signed markout↕", "⋮⋮Future midpoint↕", "⋮⋮Fee↕", "⋮⋮30s net markout↕"]);
     await waitFor(() => {
       const stored = JSON.parse(window.localStorage.getItem("kalshi.metrics.columns.v1") ?? "null") as { tables: { fills: Array<{ id: string; enabled: boolean }> } };
       expect(stored.tables.fills.find(column => column.id === "fillId")?.enabled).toBe(false);
@@ -140,6 +157,7 @@ describe("LiveMetrics", () => {
       ticker, description: `${ticker} market`, marketUrl: null, side: "YES" as const,
       yesContractsUnits: contractsUnits, noContractsUnits: 0, yesAverageCostPriceUnits: 4_000, noAverageCostPriceUnits: null,
       totalCostUnits, realizedPnlUnits: ticker === "NEW" ? 1_000 : 500, realizedReturnBps: 500,
+      markoutsByHorizon: { "30000": aggregate(ticker === "NEW" ? 1_000 : 500, 2, 300) },
       fillCount: 2, orderCount: 2, firstFillAtMs: lastFillAtMs - 500, lastFillAtMs,
       coverage: { fillsComplete: true, ordersComplete: true }, warnings: [],
     });
@@ -150,8 +168,8 @@ describe("LiveMetrics", () => {
     const activity: RunMarketActivityResponse = {
       generatedAt: 4_000_000, runId: "run-12345678", market: markets.items[1], source, warnings: [],
       fills: { totalCount: 2, truncated: false, items: [
-        { fillId: "fill-old", orderId: "order-old", filledAtMs: 2_000_000, side: "yes", contractsUnits: 50, matchedContractsUnits: 50, openContractsUnits: 0, timeToFillMs: 500, totalPaidUnits: 5_000, realizedPnlUnits: 100, unrealizedPnlUnits: 0, fillPnlUnits: 100 },
-        { fillId: "fill-new", orderId: "order-new", filledAtMs: 4_000_000, side: "yes", contractsUnits: 200, matchedContractsUnits: 100, openContractsUnits: 100, timeToFillMs: 1_000, totalPaidUnits: 20_000, realizedPnlUnits: 600, unrealizedPnlUnits: 300, fillPnlUnits: 900 },
+        { fillId: "fill-old", orderId: "order-old", filledAtMs: 2_000_000, side: "yes", contractsUnits: 50, matchedContractsUnits: 50, openContractsUnits: 0, timeToFillMs: 500, totalPaidUnits: 5_000, realizedPnlUnits: 100, unrealizedPnlUnits: 0, fillPnlUnits: 100, markoutsByHorizon: { "30000": fillMarkout(90, 100) } },
+        { fillId: "fill-new", orderId: "order-new", filledAtMs: 4_000_000, side: "yes", contractsUnits: 200, matchedContractsUnits: 100, openContractsUnits: 100, timeToFillMs: 1_000, totalPaidUnits: 20_000, realizedPnlUnits: 600, unrealizedPnlUnits: 300, fillPnlUnits: 900, markoutsByHorizon: { "30000": fillMarkout(590, 300) } },
       ] },
       orders: { totalCount: 2, truncated: false, items: [
         { revisionKey: "revision-old", orderId: "order-old", placedAtMs: 1_500_000, side: "yes", contractsUnits: 100, timeOnBookMs: 500, bookBidPriceUnits: 3_900, bookAskPriceUnits: 4_100, bookMidPriceUnits: 4_000, orderPriceUnits: 4_000, endedState: "Filled" },
@@ -165,8 +183,8 @@ describe("LiveMetrics", () => {
     const sessions: SavedSession[] = [{ id: "session-1", name: "Default", description: "", configuration: {} as SavedSession["configuration"], version: 1, createdAt: 1, updatedAt: 1, selected: true, runCount: 1 }];
     const initial: MetricsResponse = {
       generatedAt: 4_000_000,
-      summary: { timesRun: 1, runtimeMs: 60_000, orders: 4, ordersPerMinute: 4, fills: 4, fillsPerMinute: 4, apiCalls: 4, apiErrors: 0, realizedCents: 1, unrealizedCents: 0, totalCents: 1, pnlComplete: true, outcomes: { stopped: 1 }, apiByComponent: { bots: 4 } },
-      runs: [{ id: "run-12345678", sessionId: "session-1", sessionName: "Default", configurationVersion: 1, configuration: {} as SavedSession["configuration"], status: "stopped", createdAt: 1_000_000, startedAt: 1_000_000, endedAt: 4_000_000, artifactPath: "/tmp/run", metrics: { runtimeMs: 3_000_000, orders: 4, fills: 4, totalCents: 1, apiCalls: 4, apiErrors: 0 } }],
+      summary: { timesRun: 1, runtimeMs: 60_000, orders: 4, ordersPerMinute: 4, fills: 4, fillsPerMinute: 4, apiCalls: 4, apiErrors: 0, realizedCents: 1, unrealizedCents: 0, totalCents: 1, pnlComplete: true, outcomes: { stopped: 1 }, apiByComponent: { bots: 4 }, markoutsByHorizon: { "30000": aggregate(1_500, 4, 300) } },
+      runs: [{ id: "run-12345678", sessionId: "session-1", sessionName: "Default", configurationVersion: 1, configuration: {} as SavedSession["configuration"], status: "stopped", createdAt: 1_000_000, startedAt: 1_000_000, endedAt: 4_000_000, artifactPath: "/tmp/run", metrics: { runtimeMs: 3_000_000, orders: 4, fills: 4, totalCents: 1, apiCalls: 4, apiErrors: 0, markoutsByHorizon: { "30000": aggregate(1_500, 4, 300) } } }],
     };
 
     render(<LiveMetrics initial={initial} sessions={sessions} query="session_id=session-1" filters={{ sessionId: "session-1", status: "", from: "", to: "" }} />);
@@ -193,7 +211,7 @@ describe("LiveMetrics", () => {
 
     const beforeFilters = request.mock.calls.length;
     fireEvent.change(screen.getByLabelText("Total Cost minimum"), { target: { value: "0.75" } });
-    fireEvent.change(screen.getByLabelText("Total Unrealized P&L minimum"), { target: { value: "0.02" } });
+    fireEvent.change(screen.getByLabelText("Average Markout minimum"), { target: { value: "2" } });
     expect(screen.queryByText("fill-old")).not.toBeInTheDocument();
     expect(screen.getByText("fill-new")).toBeInTheDocument();
     expect(screen.queryByText("order-old")).not.toBeInTheDocument();
@@ -241,7 +259,7 @@ describe("LiveMetrics", () => {
     }
     vi.stubGlobal("EventSource", MockEventSource);
     window.localStorage.setItem("kalshi.metrics.columns.v1", JSON.stringify({
-      version: 1,
+      version: 2,
       tables: {
         markets: [{ id: "side", enabled: false }, { id: "identity", enabled: false }, { id: "removedColumn", enabled: false }],
         fills: [{ id: "fillId", enabled: false }],
