@@ -85,6 +85,16 @@ class WorkerHeartbeat:
 
 
 @dataclass(frozen=True)
+class WorkerControlAck:
+    worker_id: str
+    request_id: str
+    action: str
+    ok: bool
+    generated_at_ms: int
+    error: str = ""
+
+
+@dataclass(frozen=True)
 class FleetCapacity:
     api_tier: str
     read_refill_rate: int

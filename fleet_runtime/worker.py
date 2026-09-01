@@ -18,7 +18,7 @@ from typing import Any, Mapping
 
 from adaptors.kalshi import KalshiApiClient, KalshiClientConfig
 from clients.models import Fill, OrderUpdate, StreamReset
-from fleet_models import MarketHealth, ScreenerPick, WorkerHeartbeat
+from fleet_models import MarketHealth, ScreenerPick, WorkerControlAck, WorkerHeartbeat
 from session_config import bot_settings_payload
 from top_of_book_bot import BotSettings, MarketActor, TelemetryStore, load_market_metadata
 from .execution import BrokerRequest, BrokerRpcClient
@@ -28,6 +28,10 @@ from .risk import RiskSample, evaluate_risk
 def _rss_bytes() -> int:
     value = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     return int(value * 1024) if os.name != "darwin" else int(value)
+
+
+def watchdog_exit_allowed(*, mode: str, position_units: int, shutdown_frozen: bool) -> bool:
+    return mode == "flatten_only" and bool(position_units) and not shutdown_frozen
 
 
 class FleetWorkerProcess(mp.Process):
@@ -42,6 +46,7 @@ class FleetWorkerProcess(mp.Process):
         broker_response_queue: Any,
         command_queue: Any,
         heartbeat_queue: Any,
+        control_ack_queue: Any,
     ) -> None:
         super().__init__(name=f"fleet-{worker_id}", daemon=False)
         self.worker_id = worker_id
@@ -52,6 +57,7 @@ class FleetWorkerProcess(mp.Process):
         self.broker_response_queue = broker_response_queue
         self.command_queue = command_queue
         self.heartbeat_queue = heartbeat_queue
+        self.control_ack_queue = control_ack_queue
 
     def run(self) -> None:  # pragma: no cover - covered by multiprocessing integration simulations
         asyncio.run(self._run())
@@ -78,6 +84,7 @@ class FleetWorkerProcess(mp.Process):
         picks: dict[str, ScreenerPick] = {}
         risk_windows: dict[str, deque[RiskSample]] = {}
         quoting_enabled = False
+        shutdown_frozen = False
         last_retention_ms = 0
         stop_requested = asyncio.Event()
         subscriptions_ready = asyncio.Event()
@@ -136,51 +143,82 @@ class FleetWorkerProcess(mp.Process):
             if actor is not None:
                 await actor.stop(verify_orders=True)
 
+        def acknowledge(command: Mapping[str, Any], action: str, *, error: BaseException | None = None) -> None:
+            request_id = str(command.get("request_id") or "")
+            if not request_id:
+                return
+            self.control_ack_queue.put(WorkerControlAck(
+                self.worker_id,
+                request_id,
+                action,
+                error is None,
+                int(time.time() * 1000),
+                str(error) if error is not None else "",
+            ))
+
         async def command_loop() -> None:
-            nonlocal quoting_enabled, stream_generation
+            nonlocal quoting_enabled, shutdown_frozen, stream_generation
             while not stop_requested.is_set():
                 command = await asyncio.to_thread(self.command_queue.get)
                 action = str(command.get("action") or "")
-                if action == "reconcile":
-                    desired = {item.market_id: item for item in command.get("picks") or ()}
-                    had_actors = bool(actors)
-                    remove = sorted(set(actors) - set(desired))
-                    add = sorted(set(desired) - set(actors))
-                    for ticker in remove:
-                        await remove_actor(ticker)
-                    for ticker in add:
-                        await add_actor(desired[ticker])
-                    for ticker in set(desired) & set(actors):
-                        picks[ticker] = desired[ticker]
-                    if had_actors and (add or remove):
-                        try:
-                            await direct.update_market_subscriptions(add=add, remove=remove)
-                        except RuntimeError:
-                            # Reconnect only when the subscription acknowledgement
-                            # has not arrived yet; ordinary refreshes stay dynamic.
-                            await direct.close()
-                    stream_generation += 1
-                    if actors:
-                        subscriptions_ready.set()
+                try:
+                    if action == "reconcile":
+                        if shutdown_frozen:
+                            raise RuntimeError("worker is permanently frozen")
+                        desired = {item.market_id: item for item in command.get("picks") or ()}
+                        had_actors = bool(actors)
+                        remove = sorted(set(actors) - set(desired))
+                        add = sorted(set(desired) - set(actors))
+                        for ticker in remove:
+                            await remove_actor(ticker)
+                        for ticker in add:
+                            await add_actor(desired[ticker])
+                        for ticker in set(desired) & set(actors):
+                            picks[ticker] = desired[ticker]
+                        if had_actors and (add or remove):
+                            try:
+                                await direct.update_market_subscriptions(add=add, remove=remove)
+                            except RuntimeError:
+                                # Reconnect only when the subscription acknowledgement
+                                # has not arrived yet; ordinary refreshes stay dynamic.
+                                await direct.close()
+                        stream_generation += 1
+                        if actors:
+                            subscriptions_ready.set()
+                        else:
+                            subscriptions_ready.clear()
+                    elif action == "enable_quoting":
+                        quoting_enabled = bool(command.get("enabled")) and not shutdown_frozen
+                        allocations = command.get("allocations") or {}
+                        for ticker, actor in actors.items():
+                            actor.set_allowed_quote_sides(allocations.get(ticker, ()))
+                            actor.set_quoting_enabled(quoting_enabled)
+                    elif action == "freeze":
+                        shutdown_frozen = True
+                        quoting_enabled = False
+                        for actor in actors.values():
+                            actor.set_quoting_enabled(False)
+                        results = await asyncio.gather(
+                            *(actor.emergency_cancel_all_quotes(reason="worker_freeze") for actor in actors.values()),
+                            return_exceptions=True,
+                        )
+                        failure = next((item for item in results if isinstance(item, BaseException)), None)
+                        if failure is not None:
+                            raise failure
+                    elif action == "stop":
+                        acknowledge(command, action)
+                        stop_requested.set()
+                        return
                     else:
-                        subscriptions_ready.clear()
-                elif action == "enable_quoting":
-                    quoting_enabled = bool(command.get("enabled"))
-                    allocations = command.get("allocations") or {}
-                    for ticker, actor in actors.items():
-                        actor.set_allowed_quote_sides(allocations.get(ticker, ()))
-                        actor.set_quoting_enabled(quoting_enabled)
-                elif action == "freeze":
-                    quoting_enabled = False
-                    for actor in actors.values():
-                        actor.set_quoting_enabled(False)
-                    await asyncio.gather(
-                        *(actor.emergency_cancel_all_quotes(reason="worker_freeze") for actor in actors.values()),
-                        return_exceptions=True,
-                    )
-                elif action == "stop":
-                    stop_requested.set()
-                    return
+                        raise ValueError(f"unsupported worker action: {action}")
+                    acknowledge(command, action)
+                except Exception as exc:
+                    acknowledge(command, action, error=exc)
+                    if action == "reconcile":
+                        shutdown_frozen = True
+                        quoting_enabled = False
+                        for actor in actors.values():
+                            actor.set_quoting_enabled(False)
 
         async def stream_loop() -> None:
             nonlocal stream_generation
@@ -243,9 +281,14 @@ class FleetWorkerProcess(mp.Process):
                             severity="warning" if decision.mode != "normal" else "info",
                             payload={"mode": decision.mode, "reason": decision.reason, "confidence": decision.confidence},
                         )
-                        if decision.mode == "flatten_only" and actor.net_position_units:
+                        if watchdog_exit_allowed(
+                            mode=decision.mode,
+                            position_units=actor.net_position_units,
+                            shutdown_frozen=shutdown_frozen,
+                        ):
                             await actor.emergency_cancel_all_quotes(reason="risk_flatten_only")
-                            await actor.submit_watchdog_exit_order()
+                            if not shutdown_frozen:
+                                await actor.submit_watchdog_exit_order()
                     except Exception:
                         actor.set_fleet_risk("flatten_only" if actor.net_position_units else "reduction_only", reason="risk_evaluator_failed", generated_at_ms=now)
                     if index + 1 < len(ordered):

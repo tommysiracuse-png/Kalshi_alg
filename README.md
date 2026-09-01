@@ -361,7 +361,7 @@ The launcher is responsible for:
 
 `ShardedBotManager` maintains the desired fleet, bounded rendezvous assignments, pushed worker heartbeats, broker capacity, and capital allocation. A worker exit affects at most 25 markets; its exposure-increasing orders are canceled before that shard is restarted.
 
-During a fleet shutdown, the manager freezes workers, performs an authoritative broker-owned cancellation pass for bot-tagged resting orders, stops the workers, and verifies the account again. A shutdown that cannot verify order removal is reported as failed. Filled inventory is never silently flattened merely because the service stopped.
+During a fleet shutdown, the manager fences queued worker writes in the broker, freezes workers with acknowledgements, performs a retrying account-wide cancellation pass for bot-tagged resting orders, stops every worker, and verifies the account again. Venue read-after-cancel lag is retried, while a genuine verification failure is reported only after every worker and the broker have been terminated. Filled inventory is never silently flattened merely because the service stopped.
 
 Key launcher controls include:
 

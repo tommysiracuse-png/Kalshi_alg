@@ -34,11 +34,11 @@ The broker reserves 15% of measured write refill for cancel/risk work and 20% of
 
 Startup validates configured shard capacity and, for fleets above 40 markets, the 32 GiB RAM, 8 vCPU, and 100 GiB free-disk host requirements. The broker queries positions and resting orders and clears only recognized `mm:`, `tob:`, or `wd:` orders from an earlier release. Workers start observe-only. An actor cannot quote until its book and risk state are fresh, the controller API/capital gates pass, and it has an allocated side.
 
-Shutdown disables intent generation, freezes workers, cancels and verifies bot-tagged orders through the broker, stops streams and actors, stops workers, then performs a second authoritative verification. The systemd unit allows 300 seconds for this sequence.
+Shutdown first fences every worker channel in the broker so queued create/amend intents cannot execute. Workers then latch into a frozen state, acknowledge that normal quoting and watchdog exits are disabled, and cancel their quotes. Account cleanup retries venue reads with exponential backoff to tolerate read-after-cancel lag, preserves manual orders, and falls back to the controller client if the broker is unavailable. Worker and broker termination always completes before a cleanup failure is reported, followed by a final authoritative account verification. The systemd unit allows 300 seconds for this sequence.
 
 ## Health and freshness
 
-Workers publish a heartbeat every two seconds. A five-second-old heartbeat is stale. The controller disables the shard, asks the broker to cancel its exposure-increasing orders, and restarts only that worker.
+Workers publish a heartbeat every two seconds. A five-second-old heartbeat is stale outside an acknowledged reconciliation window. The controller fences the affected broker channel, freezes and stops that worker, and cancels its bot-owned orders. Cleanup failures keep the shard offline and retry every five seconds; a replacement starts observe-only only after cleanup and reconciliation are acknowledged.
 
 Every actor recomputes desired state at least once per second. A missing book, a market event older than 20 seconds, a quote decision older than 20 seconds, or risk state older than 120 seconds triggers cancellation and suppresses new exposure. A failed risk evaluator may tighten state but cannot restore normal quoting.
 

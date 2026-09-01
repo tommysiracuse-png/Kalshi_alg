@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import math
 import multiprocessing as mp
 import os
 import queue
@@ -18,12 +17,18 @@ from typing import Any, Mapping, Optional
 from adaptors.kalshi import KalshiClientConfig
 from bot_manager import BotManagerConfig
 from clients.base_client import BaseClient
-from clients.models import AccountOrderQuery, AccountPositionQuery
-from fleet_models import BotManagerEvent, FleetCapacity, ScreenerPick, ScreenerUpdate, WorkerHeartbeat
+from fleet_models import (
+    BotManagerEvent,
+    FleetCapacity,
+    ScreenerPick,
+    ScreenerUpdate,
+    WorkerControlAck,
+    WorkerHeartbeat,
+)
 from session_config import default_session_configuration, validate_session_configuration
 from .assignment import assign_markets, derive_worker_count
 from .capacity import AllocationRequest, AllocationResult, CapitalAllocator, calculate_fleet_capacity
-from .execution import BrokerRequest, ExecutionBrokerProcess
+from .execution import BrokerRequest, ExecutionBrokerProcess, cancel_and_verify_owned_orders
 from .worker import FleetWorkerProcess
 
 
@@ -40,6 +45,21 @@ class ManagedWorker:
     command_queue: Any
     response_queue: Any
     heartbeat: Optional[WorkerHeartbeat] = None
+    phase: str = "starting"
+    last_error: str = ""
+    pending_request_id: str = ""
+    pending_action: str = ""
+    control_deadline_ms: int = 0
+    last_liveness_at_ms: int = 0
+    recovery_retry_at_ms: int = 0
+    recovering: bool = False
+    channel_quiesced: bool = False
+
+
+class BrokerAdminError(RuntimeError):
+    def __init__(self, message: str, *, detail: Optional[Mapping[str, Any]] = None) -> None:
+        super().__init__(message)
+        self.detail = dict(detail or {})
 
 
 def validate_host_resources(*, strict: bool) -> list[str]:
@@ -79,7 +99,10 @@ class _BrokerAdmin:
             if response.get("request_id") != request_id:
                 continue
             if not response.get("ok"):
-                raise RuntimeError(str(response.get("error") or f"broker {operation} failed"))
+                raise BrokerAdminError(
+                    str(response.get("error") or f"broker {operation} failed"),
+                    detail=response.get("error_detail"),
+                )
             return response.get("result")
         raise TimeoutError(f"broker {operation} timed out")
 
@@ -113,10 +136,12 @@ class ShardedBotManager:
         self._shutdown_started = False
         self._request_queue: Any = None
         self._heartbeat_queue: Any = None
+        self._control_ack_queue: Any = None
         self._broker_status_queue: Any = None
         self._broker: Optional[ExecutionBrokerProcess] = None
         self._response_queues: dict[str, Any] = {}
         self._admin: Optional[_BrokerAdmin] = None
+        self._control_results: dict[str, WorkerControlAck] = {}
         self._client_config: Optional[KalshiClientConfig] = None
         self._capacity: Optional[FleetCapacity] = None
         self._allocation: Optional[AllocationResult] = None
@@ -126,6 +151,8 @@ class ShardedBotManager:
         self._shutdown_cleanup: dict[str, Any] = {
             "state": "idle", "startedAtMs": None, "completedAtMs": None,
             "canceledOrders": 0, "ordersVerifiedAbsent": False, "error": None,
+            "workersStopped": False, "brokerStopped": False,
+            "remainingBotOrderIds": [], "warnings": [],
         }
 
     @property
@@ -154,7 +181,135 @@ class ShardedBotManager:
             broker_response_queue=response_queue,
             command_queue=command_queue,
             heartbeat_queue=self._heartbeat_queue,
+            control_ack_queue=self._control_ack_queue,
         )
+
+    def _make_broker(self) -> ExecutionBrokerProcess:
+        assert self._client_config is not None
+        return ExecutionBrokerProcess(
+            client_config=self._client_config,
+            request_queue=self._request_queue,
+            response_queues=self._response_queues,
+            status_queue=self._broker_status_queue,
+            write_utilization_limit=float(self.fleet_config["writeUtilizationLimit"]),
+            cleanup_attempts=self.config.shutdown_cleanup_attempts,
+            cleanup_delay_seconds=self.config.shutdown_cleanup_delay_seconds,
+        )
+
+    def _send_control(self, managed: ManagedWorker, action: str, **payload: Any) -> str:
+        request_id = uuid.uuid4().hex
+        managed.pending_request_id = request_id
+        managed.pending_action = action
+        timeout_seconds = (
+            float(self.fleet_config["startupTimeoutSeconds"])
+            if action == "reconcile" else 5.0
+        )
+        managed.control_deadline_ms = int(time.time() * 1000 + timeout_seconds * 1000)
+        managed.phase = "reconciling" if action == "reconcile" else "quiescing" if action == "freeze" else "stopping"
+        managed.command_queue.put({"request_id": request_id, "action": action, **payload})
+        return request_id
+
+    def _drain_control_acks(self) -> None:
+        if self._control_ack_queue is None:
+            return
+        while True:
+            try:
+                ack = self._control_ack_queue.get_nowait()
+            except queue.Empty:
+                break
+            if not isinstance(ack, WorkerControlAck):
+                continue
+            if ack.action in {"freeze", "stop"}:
+                self._control_results[ack.request_id] = ack
+            managed = self._workers.get(ack.worker_id)
+            if managed is None:
+                continue
+            managed.last_liveness_at_ms = max(managed.last_liveness_at_ms, ack.generated_at_ms)
+            if managed.pending_request_id != ack.request_id:
+                continue
+            managed.pending_request_id = ""
+            managed.pending_action = ""
+            managed.control_deadline_ms = 0
+            managed.last_error = ack.error
+            if ack.action == "reconcile":
+                if ack.ok:
+                    managed.phase = "resume_pending" if managed.recovering else "healthy"
+                else:
+                    managed.phase = "cleanup_pending"
+                    managed.recovering = True
+                    managed.recovery_retry_at_ms = 0
+            elif ack.action == "freeze":
+                managed.phase = "quiesced" if ack.ok else "quiesce_failed"
+
+    async def _wait_for_control(self, request_id: str, timeout: float) -> Optional[WorkerControlAck]:
+        deadline = time.monotonic() + max(0.0, timeout)
+        while time.monotonic() < deadline:
+            self._drain_control_acks()
+            ack = self._control_results.pop(request_id, None)
+            if ack is not None:
+                return ack
+            await asyncio.sleep(0.05)
+        self._drain_control_acks()
+        return self._control_results.pop(request_id, None)
+
+    @staticmethod
+    def _remaining_ids(error: BaseException) -> list[str]:
+        if isinstance(error, BrokerAdminError):
+            return [str(item) for item in error.detail.get("remaining_order_ids", [])]
+        return [str(item) for item in getattr(error, "remaining_order_ids", ())]
+
+    async def _cancel_owned(self, market_id: str = "") -> int:
+        if self.config.dry_run:
+            return 0
+        errors: list[BaseException] = []
+        if self._admin is not None and self._broker is not None and self._broker.is_alive():
+            try:
+                operation = "cancel_market" if market_id else "cancel_all"
+                return int(await self._admin.call(operation, {"market_id": market_id} if market_id else None) or 0)
+            except Exception as exc:
+                errors.append(exc)
+        if self.cleanup_client is not None:
+            try:
+                return await asyncio.to_thread(
+                    cancel_and_verify_owned_orders,
+                    self.cleanup_client,
+                    market_id,
+                    attempts=self.config.shutdown_cleanup_attempts,
+                    delay_seconds=self.config.shutdown_cleanup_delay_seconds,
+                )
+            except Exception as exc:
+                errors.append(exc)
+        if not errors:
+            raise RuntimeError("no account cleanup client is available")
+        remaining = tuple(sorted({item for error in errors for item in self._remaining_ids(error)}))
+        detail = "; ".join(str(error) for error in errors)
+        error = RuntimeError(detail)
+        setattr(error, "remaining_order_ids", remaining)
+        raise error
+
+    @staticmethod
+    async def _join_process(process: Any, timeout: float) -> bool:
+        await asyncio.to_thread(process.join, timeout)
+        return not process.is_alive()
+
+    @classmethod
+    async def _terminate_process(cls, process: Any, *, graceful_timeout: float = 0.0) -> bool:
+        if not process.is_alive():
+            return True
+        if graceful_timeout > 0 and await cls._join_process(process, graceful_timeout):
+            return True
+        try:
+            process.terminate()
+        except Exception:
+            pass
+        if await cls._join_process(process, 5.0):
+            return True
+        try:
+            killer = getattr(process, "kill", process.terminate)
+            killer()
+        except Exception:
+            pass
+        return await cls._join_process(process, 2.0)
 
     async def _ensure_started(self) -> None:
         if self._started:
@@ -167,6 +322,7 @@ class ShardedBotManager:
             return
         self._request_queue = mp.Queue()
         self._heartbeat_queue = mp.Queue()
+        self._control_ack_queue = mp.Queue()
         self._broker_status_queue = mp.Queue()
         response_queues: dict[str, Any] = {"controller": mp.Queue()}
         for index in range(self.worker_count):
@@ -180,13 +336,7 @@ class ShardedBotManager:
             subaccount_number=int(self.config.subaccount or 0),
         )
         self._response_queues = response_queues
-        self._broker = ExecutionBrokerProcess(
-            client_config=self._client_config,
-            request_queue=self._request_queue,
-            response_queues=response_queues,
-            status_queue=self._broker_status_queue,
-            write_utilization_limit=float(self.fleet_config["writeUtilizationLimit"]),
-        )
+        self._broker = self._make_broker()
         self._broker.start()
         self._admin = _BrokerAdmin(self._request_queue, response_queues["controller"])
         for index in range(self.worker_count):
@@ -267,17 +417,23 @@ class ShardedBotManager:
         self._desired = dict(desired)
         self.bots = {ticker: ManagedMarket(pick, self._market_to_worker[ticker]) for ticker, pick in desired.items()}
         for worker_id, managed in self._workers.items():
-            managed.command_queue.put({
-                "action": "reconcile",
-                "picks": tuple(desired[ticker] for ticker in assignments[worker_id]),
-                "generation_id": update.generation_id,
-            })
+            if not managed.process.is_alive():
+                continue
+            if managed.recovering and managed.phase not in {"reconciling", "resume_pending"}:
+                continue
+            self._send_control(
+                managed,
+                "reconcile",
+                picks=tuple(desired[ticker] for ticker in assignments[worker_id]),
+                generation_id=update.generation_id,
+            )
         self._capacity, self._allocation = await self._admission(desired)
         self._capacity_error = self._capacity.error
         gate_open = self._capacity.gate_open and self._allocation.gate_open
         allocations = self._allocation.sides_by_ticker if gate_open else {}
         for managed in self._workers.values():
-            managed.command_queue.put({"action": "enable_quoting", "enabled": gate_open, "allocations": allocations})
+            if not managed.recovering and managed.process.is_alive():
+                managed.command_queue.put({"action": "enable_quoting", "enabled": gate_open, "allocations": allocations})
         if not gate_open:
             await self._emit(
                 "capacity_fail_closed", "*",
@@ -307,6 +463,115 @@ class ShardedBotManager:
         )
         await self.apply_update(update)
 
+    def _quoting_gate(self) -> tuple[bool, Mapping[str, Any]]:
+        gate_open = bool(
+            self._capacity and self._capacity.gate_open
+            and self._allocation and self._allocation.gate_open
+            and not self._capacity_error
+        )
+        allocations = self._allocation.sides_by_ticker if gate_open and self._allocation else {}
+        return gate_open, allocations
+
+    async def _resume_recovered_worker(self, managed: ManagedWorker) -> None:
+        now = int(time.time() * 1000)
+        if managed.recovery_retry_at_ms > now:
+            return
+        try:
+            if self._admin is None or self._broker is None or not self._broker.is_alive():
+                raise RuntimeError("execution broker is unavailable")
+            await self._admin.call("resume_channel", {"channel": managed.worker_id})
+            managed.channel_quiesced = False
+            gate_open, allocations = self._quoting_gate()
+            managed.command_queue.put({
+                "action": "enable_quoting",
+                "enabled": gate_open,
+                "allocations": allocations,
+            })
+            managed.phase = "healthy"
+            managed.recovering = False
+            managed.last_error = ""
+            managed.recovery_retry_at_ms = 0
+            await self._emit(
+                "worker_restarted",
+                "*",
+                worker_id=managed.worker_id,
+                affected_markets=len(self._assignments.get(managed.worker_id, ())),
+            )
+        except Exception as exc:
+            managed.last_error = str(exc)
+            managed.recovery_retry_at_ms = now + 5_000
+
+    async def _recover_worker(self, worker_id: str, managed: ManagedWorker) -> None:
+        now = int(time.time() * 1000)
+        if managed.recovery_retry_at_ms > now:
+            return
+        managed.recovering = True
+        managed.phase = "quiescing"
+        errors: list[str] = []
+
+        try:
+            if self._admin is None or self._broker is None or not self._broker.is_alive():
+                raise RuntimeError("execution broker is unavailable")
+            await self._admin.call("quiesce_channel", {"channel": worker_id})
+            managed.channel_quiesced = True
+        except Exception as exc:
+            errors.append(f"broker quiesce: {exc}")
+
+        if managed.process.is_alive():
+            freeze_request = self._send_control(managed, "freeze")
+            freeze_ack = await self._wait_for_control(freeze_request, 5.0)
+            if freeze_ack is None:
+                errors.append("worker freeze acknowledgement timed out")
+            elif not freeze_ack.ok:
+                errors.append(f"worker freeze failed: {freeze_ack.error}")
+            if freeze_ack is not None:
+                stop_request = self._send_control(managed, "stop")
+                await self._wait_for_control(stop_request, 1.0)
+            stopped = await self._terminate_process(managed.process, graceful_timeout=5.0)
+            if not stopped:
+                errors.append("worker process survived terminate/kill escalation")
+
+        managed.phase = "cleanup_pending"
+        if managed.process.is_alive() or not managed.channel_quiesced:
+            managed.last_error = "; ".join(errors) or "worker could not be quiesced"
+            managed.recovery_retry_at_ms = int(time.time() * 1000) + 5_000
+            await self._emit(
+                "worker_recovery_failed", "*", worker_id=worker_id, error=managed.last_error,
+            )
+            return
+
+        try:
+            for ticker in self._assignments.get(worker_id, ()):
+                await self._cancel_owned(ticker)
+        except Exception as exc:
+            errors.append(f"order cleanup: {exc}")
+            managed.last_error = "; ".join(errors)
+            managed.recovery_retry_at_ms = int(time.time() * 1000) + 5_000
+            await self._emit(
+                "worker_recovery_failed",
+                "*",
+                worker_id=worker_id,
+                error=managed.last_error,
+                remaining_order_ids=self._remaining_ids(exc),
+            )
+            return
+
+        command_queue = mp.Queue()
+        process = self._make_worker(worker_id, managed.response_queue, command_queue)
+        process.start()
+        managed.process = process
+        managed.command_queue = command_queue
+        managed.heartbeat = None
+        managed.last_liveness_at_ms = int(time.time() * 1000)
+        managed.last_error = "; ".join(errors)
+        managed.recovery_retry_at_ms = 0
+        tickers = self._assignments.get(worker_id, ())
+        self._send_control(
+            managed,
+            "reconcile",
+            picks=tuple(self._desired[ticker] for ticker in tickers if ticker in self._desired),
+        )
+
     async def monitor_once(self) -> None:
         if not self._started:
             return
@@ -314,14 +579,7 @@ class ShardedBotManager:
             for managed in self._workers.values():
                 managed.command_queue.put({"action": "enable_quoting", "enabled": False, "allocations": {}})
             self._capacity_error = "execution broker exited; fleet is reduction-only during restart"
-            assert self._client_config is not None
-            self._broker = ExecutionBrokerProcess(
-                client_config=self._client_config,
-                request_queue=self._request_queue,
-                response_queues=self._response_queues,
-                status_queue=self._broker_status_queue,
-                write_utilization_limit=float(self.fleet_config["writeUtilizationLimit"]),
-            )
+            self._broker = self._make_broker()
             self._broker.start()
             await self._emit("broker_restarted", "*", pid=self._broker.pid)
         broker_changed = False
@@ -358,7 +616,8 @@ class ShardedBotManager:
             )
             allocations = self._allocation.sides_by_ticker if gate_open and self._allocation else {}
             for managed in self._workers.values():
-                managed.command_queue.put({"action": "enable_quoting", "enabled": gate_open, "allocations": allocations})
+                if not managed.recovering and managed.process.is_alive():
+                    managed.command_queue.put({"action": "enable_quoting", "enabled": gate_open, "allocations": allocations})
             if not gate_open:
                 await self._emit("runtime_capacity_fail_closed", "*", error=self._capacity_error)
         while True:
@@ -369,67 +628,175 @@ class ShardedBotManager:
             managed = self._workers.get(heartbeat.worker_id)
             if managed:
                 managed.heartbeat = heartbeat
+                managed.last_liveness_at_ms = max(managed.last_liveness_at_ms, heartbeat.generated_at_ms)
+        self._drain_control_acks()
         current = int(time.time() * 1000)
         stale_ms = int(float(self.fleet_config["workerStaleSeconds"]) * 1000)
         for worker_id, managed in list(self._workers.items()):
-            stale = managed.heartbeat is not None and current - managed.heartbeat.generated_at_ms > stale_ms
-            dead = not managed.process.is_alive()
-            if not stale and not dead:
+            if managed.phase == "resume_pending":
+                await self._resume_recovered_worker(managed)
                 continue
-            tickers = self._assignments.get(worker_id, ())
-            if self._admin is not None:
-                for ticker in tickers:
-                    await self._admin.call("cancel_market", {"market_id": ticker})
-            managed.command_queue.put({"action": "stop"})
-            await asyncio.to_thread(managed.process.join, 5.0)
-            if managed.process.is_alive():
-                managed.process.terminate()
-                await asyncio.to_thread(managed.process.join, 2.0)
-            process = self._make_worker(worker_id, managed.response_queue, managed.command_queue)
-            process.start()
-            managed.process = process
-            managed.heartbeat = None
-            managed.command_queue.put({"action": "reconcile", "picks": tuple(self._desired[ticker] for ticker in tickers)})
-            await self._emit("worker_restarted", "*", worker_id=worker_id, affected_markets=len(tickers))
+            if managed.phase in {"cleanup_pending", "quiesce_failed"}:
+                await self._recover_worker(worker_id, managed)
+                continue
+            reconcile_grace = managed.pending_action == "reconcile" and current <= managed.control_deadline_ms
+            liveness_at_ms = max(
+                managed.last_liveness_at_ms,
+                managed.heartbeat.generated_at_ms if managed.heartbeat else 0,
+            )
+            stale = bool(liveness_at_ms and current - liveness_at_ms > stale_ms)
+            dead = not managed.process.is_alive()
+            reconcile_timed_out = (
+                managed.pending_action == "reconcile"
+                and bool(managed.control_deadline_ms)
+                and current > managed.control_deadline_ms
+            )
+            if reconcile_grace and not dead:
+                continue
+            if not stale and not dead and not reconcile_timed_out:
+                continue
+            await self._recover_worker(worker_id, managed)
 
     async def stop_all(self, *, reason: str = "launcher_shutdown") -> None:
         self.begin_shutdown()
-        if not self._started:
+        has_live_children = any(item.process.is_alive() for item in self._workers.values()) or bool(
+            self._broker is not None and self._broker.is_alive()
+        )
+        if not self._started and not has_live_children:
             return
         started = int(time.time() * 1000)
-        self._shutdown_cleanup.update(state="running", startedAtMs=started)
-        for managed in self._workers.values():
-            managed.command_queue.put({"action": "freeze"})
-        await asyncio.sleep(0.1)
+        self._shutdown_cleanup = {
+            "state": "running",
+            "startedAtMs": started,
+            "completedAtMs": None,
+            "canceledOrders": 0,
+            "ordersVerifiedAbsent": False,
+            "workersStopped": False,
+            "brokerStopped": False,
+            "remainingBotOrderIds": [],
+            "warnings": [],
+            "error": None,
+        }
         canceled = 0
+        warnings: list[str] = []
+        terminal_errors: list[str] = []
+        remaining_ids: list[str] = []
+        final_orders_verified = False
+        broker_fenced = self._planning_only
+
         try:
-            if self._admin is not None:
-                canceled += int(await self._admin.call("cancel_all") or 0)
-            for managed in self._workers.values():
-                managed.command_queue.put({"action": "stop"})
-            await asyncio.gather(*(asyncio.to_thread(item.process.join, 30.0) for item in self._workers.values()))
+            if not self._planning_only:
+                try:
+                    if self._admin is None or self._broker is None or not self._broker.is_alive():
+                        raise RuntimeError("execution broker is unavailable")
+                    await self._admin.call("quiesce_all")
+                    broker_fenced = True
+                except Exception as exc:
+                    warnings.append(f"broker write fence failed: {exc}")
+
+            freeze_requests: list[tuple[ManagedWorker, str]] = []
             for managed in self._workers.values():
                 if managed.process.is_alive():
-                    managed.process.terminate()
-                    await asyncio.to_thread(managed.process.join, 5.0)
-            if self._admin is not None:
-                canceled += int(await self._admin.call("verify_clear") or 0)
-                await self._admin.call("stop")
+                    freeze_requests.append((managed, self._send_control(managed, "freeze")))
+            freeze_results = await asyncio.gather(*(
+                self._wait_for_control(request_id, 5.0)
+                for _, request_id in freeze_requests
+            ))
+            for (managed, _), ack in zip(freeze_requests, freeze_results):
+                if ack is None:
+                    warnings.append(f"{managed.worker_id}: freeze acknowledgement timed out")
+                    await self._terminate_process(managed.process)
+                elif not ack.ok:
+                    warnings.append(f"{managed.worker_id}: freeze failed: {ack.error}")
+
+            # If the broker could not establish the write barrier, terminate
+            # every producer and the broker before attempting account cleanup.
+            if not broker_fenced:
+                for managed in self._workers.values():
+                    await self._terminate_process(managed.process)
+                if self._broker is not None:
+                    await self._terminate_process(self._broker)
+
+            try:
+                canceled += await self._cancel_owned()
+            except Exception as exc:
+                warnings.append(f"initial account cleanup: {exc}")
+
+            stop_requests: list[tuple[ManagedWorker, str]] = []
+            for managed in self._workers.values():
+                if managed.process.is_alive():
+                    stop_requests.append((managed, self._send_control(managed, "stop")))
+            await asyncio.gather(*(
+                self._wait_for_control(request_id, 5.0)
+                for _, request_id in stop_requests
+            ))
+            await asyncio.gather(*(
+                self._terminate_process(managed.process, graceful_timeout=30.0)
+                for managed in self._workers.values()
+            ))
+
+            try:
+                canceled += await self._cancel_owned()
+                final_orders_verified = True
+            except Exception as exc:
+                terminal_errors.append(f"final account cleanup: {exc}")
+                remaining_ids.extend(self._remaining_ids(exc))
+
+            if self._admin is not None and self._broker is not None and self._broker.is_alive():
+                try:
+                    await self._admin.call("stop")
+                except Exception as exc:
+                    warnings.append(f"broker stop command failed: {exc}")
             if self._broker is not None:
-                await asyncio.to_thread(self._broker.join, 30.0)
-                if self._broker.is_alive():
-                    self._broker.terminate()
-                    await asyncio.to_thread(self._broker.join, 5.0)
-            self._shutdown_cleanup.update(
-                state="verified", completedAtMs=int(time.time() * 1000), canceledOrders=canceled,
-                ordersVerifiedAbsent=True,
-            )
+                await self._terminate_process(self._broker, graceful_timeout=30.0)
         except Exception as exc:
-            self._shutdown_cleanup.update(state="failed", completedAtMs=int(time.time() * 1000), error=str(exc))
-            raise
+            terminal_errors.append(f"shutdown orchestration: {exc}")
         finally:
+            for managed in self._workers.values():
+                try:
+                    await self._terminate_process(managed.process)
+                except Exception as exc:
+                    terminal_errors.append(f"{managed.worker_id} teardown: {exc}")
+            if self._broker is not None:
+                try:
+                    await self._terminate_process(self._broker)
+                except Exception as exc:
+                    terminal_errors.append(f"broker teardown: {exc}")
             self._started = False
             self.bots.clear()
+            for managed in self._workers.values():
+                managed.phase = "stopped"
+                managed.recovering = False
+
+        workers_stopped = all(not managed.process.is_alive() for managed in self._workers.values())
+        broker_stopped = self._broker is None or not self._broker.is_alive()
+        if not workers_stopped:
+            terminal_errors.append("one or more worker processes remain alive")
+        if not broker_stopped:
+            terminal_errors.append("execution broker process remains alive")
+        successful = final_orders_verified and workers_stopped and broker_stopped
+        error = "; ".join(terminal_errors) or None
+        self._shutdown_cleanup.update(
+            state="verified" if successful else "failed",
+            completedAtMs=int(time.time() * 1000),
+            canceledOrders=canceled,
+            ordersVerifiedAbsent=final_orders_verified,
+            workersStopped=workers_stopped,
+            brokerStopped=broker_stopped,
+            remainingBotOrderIds=sorted(set(remaining_ids)),
+            warnings=warnings,
+            error=error,
+        )
+        if successful:
+            await self._emit(
+                "fleet_shutdown_cleanup_verified",
+                "*",
+                canceled_orders=canceled,
+                orders_verified_absent=True,
+            )
+            return
+        await self._emit("shutdown_cleanup_failed", "*", reason=reason, error=error or "unknown shutdown failure")
+        raise RuntimeError("launcher shutdown cleanup failed: " + (error or "unknown shutdown failure"))
 
     def status_snapshot(self) -> dict[str, Any]:
         now = int(time.time() * 1000)
@@ -439,12 +806,22 @@ class ShardedBotManager:
         risk_modes: dict[str, int] = {}
         for worker_id, managed in self._workers.items():
             heartbeat = managed.heartbeat
+            liveness_at_ms = max(
+                managed.last_liveness_at_ms,
+                heartbeat.generated_at_ms if heartbeat else 0,
+            )
             workers.append({
                 "workerId": worker_id, "pid": managed.process.pid,
                 "running": managed.process.is_alive(),
+                "phase": managed.phase,
+                "lastRecoveryError": managed.last_error or None,
                 "assignedMarkets": len(self._assignments.get(worker_id, ())),
                 "heartbeatAtMs": heartbeat.generated_at_ms if heartbeat else None,
-                "stale": heartbeat is None or now - heartbeat.generated_at_ms > int(float(self.fleet_config["workerStaleSeconds"]) * 1000),
+                "stale": (
+                    False
+                    if managed.pending_action == "reconcile" and now <= managed.control_deadline_ms
+                    else not liveness_at_ms or now - liveness_at_ms > int(float(self.fleet_config["workerStaleSeconds"]) * 1000)
+                ),
                 "memoryRssBytes": heartbeat.memory_rss_bytes if heartbeat else None,
                 "queueDepth": heartbeat.queue_depth if heartbeat else None,
                 "eventLagMs": heartbeat.event_lag_ms if heartbeat else None,

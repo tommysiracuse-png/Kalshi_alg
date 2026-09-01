@@ -9,7 +9,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional
 
 from adaptors.kalshi import KalshiApiClient, KalshiClientConfig
 from clients.models import (
@@ -33,13 +33,17 @@ _ERROR_TYPES = {
         AmendTargetUnavailableError,
     )
 }
+BOT_ORDER_PREFIXES = ("mm:", "tob:", "wd:")
 
 
 def _urgency(operation: str, payload: Mapping[str, Any]) -> IntentUrgency:
     intent = payload.get("intent")
     if isinstance(intent, QuoteIntent):
         return intent.urgency
-    if operation in {"cancel_all", "cancel_market"}:
+    if operation in {
+        "cancel_all", "cancel_market", "verify_clear",
+        "quiesce_all", "quiesce_channel", "resume_channel",
+    }:
         return IntentUrgency.EMERGENCY_CANCEL
     if operation == "cancel_order":
         return IntentUrgency.EMERGENCY_CANCEL
@@ -58,6 +62,90 @@ class BrokerRequest:
     operation: str
     payload: Mapping[str, Any]
     submitted_at_ms: int
+
+
+class BotOrderCleanupError(RuntimeError):
+    """Raised after bot-owned resting orders survive every cleanup attempt."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        remaining_order_ids: tuple[str, ...] = (),
+    ) -> None:
+        super().__init__(message)
+        self.remaining_order_ids = remaining_order_ids
+
+
+def is_bot_owned_order(client_order_id: str) -> bool:
+    return bool(client_order_id) and client_order_id.startswith(BOT_ORDER_PREFIXES)
+
+
+def cancel_and_verify_owned_orders(
+    client: Any,
+    market_id: str = "",
+    *,
+    attempts: int = 8,
+    delay_seconds: float = 0.5,
+    sleep: Callable[[float], None] = time.sleep,
+) -> int:
+    """Cancel bot-tagged resting orders, tolerating venue read-after-write lag."""
+
+    from clients.models import AccountOrderQuery
+
+    canceled_ids: set[str] = set()
+    remaining_ids: tuple[str, ...] = ()
+    last_error: Optional[BaseException] = None
+    total_attempts = max(1, int(attempts))
+    for attempt in range(total_attempts):
+        try:
+            orders = client.list_account_orders(
+                AccountOrderQuery(status="resting", market_id=market_id, page_size=1_000)
+            )
+            owned = [
+                order for order in orders
+                if order.order_id and is_bot_owned_order(order.client_order_id)
+            ]
+            remaining_ids = tuple(sorted({str(order.order_id) for order in owned}))
+            if not owned:
+                return len(canceled_ids)
+            for order in owned:
+                order_id = str(order.order_id)
+                try:
+                    client.cancel_order(order_id=order_id)
+                except OrderNotFoundError:
+                    pass
+                canceled_ids.add(order_id)
+            last_error = None
+        except Exception as exc:
+            last_error = exc
+        if attempt + 1 < total_attempts:
+            sleep(min(4.0, max(0.0, float(delay_seconds)) * (2 ** attempt)))
+
+    # The last cancellation attempt must still be followed by an authoritative
+    # read; otherwise a successful final cancel would be reported as failure.
+    try:
+        orders = client.list_account_orders(
+            AccountOrderQuery(status="resting", market_id=market_id, page_size=1_000)
+        )
+        remaining_ids = tuple(sorted({
+            str(order.order_id)
+            for order in orders
+            if order.order_id and is_bot_owned_order(order.client_order_id)
+        }))
+        if not remaining_ids:
+            return len(canceled_ids)
+        last_error = None
+    except Exception as exc:
+        last_error = exc
+
+    scope = market_id or "the account"
+    detail = f"; last error: {last_error}" if last_error is not None else ""
+    ids = f"; remaining order ids: {', '.join(remaining_ids)}" if remaining_ids else ""
+    raise BotOrderCleanupError(
+        f"could not verify cancellation of all bot-owned orders for {scope}{ids}{detail}",
+        remaining_order_ids=remaining_ids,
+    )
 
 
 class BrokerRpcClient:
@@ -188,7 +276,7 @@ class BrokerRpcClient:
 
 
 class ExecutionBrokerProcess(mp.Process):
-    BOT_ORDER_PREFIXES = ("mm:", "tob:", "wd:")
+    BOT_ORDER_PREFIXES = BOT_ORDER_PREFIXES
 
     def __init__(
         self,
@@ -199,6 +287,8 @@ class ExecutionBrokerProcess(mp.Process):
         status_queue: Any,
         write_utilization_limit: float = 0.85,
         refresh_limits_seconds: float = 60.0,
+        cleanup_attempts: int = 8,
+        cleanup_delay_seconds: float = 0.5,
     ) -> None:
         super().__init__(name="execution-broker", daemon=False)
         self.client_config = client_config
@@ -207,39 +297,36 @@ class ExecutionBrokerProcess(mp.Process):
         self.status_queue = status_queue
         self.write_utilization_limit = write_utilization_limit
         self.refresh_limits_seconds = refresh_limits_seconds
+        self.cleanup_attempts = max(1, int(cleanup_attempts))
+        self.cleanup_delay_seconds = max(0.0, float(cleanup_delay_seconds))
 
     @staticmethod
     def _owned(client_order_id: str) -> bool:
-        return bool(client_order_id) and client_order_id.startswith(ExecutionBrokerProcess.BOT_ORDER_PREFIXES)
+        return is_bot_owned_order(client_order_id)
 
     def _respond(self, request: BrokerRequest, *, result: Any = None, error: Optional[BaseException] = None) -> None:
         target = self.response_queues.get(request.response_channel)
         if target is None:
             return
+        detail = None
+        if isinstance(error, BotOrderCleanupError):
+            detail = {"remaining_order_ids": list(error.remaining_order_ids)}
         target.put({
             "request_id": request.request_id,
             "ok": error is None,
             "result": result,
             "error": str(error) if error else None,
             "error_type": type(error).__name__ if error else None,
+            "error_detail": detail,
         })
 
     def _cancel_owned(self, client: KalshiApiClient, market_id: str = "") -> int:
-        from clients.models import AccountOrderQuery
-
-        canceled = 0
-        orders = client.list_account_orders(AccountOrderQuery(status="resting", market_id=market_id, page_size=1_000))
-        for order in orders:
-            if order.order_id and self._owned(order.client_order_id):
-                try:
-                    client.cancel_order(order_id=order.order_id)
-                except OrderNotFoundError:
-                    pass
-                canceled += 1
-        remaining = client.list_account_orders(AccountOrderQuery(status="resting", market_id=market_id, page_size=1_000))
-        if any(self._owned(item.client_order_id) for item in remaining):
-            raise RuntimeError("bot-tagged orders remain after broker cancellation")
-        return canceled
+        return cancel_and_verify_owned_orders(
+            client,
+            market_id,
+            attempts=self.cleanup_attempts,
+            delay_seconds=self.cleanup_delay_seconds,
+        )
 
     def _execute(self, client: KalshiApiClient, request: BrokerRequest) -> Any:
         payload = request.payload
@@ -339,6 +426,19 @@ class ExecutionBrokerProcess(mp.Process):
             return "stopping"
         raise ValueError(f"unsupported broker operation: {request.operation}")
 
+    @staticmethod
+    def _write_blocked(
+        request: BrokerRequest,
+        *,
+        all_workers_quiesced: bool,
+        quiesced_channels: set[str],
+    ) -> bool:
+        if request.response_channel == "controller":
+            return False
+        if not all_workers_quiesced and request.response_channel not in quiesced_channels:
+            return False
+        return request.operation in {"quote_intent", "create_order", "amend_order", "decrease_order_to"}
+
     def run(self) -> None:  # pragma: no cover - integration exercised with real multiprocessing
         config = KalshiClientConfig(
             **{
@@ -371,6 +471,8 @@ class ExecutionBrokerProcess(mp.Process):
         superseded: set[str] = set()
         followers: dict[str, list[BrokerRequest]] = {}
         latest_intents: dict[tuple[str, str], BrokerRequest] = {}
+        all_workers_quiesced = False
+        quiesced_channels: set[str] = set()
         try:
             while not stopping:
                 now = time.monotonic()
@@ -444,7 +546,9 @@ class ExecutionBrokerProcess(mp.Process):
                     "quote_intent", "create_order", "amend_order", "decrease_order_to", "cancel_order",
                     "cancel_market", "cancel_all", "verify_clear",
                 }
-                no_token_operation = request.operation in {"stop", "order_update"}
+                no_token_operation = request.operation in {
+                    "stop", "order_update", "quiesce_all", "quiesce_channel", "resume_channel",
+                }
                 if no_token_operation:
                     permitted = True
                 elif write_operation:
@@ -464,7 +568,32 @@ class ExecutionBrokerProcess(mp.Process):
                     time.sleep(0.005)
                     continue
                 try:
-                    result = self._execute(client, request)
+                    if request.operation == "quiesce_all":
+                        all_workers_quiesced = True
+                        result = "quiesced"
+                    elif request.operation == "quiesce_channel":
+                        channel = str(request.payload.get("channel") or "")
+                        if not channel or channel == "controller":
+                            raise ValueError("a worker channel is required")
+                        quiesced_channels.add(channel)
+                        result = channel
+                    elif request.operation == "resume_channel":
+                        channel = str(request.payload.get("channel") or "")
+                        if not channel or channel == "controller":
+                            raise ValueError("a worker channel is required")
+                        quiesced_channels.discard(channel)
+                        # A global fence remains authoritative during shutdown.
+                        if all_workers_quiesced:
+                            raise RuntimeError("all worker channels are quiesced")
+                        result = channel
+                    elif self._write_blocked(
+                        request,
+                        all_workers_quiesced=all_workers_quiesced,
+                        quiesced_channels=quiesced_channels,
+                    ):
+                        raise ClientError(f"execution channel {request.response_channel} is quiesced")
+                    else:
+                        result = self._execute(client, request)
                     self._respond(request, result=result)
                     for follower in followers.pop(request.request_id, []):
                         self._respond(follower, result=result)

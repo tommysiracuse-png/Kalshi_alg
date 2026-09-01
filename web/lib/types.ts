@@ -102,7 +102,7 @@ export type Monitoring = {
   generatedAt: number; schemaVersion?: number; source: SourceState; warnings: string[];
   manager: { running?: boolean; lifecycle?: string; startedAtMs?: number; runningForMs?: number; botsRunning?: number; portfolio?: { items?: Array<{ marketId: string; title?: string; positionUnits?: number | null; updatedAtMs?: number; stale?: boolean; available?: boolean }>; grossPositionUnits?: number; netPositionUnits?: number; unknownMarkets?: number; staleMarkets?: number }; pnl?: PnlTotals; apiActivity?: ApiActivity };
   clients: ClientMonitoring[];
-  workers?: Array<{ workerId: string; pid?: number; running: boolean; assignedMarkets: number; heartbeatAtMs?: number | null; stale: boolean; memoryRssBytes?: number | null; queueDepth?: number | null; eventLagMs?: number | null }>;
+  workers?: Array<{ workerId: string; pid?: number; running: boolean; phase?: string; lastRecoveryError?: string | null; assignedMarkets: number; heartbeatAtMs?: number | null; stale: boolean; memoryRssBytes?: number | null; queueDepth?: number | null; eventLagMs?: number | null }>;
   broker?: { pid?: number | null; running?: boolean };
   capacity?: Record<string, unknown> | null;
   allocation?: Record<string, unknown> | null;
