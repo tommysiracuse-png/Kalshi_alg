@@ -260,24 +260,20 @@ Saved configuration is versioned by `session_config.py` and divided into:
 - `execution`: demo/production selection, dry-run mode, and subaccount.
 - `launcher`: fixed ticker or screened fleet, bot count, per-side budgets, launch delay, refresh schedule, poll period, and inventory carryover threshold.
 - `watchdog`: profiling cadence, state refresh and staleness thresholds, sample interval, confidence thresholds, and emergency flatten retries.
-- `fleetRuntime`: shard sizing, quote freshness, API utilization, cash reserve, series concentration, heartbeat, and startup gates.
+- `fleetRuntime`: shard sizing, quote freshness, API utilization, cash reserve, series concentration, heartbeat, startup gates, and the worker-local risk evaluator tunables (`riskWindowSeconds`, `riskElevatedMoveCents`, `riskExtremeMoveCents`, `riskStaleSeconds`: the mid-move window is time-bounded; staleness is judged only on venue market-data events for that market (book snapshot/delta, public trade, ticker - the worker's own order updates, fills and position updates never count), so a feed that dies silently is `risk_inputs_stale` at the first ~60 s risk visit after `riskStaleSeconds` of silence, i.e. within `riskStaleSeconds` plus one risk-loop period, even while other markets on the shard are active and the market's own order traffic keeps flowing; a market quiet for longer than `riskStaleSeconds / 3` is re-sampled from its book so the move window stays current, but that synthetic sample is never liveness evidence, which also means a market with no market-data at all for longer than `riskStaleSeconds` is demoted - raise `riskStaleSeconds` for very illiquid markets; an extreme-move `flatten_only` on a market holding inventory stays latched for `fleet_runtime.risk.RISK_FLATTEN_LATCH_MS` (10 min) after the last extreme move, then downgrades to `reduction_only` (no new exposure, passive reduction allowed, no further watchdog IOC exits) and returns to `normal` only once the position is flat).
 - `bot`: all remaining `BotSettings` strategy, sizing, fair-value, toxicity, queue, quote, telemetry, and inventory fields.
+- `botClasses` (schema v3): market-class classifier thresholds and per-class `bot` overrides.
+- `screener` (schema v4): the market screener's scan and liquidity filters, excluded ticker keywords, quote-planning constants, and the markout toxic-series filter.
 
-The canonical defaults and validation rules are in `session_config.py` and the `BotSettings` dataclass in `top_of_book_bot.py`. Unknown fields are rejected, and numeric relationships such as watchdog threshold ordering are validated before a session is saved or launched.
+The canonical defaults and validation rules are in `session_config.py` and the `BotSettings` dataclass in `top_of_book_bot.py`. Unknown fields are rejected, and numeric relationships such as watchdog threshold ordering are validated before a session is saved or launched. Older stored sessions (schema v1/v2/v3) migrate on read by splicing in the defaults of every newer section, so their runtime behaviour does not change.
 
 ### Screener configuration
 
-`kalshi_screener_config.py` controls the public market scan. Important groups include:
+Screener filters now live in the saved session's `screener` section and are edited on the dashboard's **Sessions** page (the "Screener" panel). The fields are `status`, `mveFilter`, `maxMarketsToScan`, `topN`, `minSpreadCents`/`maxSpreadCents`, `minYesBidCents`/`minNoBidCents`, `minVol24h`, `minOpenInterest`, `minTimeToCloseHours`/`maxTimeToCloseHours`, `excludedTickerKeywords`, `targetEdgeCents`, `quoteSize` and the `markoutFilter*` thresholds (`markoutFilterHorizonSeconds` must be one of the recorded horizons 1, 5, 30 or 120; the unused `feeBufferCents` field was retired and is dropped from stored sessions on read). Their defaults are read from `kalshi_screener_config.py` (`default_screener_configuration()` in `session_config.py`), so a session that never touched the section screens exactly like the constants. `launcher.screener_settings_for_session()` maps the section onto the settings dict consumed by `Screener` / `kalshi_screener.screen_markets` (`kalshi_screener.build_settings_from_configuration`); `top_n` is floored at `launcher.maxBots` as before, and `targetEdgeCents` reaches the EV filter through the derived floor `max(2, target // 2)`. Changes apply when the fleet is next started: a running fleet keeps the immutable run snapshot it launched with.
 
-- market status, MVE handling, maximum catalog size, and exported top-N count;
-- minimum/maximum spread, bid, volume, open interest, and time-to-close filters;
-- permanently excluded ticker keywords;
-- target expected edge, fee buffer, tick assumptions, and quote size;
-- historical markout filters at ticker and series scope;
-- realized net-per-contract and total-loss thresholds;
-- output CSV and optional standalone loop interval.
+`kalshi_screener_config.py` still owns the settings the session does not expose: the API host / demo switch, `DEFAULT_TICK_CENTS`, the EV tuning constants (fee factor, fair-value weights, queue and toxicity penalties), `MARKOUT_FILTER_FEE_FACTOR`, `EXCLUDED_SERIES`, the output CSV and the standalone loop interval. The standalone `kalshi_screener.py` CLI (no session) keeps reading every default from that file.
 
-The fleet's `maxBots` is independent of the screener's exported `TOP_N`: the CSV may contain more markets than the launcher is allowed to run.
+The fleet's `maxBots` is independent of the screener's exported `topN`: the CSV may contain more markets than the launcher is allowed to run.
 
 ## Running the system
 
@@ -361,7 +357,7 @@ The launcher is responsible for:
 
 `ShardedBotManager` maintains the desired fleet, bounded rendezvous assignments, pushed worker heartbeats, broker capacity, and capital allocation. A worker exit affects at most 25 markets; its exposure-increasing orders are canceled before that shard is restarted.
 
-During a fleet shutdown, the manager fences queued worker writes in the broker, freezes workers with acknowledgements, performs a retrying account-wide cancellation pass for bot-tagged resting orders, stops every worker, and verifies the account again. Venue read-after-cancel lag is retried, while a genuine verification failure is reported only after every worker and the broker have been terminated. Filled inventory is never silently flattened merely because the service stopped.
+During a fleet shutdown, the manager freezes workers, performs an authoritative broker-owned cancellation pass for bot-tagged resting orders, stops the workers, and verifies the account again. A shutdown that cannot verify order removal is reported as failed. Filled inventory is never silently flattened merely because the service stopped.
 
 Key launcher controls include:
 

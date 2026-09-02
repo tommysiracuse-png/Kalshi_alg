@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Dict, Literal, Mapping, Optional, Tuple
+from typing import Any, Dict, Literal, Mapping, Optional, Tuple
 
 
 DEFAULT_MAX_BOTS = 40
@@ -71,6 +71,9 @@ class MarketHealth:
     order_activity: Mapping[str, Mapping[str, int]] = field(default_factory=dict)
     pnl: Mapping[str, object] = field(default_factory=dict)
     markouts: Mapping[str, Mapping[str, object]] = field(default_factory=dict)
+    # Why the worker's risk evaluator chose ``risk_mode`` (e.g.
+    # ``elevated_price_move``); surfaced as ``bots[].watchdogReason``.
+    risk_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -123,6 +126,11 @@ class ScreenerPick:
     no_budget_cents: int
     ranking: Mapping[str, object] = field(default_factory=dict)
     selection_reason: str = "screen"
+    # Market class assigned by the screener's classifier and the per-class
+    # BotSettings overrides resolved for it (``(field, value)`` pairs; tuples
+    # only, so the pick stays picklable across the worker queue and hashable).
+    market_class: str = "default"
+    settings_overrides: Tuple[Tuple[str, Any], ...] = ()
 
     @property
     def ticker(self) -> str:
@@ -132,8 +140,16 @@ class ScreenerPick:
     def raw_row(self) -> Dict[str, str]:
         return {str(key): "" if value is None else str(value) for key, value in self.ranking.items()}
 
-    def runtime_key(self) -> Tuple[int, int]:
-        return self.yes_budget_cents, self.no_budget_cents
+    def runtime_key(self) -> Tuple[int, int, str, Tuple[Tuple[str, Any], ...]]:
+        # Everything that changes the running actor's settings belongs here:
+        # the screener diffs runtime keys to decide which retained markets
+        # must restart, so overrides left out would never be reconciled.
+        return (
+            self.yes_budget_cents,
+            self.no_budget_cents,
+            self.market_class,
+            tuple(tuple(item) for item in self.settings_overrides),
+        )
 
 
 @dataclass(frozen=True)

@@ -1,17 +1,23 @@
 """Shared runtime status and local control-socket primitives.
 
-The socket is intentionally Unix-only and permissioned to the service account.
-It is not an authentication boundary; callers must already be trusted local
+The socket is Unix-domain and permissioned to the service account where
+AF_UNIX exists. On hosts without AF_UNIX (Windows CPython) the launcher
+control server falls back to a loopback TCP port bound to 127.0.0.1; the
+port and a per-run secret token are published next to the socket path in
+``launcher_control.json`` and every TCP request must carry the token. It is
+not an authentication boundary; callers must already be trusted local
 processes (the loopback operations API in production).
 """
 
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import errno
 import os
 import queue
+import secrets
 import socket
 import tempfile
 import threading
@@ -22,7 +28,43 @@ from typing import Any, Awaitable, Callable, Dict, Optional
 
 
 STATUS_SCHEMA_VERSION = 4
-ALLOWED_ACTIONS = {"status", "refresh", "disable_ticker", "enable_ticker"}
+ALLOWED_ACTIONS = {"status", "refresh", "disable_ticker", "enable_ticker", "shutdown"}
+
+_HAS_AF_UNIX = hasattr(socket, "AF_UNIX")
+
+
+class _UnauthorizedError(Exception):
+    """A TCP-fallback request arrived without a valid control token."""
+
+
+def control_endpoint_path(socket_path: Path) -> Path:
+    """Descriptor path for the loopback-TCP fallback (launcher.sock -> launcher_control.json)."""
+    socket_path = Path(socket_path)
+    return socket_path.with_name(socket_path.stem + "_control.json")
+
+
+def read_control_endpoint(socket_path: Path) -> Optional[Dict[str, Any]]:
+    """Return {"port", "token"} when a valid TCP-fallback descriptor exists."""
+    descriptor = read_json(control_endpoint_path(socket_path))
+    port, token = descriptor.get("port"), descriptor.get("token")
+    if isinstance(port, int) and 0 < port < 65536 and isinstance(token, str) and token:
+        return {"port": port, "token": token}
+    return None
+
+
+def control_endpoint_available(socket_path: Path, timeout: float = 1.0) -> bool:
+    """True when the control endpoint exists (Unix socket) or answers (TCP fallback)."""
+    socket_path = Path(socket_path)
+    if socket_path.exists():
+        return True
+    descriptor = read_control_endpoint(socket_path)
+    if descriptor is None:
+        return False
+    try:
+        with socket.create_connection(("127.0.0.1", int(descriptor["port"])), timeout=timeout):
+            return True
+    except OSError:
+        return False
 
 
 class BotControlServer:
@@ -138,6 +180,7 @@ class ControlServer:
         self._server: Optional[socket.socket] = None
         self._completed: Dict[str, Dict[str, Any]] = {}
         self._lock = threading.Lock()
+        self._token: Optional[str] = None
 
     def start(self) -> None:
         self.socket_path.parent.mkdir(parents=True, exist_ok=True)
@@ -145,13 +188,30 @@ class ControlServer:
             self.socket_path.unlink()
         except FileNotFoundError:
             pass
-        server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        try:
-            server.bind(str(self.socket_path))
-        except Exception:
-            server.close()
-            raise
-        os.chmod(self.socket_path, 0o600)
+        if _HAS_AF_UNIX:
+            server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                server.bind(str(self.socket_path))
+            except Exception:
+                server.close()
+                raise
+            os.chmod(self.socket_path, 0o600)
+        else:
+            # Windows CPython exposes no AF_UNIX: bind a loopback TCP port and
+            # publish {port, token} beside the socket path. Every request over
+            # TCP must carry the token.
+            server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                server.bind(("127.0.0.1", 0))
+                self._token = secrets.token_hex(32)
+                atomic_write_json(
+                    control_endpoint_path(self.socket_path),
+                    {"port": int(server.getsockname()[1]), "token": self._token},
+                )
+            except Exception:
+                server.close()
+                self._token = None
+                raise
         server.listen(8)
         server.settimeout(0.5)
         self._server = server
@@ -171,6 +231,12 @@ class ControlServer:
             self.socket_path.unlink()
         except FileNotFoundError:
             pass
+        if self._token is not None:
+            try:
+                control_endpoint_path(self.socket_path).unlink()
+            except FileNotFoundError:
+                pass
+            self._token = None
 
     def _serve(self) -> None:
         assert self._server is not None
@@ -190,6 +256,8 @@ class ControlServer:
                         raw += chunk
                     payload = json.loads(raw.split(b"\n", 1)[0].decode("utf-8"))
                     response = self._handle(payload)
+                except _UnauthorizedError as exc:
+                    response = {"ok": False, "code": "unauthorized", "message": str(exc)}
                 except Exception as exc:
                     response = {"ok": False, "code": "invalid_request", "message": str(exc)}
                 connection.sendall((json.dumps(response, separators=(",", ":")) + "\n").encode("utf-8"))
@@ -197,6 +265,8 @@ class ControlServer:
     def _handle(self, payload: object) -> Dict[str, Any]:
         if not isinstance(payload, dict):
             raise ValueError("request must be a JSON object")
+        if self._token is not None and not hmac.compare_digest(str(payload.get("token") or ""), self._token):
+            raise _UnauthorizedError("a valid control token is required on the TCP fallback endpoint")
         request_id = str(payload.get("request_id") or "").strip()
         action = str(payload.get("action") or "").strip()
         ticker_value = payload.get("ticker")
@@ -233,9 +303,21 @@ class ControlServer:
 
 
 def send_control_command(socket_path: Path, payload: Dict[str, Any], timeout: float = 125.0) -> Dict[str, Any]:
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+    socket_path = Path(socket_path)
+    descriptor = None if socket_path.exists() else read_control_endpoint(socket_path)
+    if descriptor is not None:
+        # launcher.sock is absent but a TCP-fallback descriptor exists: connect
+        # over loopback and stamp the request with the required token.
+        payload = {**payload, "token": str(descriptor["token"])}
+        client = socket.create_connection(("127.0.0.1", int(descriptor["port"])), timeout=timeout)
+    elif _HAS_AF_UNIX:
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    else:
+        raise FileNotFoundError(f"no launcher control endpoint (unix socket or TCP descriptor) at {socket_path}")
+    with client:
         client.settimeout(timeout)
-        client.connect(str(socket_path))
+        if descriptor is None:
+            client.connect(str(socket_path))
         client.sendall((json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8"))
         raw = b""
         while b"\n" not in raw and len(raw) <= 1_048_576:

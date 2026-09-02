@@ -357,8 +357,13 @@ def extract_book_snapshot(mkt: Dict[str, Any], default_tick_cents: int) -> Optio
 
 
 def market_passes_safety_filters(mkt: Dict[str, Any], book: Dict[str, Any], settings: Dict[str, Any]) -> bool:
-    # Keyword-based permanent exclusion (e.g. temperature markets)
-    excluded_keywords = [kw.upper() for kw in getattr(config, "EXCLUDED_TICKER_KEYWORDS", [])]
+    # Keyword-based permanent exclusion (e.g. temperature markets). The session
+    # supplies the list via settings; a settings dict without the key (older
+    # callers, tests) falls back to the module constant.
+    raw_keywords = settings.get("excluded_ticker_keywords")
+    if raw_keywords is None:
+        raw_keywords = getattr(config, "EXCLUDED_TICKER_KEYWORDS", [])
+    excluded_keywords = [str(kw).upper() for kw in raw_keywords if str(kw).strip()]
     if excluded_keywords:
         ticker_upper = str(mkt.get("ticker") or "").upper()
         if any(kw in ticker_upper for kw in excluded_keywords):
@@ -684,6 +689,9 @@ def build_market_row(mkt: Dict[str, Any], book: Dict[str, Any], settings: Dict[s
         "CutoffField": cutoff_field,
         "CutoffUTC": fmt_utc(cutoff_dt),
         "Ticker": str(mkt.get("ticker") or ""),
+        # Exchange shard hosting the market; capital is allocated per shard and
+        # orders are routed to it, so the fleet must know it per pick.
+        "Exchange Index": int(mkt.get("exchange_index") or 0),
         "SeriesURL": series_url,
         "SearchText": title[:120],
         "YES candidate debug": yes_result["candidate_debug"],
@@ -853,6 +861,15 @@ def build_settings_from_args(args: argparse.Namespace) -> Dict[str, Any]:
         "default_tick_cents": args.default_tick_cents,
         "quote_size": args.quote_size,
         "excluded_series": args.excluded_series,
+        "excluded_ticker_keywords": list(
+            getattr(args, "excluded_ticker_keywords", None)
+            if getattr(args, "excluded_ticker_keywords", None) is not None
+            else getattr(config, "EXCLUDED_TICKER_KEYWORDS", [])
+        ),
+        # Quote-planning constants carried for the session mapping; the EV
+        # minimum derived from target_edge_cents is the key the filter reads.
+        "target_edge_cents": cfg("TARGET_EDGE_CENTS", 2),
+        "fee_buffer_cents": cfg("FEE_BUFFER_CENTS", 0),
         # EV-specific settings
         "minimum_expected_edge_cents_to_quote": args.minimum_expected_edge_cents_to_quote,
         "default_toxicity_cents": args.default_toxicity_cents,
@@ -879,6 +896,38 @@ def build_settings_from_args(args: argparse.Namespace) -> Dict[str, Any]:
         "markout_filter_fee_factor": args.markout_filter_fee_factor,
         "markout_filter_total_net_threshold_cents": args.markout_filter_total_net_threshold_cents,
     }
+
+
+def minimum_expected_edge_cents_for_target(target_edge_cents: Any) -> float:
+    """The EV floor the CLI derives from ``TARGET_EDGE_CENTS`` (``max(2, target // 2)``).
+
+    An explicit ``MIN_EXPECTED_EDGE_CENTS_TO_QUOTE`` in ``kalshi_screener_config``
+    still wins, exactly as it does for the CLI default.
+    """
+    try:
+        target = int(target_edge_cents)
+    except (TypeError, ValueError):
+        target = int(cfg("TARGET_EDGE_CENTS", 4))
+    return float(cfg("MIN_EXPECTED_EDGE_CENTS_TO_QUOTE", max(2, target // 2)))
+
+
+def build_settings_from_configuration(configuration: Dict[str, Any]) -> Dict[str, Any]:
+    """Screener settings for a saved session: CLI/config defaults overlaid with the session's ``screener`` section.
+
+    Every ``session_config._SCREENER_FIELDS`` key lands on the snake_case key
+    the filters read (``screen_markets`` / ``market_passes_safety_filters`` /
+    ``build_export_dataframe`` / the markout filter). Settings the session does
+    not expose (tick size, EV tuning, ``markout_filter_fee_factor``,
+    ``excluded_series``) keep their ``kalshi_screener_config`` values.
+    """
+    from session_config import screener_settings_from_configuration
+
+    settings = build_settings_from_args(build_parser().parse_args([]))
+    settings.update(screener_settings_from_configuration(configuration))
+    settings["minimum_expected_edge_cents_to_quote"] = minimum_expected_edge_cents_for_target(
+        settings["target_edge_cents"]
+    )
+    return settings
 
 
 def run_once(args: argparse.Namespace) -> None:
@@ -942,6 +991,12 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="*",
         default=list(getattr(config, "EXCLUDED_SERIES", [])),
         help="Series prefixes to exclude (e.g. KXWTI KXXRPD). Overrides config.EXCLUDED_SERIES.",
+    )
+    parser.add_argument(
+        "--excluded-ticker-keywords",
+        nargs="*",
+        default=list(getattr(config, "EXCLUDED_TICKER_KEYWORDS", [])),
+        help="Case-insensitive ticker substrings to drop (e.g. LOWT HIGH). Overrides config.EXCLUDED_TICKER_KEYWORDS.",
     )
 
     # EV defaults are self-contained so config does not need to change

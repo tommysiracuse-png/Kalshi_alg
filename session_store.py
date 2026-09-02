@@ -251,32 +251,46 @@ class SessionStore:
                 VALUES(?,?,?,?,?,'pending',?,?)""", (run_id, session_id, session["name"], session["version"], session["configuration_json"], timestamp, str(artifact)))
         return self.get_run(run_id)
 
+    def reconcile_orphaned_runs(self) -> int:
+        """Finalize runs whose launcher exited without writing a terminal status.
+
+        A stranded 'running' row blocks session selection and new runs, so this
+        is safe to call whenever the launcher is known to be gone rather than
+        only when the next run claims.
+        """
+        with self._connect() as db:
+            return self._interrupt_active_runs(db, now_ms())
+
+    def _interrupt_active_runs(self, db: sqlite3.Connection, timestamp: int) -> int:
+        interrupted_runs = db.execute(
+            """SELECT id,artifact_path,heartbeat_at_ms,metrics_json FROM runs
+               WHERE status IN ('starting','running')"""
+        ).fetchall()
+        for interrupted in interrupted_runs:
+            artifact = Path(interrupted["artifact_path"])
+            self._finalize_order_revisions(artifact, timestamp)
+            totals, markets, warnings = self._summarize_markouts(
+                artifact, active=False,
+                as_of_ms=int(interrupted["heartbeat_at_ms"] or timestamp),
+            )
+            metrics = json.loads(interrupted["metrics_json"] or "{}")
+            metrics["markoutsByHorizon"] = totals
+            metrics["markoutWarnings"] = warnings
+            market_metrics = dict(metrics.get("markets") or {})
+            for ticker, values in markets.items():
+                market_metrics.setdefault(ticker, {})["markoutsByHorizon"] = values
+            metrics["markets"] = market_metrics
+            db.execute(
+                "UPDATE runs SET metrics_json=? WHERE id=?",
+                (json.dumps(metrics, separators=(",", ":")), interrupted["id"]),
+            )
+        db.execute("UPDATE runs SET status='interrupted',ended_at_ms=COALESCE(heartbeat_at_ms,?),error=COALESCE(error,'launcher exited without finalizing') WHERE status IN ('starting','running')", (timestamp,))
+        return len(interrupted_runs)
+
     def claim_run(self, run_id: Optional[str] = None) -> Dict[str, Any]:
         with self._connect() as db:
             timestamp = now_ms()
-            interrupted_runs = db.execute(
-                """SELECT id,artifact_path,heartbeat_at_ms,metrics_json FROM runs
-                   WHERE status IN ('starting','running')"""
-            ).fetchall()
-            for interrupted in interrupted_runs:
-                artifact = Path(interrupted["artifact_path"])
-                self._finalize_order_revisions(artifact, timestamp)
-                totals, markets, warnings = self._summarize_markouts(
-                    artifact, active=False,
-                    as_of_ms=int(interrupted["heartbeat_at_ms"] or timestamp),
-                )
-                metrics = json.loads(interrupted["metrics_json"] or "{}")
-                metrics["markoutsByHorizon"] = totals
-                metrics["markoutWarnings"] = warnings
-                market_metrics = dict(metrics.get("markets") or {})
-                for ticker, values in markets.items():
-                    market_metrics.setdefault(ticker, {})["markoutsByHorizon"] = values
-                metrics["markets"] = market_metrics
-                db.execute(
-                    "UPDATE runs SET metrics_json=? WHERE id=?",
-                    (json.dumps(metrics, separators=(",", ":")), interrupted["id"]),
-                )
-            db.execute("UPDATE runs SET status='interrupted',ended_at_ms=COALESCE(heartbeat_at_ms,?),error=COALESCE(error,'launcher exited without finalizing') WHERE status IN ('starting','running')", (timestamp,))
+            self._interrupt_active_runs(db, timestamp)
             row = db.execute("SELECT * FROM runs WHERE id=? AND status='pending'", (run_id,)).fetchone() if run_id else db.execute("SELECT * FROM runs WHERE status='pending' ORDER BY created_at_ms LIMIT 1").fetchone()
             if not row:
                 # Boot-time/autonomous start snapshots the selected session.

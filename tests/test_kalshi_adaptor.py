@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 
 import pytest
 
@@ -8,6 +9,7 @@ from clients.http_client import HTTPClientError
 from clients.models import (
     AccountFillQuery,
     AccountOrderQuery,
+    AmendOrderRequest,
     CreateOrderRequest,
     OrderBookDelta,
     OrderBookSnapshot,
@@ -402,3 +404,227 @@ def test_account_direction_accepts_legacy_action_and_side():
         "order_id": "legacy", "action": "sell", "side": "yes", "yes_price_dollars": "0.3000"
     })
     assert order.side == "no"
+
+
+# --- exchange sharding -------------------------------------------------------
+
+
+def _create(market_id, client_order_id="c1"):
+    return CreateOrderRequest(market_id, "yes", 4_000, 100, client_order_id, None)
+
+
+def test_market_parses_exchange_index_and_defaults_to_zero():
+    assert KalshiApiClient._market({"ticker": "KXATP-X", "exchange_index": 3}, "").exchange_index == 3
+    assert KalshiApiClient._market({"ticker": "KXATP-X", "exchange_index": "2"}, "").exchange_index == 2
+    assert KalshiApiClient._market({"ticker": "KXATP-X"}, "").exchange_index == 0
+    assert KalshiApiClient._market({"ticker": "KXATP-X", "exchange_index": None}, "").exchange_index == 0
+
+
+def test_balance_breakdown_is_parsed_per_exchange_in_price_units():
+    http = FakeHTTP()
+    http.responses = [{
+        "balance": 71803,
+        "balance_dollars": "718.0341",
+        "portfolio_value_dollars": "900.0000",
+        "updated_ts": 10,
+        "balance_breakdown": [
+            {"exchange_index": 3, "balance": "0.0000"},
+            {"exchange_index": 0, "balance": "718.0341"},
+            {"exchange_index": 2, "balance": "0.0000"},
+            {"exchange_index": 1, "balance": "0.0000"},
+        ],
+    }]
+    balance = make_client(http=http).get_account_balance()
+    assert balance.available_cash_units == 7_180_341
+    assert balance.portfolio_value_units == 9_000_000
+    assert balance.balance_by_exchange == ((0, 7_180_341), (1, 0), (2, 0), (3, 0))
+
+
+def test_balance_without_breakdown_leaves_per_exchange_tuple_empty():
+    http = FakeHTTP()
+    http.responses = [{"balance_dollars": "12.3400", "portfolio_value_dollars": "12.3400"}]
+    balance = make_client(http=http).get_account_balance()
+    assert balance.available_cash_units == 123_400
+    assert balance.balance_by_exchange == ()
+
+
+def test_create_order_targets_cached_market_shard_else_requires_auto_routing():
+    http = FakeHTTP()
+    http.responses = [
+        {"market": {"ticker": "TENNIS", "exchange_index": 3}},
+        {"order": {"order_id": "o-tennis"}},
+        {"order": {"order_id": "o-unknown"}},
+        {"market": {"ticker": "LEGACY"}},
+        {"order": {"order_id": "o-legacy"}},
+    ]
+    client = make_client(http=http)
+
+    market = client.get_market("TENNIS")
+    assert market.exchange_index == 3
+    assert client.exchange_index_for_market("TENNIS") == 3
+    assert client.exchange_index_for_market("UNKNOWN") is None
+
+    client.create_order(_create("TENNIS"))
+    # create-order-v2: exchange_index is a JSON body integer.
+    assert http.calls[1][2]["body"]["exchange_index"] == 3
+    assert "exchange_index" not in (http.calls[1][2].get("params") or {})
+
+    client.create_order(_create("UNKNOWN"))
+    assert http.calls[2][2]["body"]["exchange_index"] == -1
+
+    # A market payload that omits exchange_index normalizes to shard 0 on the
+    # model but is NOT trusted for direct routing: the write auto-routes.
+    legacy = client.get_market("LEGACY")
+    assert legacy.exchange_index == 0
+    assert client.exchange_index_for_market("LEGACY") is None
+    client.create_order(_create("LEGACY"))
+    assert http.calls[4][2]["body"]["exchange_index"] == -1
+
+
+def test_list_markets_and_quotes_populate_shard_cache():
+    http = FakeHTTP()
+    http.responses = [
+        {"markets": [{"ticker": "MLB-1", "exchange_index": 3}, {"ticker": "BTC-1", "exchange_index": 2}]},
+        {"market": {"ticker": "QUOTED", "exchange_index": 1, "yes_bid_dollars": "0.4000"}},
+    ]
+    client = make_client(http=http)
+    markets = client.list_markets(MarketQuery(max_results=2))
+    assert [m.exchange_index for m in markets] == [3, 2]
+    client.get_market_quote("QUOTED")
+    assert client.exchange_index_for_market("MLB-1") == 3
+    assert client.exchange_index_for_market("BTC-1") == 2
+    assert client.exchange_index_for_market("QUOTED") == 1
+
+
+def test_cancel_decrease_and_amend_carry_remembered_shard_and_ticker():
+    http = FakeHTTP()
+    http.responses = [
+        {"market": {"ticker": "TENNIS", "exchange_index": 3}},
+        {"order": {"order_id": "o1"}},
+        {"order_id": "o1", "reduced_by": "1.00"},
+        {"order_id": "o1", "remaining_count": "0.50"},
+        {"order": {"order_id": "o1"}},
+    ]
+    client = make_client(http=http, subaccount_number=2)
+    client.get_market("TENNIS")
+    client.create_order(_create("TENNIS"))
+
+    client.cancel_order(order_id="o1")
+    # cancel-order-v2: exchange_index and market_ticker are QUERY parameters.
+    method, path, kwargs = http.calls[2]
+    assert method == "DELETE" and path.endswith("/portfolio/events/orders/o1")
+    assert kwargs["params"] == {"subaccount": 2, "exchange_index": 3, "market_ticker": "TENNIS"}
+
+    client.decrease_order_to(order_id="o1", remaining_count_units=50)
+    # decrease-order-v2: exchange_index and market_ticker are JSON BODY fields.
+    method, path, kwargs = http.calls[3]
+    assert method == "POST" and path.endswith("/portfolio/events/orders/o1/decrease")
+    assert kwargs["body"] == {"reduce_to": "0.50", "exchange_index": 3, "market_ticker": "TENNIS"}
+    assert kwargs["params"] == {"subaccount": 2}
+
+    client.amend_order(AmendOrderRequest("o1", "TENNIS", "yes", 4_100, 100, "c1", "c2"))
+    # amend-order-v2: exchange_index is a JSON body integer alongside ticker.
+    method, path, kwargs = http.calls[4]
+    assert path.endswith("/portfolio/events/orders/o1/amend")
+    assert kwargs["body"]["exchange_index"] == 3
+    assert kwargs["body"]["ticker"] == "TENNIS"
+
+
+def test_cancel_of_auto_routed_order_falls_back_to_ticker_auto_routing():
+    http = FakeHTTP()
+    http.responses = [
+        {"order": {"order_id": "o-auto"}},
+        {"order_id": "o-auto"},
+        {"order_id": "o-auto"},
+        {"market": {"ticker": "LATER", "exchange_index": 2}},
+        {"order_id": "o-auto"},
+        {"order": {"order_id": "o-resp", "exchange_index": 1}},
+        {"order_id": "o-resp"},
+    ]
+    client = make_client(http=http)
+
+    # Created without a known shard (-1). The shard is still unknown, but the
+    # ticker is remembered, so cancel/decrease send -1 + market_ticker.
+    client.create_order(_create("LATER"))
+    assert http.calls[0][2]["body"]["exchange_index"] == -1
+    client.cancel_order(order_id="o-auto")
+    assert http.calls[1][2]["params"] == {"subaccount": 0, "exchange_index": -1, "market_ticker": "LATER"}
+    client.decrease_order_to(order_id="o-auto", remaining_count_units=100)
+    assert http.calls[2][2]["body"] == {"reduce_to": "1.00", "exchange_index": -1, "market_ticker": "LATER"}
+
+    # Once the market's shard is learned, the order resolves to it explicitly.
+    client.get_market("LATER")
+    client.cancel_order(order_id="o-auto")
+    assert http.calls[4][2]["params"] == {"subaccount": 0, "exchange_index": 2, "market_ticker": "LATER"}
+
+    # A create response that reports exchange_index wins over the value sent.
+    client.create_order(_create("LATER", "c9"))
+    client.cancel_order(order_id="o-resp")
+    assert http.calls[6][2]["params"]["exchange_index"] == 1
+
+
+def test_cancel_of_unknown_order_omits_routing_and_warns_once(caplog):
+    http = FakeHTTP()
+    http.responses = [{"order_id": "ghost"}, {"order_id": "ghost"}, {"order_id": "ghost"}]
+    client = make_client(http=http, subaccount_number=1)
+
+    with caplog.at_level(logging.WARNING, logger="kalshi_top_of_book_bot"):
+        client.cancel_order(order_id="ghost")
+        client.decrease_order_to(order_id="ghost", remaining_count_units=100)
+        client.cancel_order(order_id="ghost")
+
+    # Docs: -1 "require[s] auto-routing by market ticker"; with no ticker the
+    # parameter is omitted and the venue defaults to shard 0, warned once.
+    assert http.calls[0][2]["params"] == {"subaccount": 1}
+    assert http.calls[1][2]["body"] == {"reduce_to": "1.00"}
+    assert http.calls[2][2]["params"] == {"subaccount": 1}
+    warnings = [r for r in caplog.records if "ORDER_ROUTE_UNKNOWN" in r.getMessage()]
+    assert len(warnings) == 1
+    assert "ghost" in warnings[0].getMessage()
+
+
+def test_resting_orders_and_stream_updates_seed_routing_after_restart():
+    http = FakeHTTP()
+    http.responses = [
+        {"orders": [
+            {"order_id": "r-shard", "ticker": "TENNIS", "status": "resting", "exchange_index": 3},
+            {"order_id": "r-ticker", "ticker": "TENNIS", "status": "resting"},
+        ], "cursor": ""},
+        {"order_id": "r-shard"},
+        {"order_id": "r-ticker"},
+        {"order_id": "ws-order"},
+    ]
+    client = make_client(http=http)
+    resting = client.get_resting_orders("TENNIS")
+    assert [o.order_id for o in resting] == ["r-shard", "r-ticker"]
+
+    client.cancel_order(order_id="r-shard")
+    assert http.calls[1][2]["params"] == {"subaccount": 0, "exchange_index": 3, "market_ticker": "TENNIS"}
+    client.cancel_order(order_id="r-ticker")
+    assert http.calls[2][2]["params"] == {"subaccount": 0, "exchange_index": -1, "market_ticker": "TENNIS"}
+
+    event = client._event(
+        {"type": "user_order", "msg": {"ticker": "MLB-9", "side": "yes", "order_id": "ws-order", "status": "resting"}},
+        "MLB-9",
+    )
+    assert isinstance(event, OrderUpdate)
+    client.cancel_order(order_id="ws-order")
+    assert http.calls[3][2]["params"] == {"subaccount": 0, "exchange_index": -1, "market_ticker": "MLB-9"}
+
+
+def test_dry_run_writes_still_short_circuit_with_sharding():
+    http = FakeHTTP()
+    client = make_client(http=http, dry_run=True)
+    order = client.create_order(_create("TENNIS"))
+    assert order.order_id.startswith("DRY-")
+    assert client.cancel_order(order_id=order.order_id).order_id == order.order_id
+    assert client.decrease_order_to(order_id=order.order_id, remaining_count_units=10).order_id == order.order_id
+    assert http.calls == []
+
+
+def test_dry_run_create_reports_the_outcome_side_like_a_live_answer():
+    client = make_client(http=FakeHTTP(), dry_run=True)
+    sell_yes = CreateOrderRequest("MKT", "yes", 4_000, 100, "wd:yes:1", None, action="sell", reduce_only=True)
+    assert client.create_order(sell_yes).side == "no"
+    assert client.create_order(CreateOrderRequest("MKT", "no", 4_000, 100, "c2", None, action="sell")).side == "yes"
+    assert client.create_order(_create("MKT")).side == "yes"

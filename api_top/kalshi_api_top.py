@@ -37,6 +37,8 @@ CATEGORY_NAMES = {
     "get_series": "pull series",
     "get_series_fee_changes": "pull series fees",
     "get_incentive_programs": "pull incentives",
+    "get_market_candlesticks": "pull candlesticks",
+    "list_public_trades": "pull public trades",
 }
 
 ENDPOINT_COSTS_URL = "https://external-api.kalshi.com/trade-api/v2/account/endpoint_costs"
@@ -61,6 +63,8 @@ OPERATION_ENDPOINTS = {
     "get_series": ("GET", "/trade-api/v2/series/:series_ticker"),
     "get_series_fee_changes": ("GET", "/trade-api/v2/series/fee_changes"),
     "get_incentive_programs": ("GET", "/trade-api/v2/incentive_programs"),
+    "get_market_candlesticks": ("GET", "/trade-api/v2/series/:series_ticker/markets/:ticker/candlesticks"),
+    "list_public_trades": ("GET", "/trade-api/v2/markets/trades"),
 }
 
 # Current documented fallback. The live public endpoint replaces this catalog

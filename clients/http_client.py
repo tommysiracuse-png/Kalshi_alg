@@ -20,11 +20,31 @@ class HTTPClientError(RuntimeError):
 
 
 class HTTPClient:
-    def __init__(self, base_url: str, *, timeout_seconds: float = 15, session: Optional[Any] = None) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        *,
+        timeout_seconds: float = 15,
+        session: Optional[Any] = None,
+        connect_timeout_seconds: Optional[float] = None,
+    ) -> None:
         self.base_url = base_url.rstrip("/")
+        # ``timeout_seconds`` bounds every socket read; ``connect_timeout_seconds``
+        # (when given) bounds the TCP/TLS connect phase separately so one
+        # unreachable venue endpoint cannot hold a caller for the full read
+        # timeout before the first byte.  Either way no REST call is unbounded.
         self.timeout_seconds = float(timeout_seconds)
+        self.connect_timeout_seconds = (
+            None if connect_timeout_seconds is None else float(connect_timeout_seconds)
+        )
         self.session = session or requests.Session()
         self.activity = ActivityMonitor()
+
+    @property
+    def request_timeout(self) -> Any:
+        if self.connect_timeout_seconds is None:
+            return self.timeout_seconds
+        return (self.connect_timeout_seconds, self.timeout_seconds)
 
     def _url(self, path: str) -> str:
         return f"{self.base_url}/{path.lstrip('/')}"
@@ -89,7 +109,7 @@ class HTTPClient:
         error_message = None
         try:
             request = getattr(self.session, method.lower())
-            kwargs = {"headers": dict(headers or {}), "params": params, "timeout": self.timeout_seconds}
+            kwargs = {"headers": dict(headers or {}), "params": params, "timeout": self.request_timeout}
             if method == "POST":
                 kwargs["json"] = dict(body or {})
             response = request(self._url(path), **kwargs)

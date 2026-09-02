@@ -15,10 +15,11 @@ from typing import Dict, Optional
 
 from adaptors.kalshi import KalshiApiClient, KalshiClientConfig
 from bot_manager import BotManagerConfig
+from clients.models import AccountPositionQuery
 from fleet_runtime.manager import ShardedBotManager
 from fleet_models import ScreenerPick, ScreenerUpdate
-from kalshi_screener import build_parser as build_screener_parser
-from kalshi_screener import build_settings_from_args as build_screener_settings
+from kalshi_screener import build_settings_from_configuration as build_screener_settings
+from market_classes import HistorySeriesStatsSource, build_market_class_resolver
 from lip_launcher import (
     atomic_write_json,
     clear_disabled_ticker,
@@ -33,6 +34,20 @@ from session_config import default_session_configuration, validate_session_confi
 
 
 LOGGER = logging.getLogger(__name__)
+
+
+def screener_settings_for_session(session_configuration: Dict[str, object], max_bots: int) -> Dict[str, object]:
+    """Screener settings the fleet runs with: the session's ``screener`` section plus the ``maxBots`` floor.
+
+    The direct-CLI path passes ``default_session_configuration()`` (its
+    ``screener`` defaults are the ``kalshi_screener_config`` constants), so it
+    screens exactly as before sessions carried the section. ``top_n`` keeps
+    its historical semantics: the export must hold at least ``maxBots`` rows.
+    """
+    settings = build_screener_settings(session_configuration)
+    if int(max_bots) > 0:
+        settings["top_n"] = max(int(settings["top_n"]), int(max_bots))
+    return settings
 
 
 class Launcher:
@@ -114,11 +129,8 @@ class Launcher:
                 analytics_path=self.runtime_dir / "portfolio_analytics.sqlite3",
             ),
         )
-        screener_args = build_screener_parser().parse_args([])
-        screener_args.output = str(self.screen_path)
-        screener_settings = build_screener_settings(screener_args)
-        if arguments.max_bots > 0:
-            screener_settings["top_n"] = max(int(screener_settings["top_n"]), int(arguments.max_bots))
+        screener_settings = screener_settings_for_session(self.session_configuration, int(arguments.max_bots))
+        fleet_runtime = self.session_configuration.get("fleetRuntime") or {}
         self.screener = Screener(
             client=self.client,
             settings=screener_settings,
@@ -127,9 +139,15 @@ class Launcher:
             default_no_budget_cents=arguments.no_budget_cents,
             max_bots=int(arguments.max_bots),
             minimum_carryover_value_cents=arguments.minimum_carryover_value_cents,
+            cash_reserve_fraction=float(fleet_runtime.get("cashReserveFraction", 0.0)),
+            allocation_oversubscription=float(fleet_runtime.get("allocationOversubscription", 1.0)),
             yes_budget_column=arguments.yes_budget_column,
             no_budget_column=arguments.no_budget_column,
             disabled_market_ids=lambda: set(load_disable_list(self.watchdog_disable_file)),
+            market_class_resolver=build_market_class_resolver(
+                self.session_configuration,
+                series_stats=HistorySeriesStatsSource(Path(__file__).resolve().parent / "history_data" / "history.sqlite3"),
+            ),
         )
         self.manager = ShardedBotManager(
             BotManagerConfig(
@@ -181,11 +199,59 @@ class Launcher:
         self._append_run_log("launcher initialized")
 
     def _append_run_log(self, message: str) -> None:
-        if self.run_artifact_path is None:
+        if getattr(self, "run_artifact_path", None) is None:
             return
         self.run_artifact_path.mkdir(parents=True, exist_ok=True)
         with (self.run_artifact_path / "launcher.log").open("a", encoding="utf-8") as handle:
             handle.write(f"{int(time.time() * 1000)} {message}\n")
+
+    # Manager events that mean the fleet degraded or recovered.  They are
+    # logged at WARNING and appended to the run log so an operator reading
+    # launcher_console.log can reconstruct a stall/restart history; every
+    # other event is logged at INFO.
+    MANAGER_EVENT_WARNINGS = frozenset({
+        "broker_restarted", "worker_recovery_failed", "runtime_capacity_fail_closed",
+        "capacity_fail_closed", "shutdown_cleanup_failed", "update_skipped_shutdown",
+    })
+    MANAGER_EVENT_RUN_LOG = MANAGER_EVENT_WARNINGS | frozenset({
+        "admission_recovered", "worker_restarted", "fleet_shutdown_cleanup_verified",
+    })
+
+    @staticmethod
+    def format_manager_event(event) -> str:
+        detail = getattr(event, "detail", None) or {}
+        parts = [f"MANAGER_EVENT | type={getattr(event, 'event_type', '?')}"]
+        market_id = getattr(event, "market_id", "")
+        if market_id and market_id != "*":
+            parts.append(f"market={market_id}")
+        for key in sorted(detail):
+            value = detail[key]
+            if isinstance(value, (list, tuple)):
+                value = ",".join(str(item) for item in value) or "-"
+            parts.append(f"{key}={value}")
+        return " ".join(parts)
+
+    def _log_manager_event(self, event) -> None:
+        line = self.format_manager_event(event)
+        event_type = str(getattr(event, "event_type", "") or "")
+        LOGGER.log(logging.WARNING if event_type in self.MANAGER_EVENT_WARNINGS else logging.INFO, line)
+        if event_type in self.MANAGER_EVENT_RUN_LOG:
+            try:
+                self._append_run_log(line)
+            except OSError as exc:
+                self._record_observability_failure("append manager event", exc)
+
+    def _drain_manager_events(self) -> None:
+        """Log every queued manager event instead of discarding it."""
+        events = getattr(self.manager, "events", None)
+        if events is None:
+            return
+        while not events.empty():
+            try:
+                event = events.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            self._log_manager_event(event)
 
     def _save_screener_snapshot(self) -> None:
         if self.run_artifact_path is None:
@@ -284,6 +350,92 @@ class Launcher:
         with self.status_lock:
             return dict(self.latest_status)
 
+    async def _startup_exchange_positions(self) -> Optional[list]:
+        """The account's open exchange positions for the restart carryover.
+
+        Read once at fleet start through the launcher's own client (the same
+        positions call PortfolioMonitor uses) so every position left by an
+        earlier run gets a bot even when the screener does not re-pick its
+        market.  ``None`` when unavailable (no credentials, venue error): the
+        start proceeds without carryover and the reason is surfaced.
+        """
+        if not (self.api_key_id and self.private_key_path):
+            return None
+        try:
+            positions = await asyncio.to_thread(
+                self.client.list_account_positions, AccountPositionQuery(nonzero_only=True),
+            )
+        except Exception as exc:
+            message = f"exchange positions unavailable at start; restart carryover skipped: {exc}"
+            LOGGER.warning("STARTUP_EXCHANGE_POSITIONS | %s", message)
+            self.last_error = message
+            return None
+        return [item for item in positions if int(getattr(item, "position_units", 0) or 0) != 0]
+
+    # Run artifacts scanned for fleet fills at start (newest first).
+    TRADED_TICKERS_RUN_LIMIT = 40
+
+    def _fleet_traded_tickers_sync(self) -> set:
+        """Tickers the fleet's own telemetry has fills for, from the run artifacts.
+
+        Every run under this session's artifact root (``<artifacts>/<session>/
+        <run>``: the current run's siblings, newest first, at most
+        ``TRADED_TICKERS_RUN_LIMIT``) is scanned for its per-shard telemetry
+        databases and their ``fills`` tickers.  Used by the restart carryover
+        as proof that a position outside the screener's horizon is the
+        fleet's after all.  Read-only, best effort: an unreadable database is
+        skipped.  Empty when the launcher runs without a session run.
+        """
+        import sqlite3
+        from contextlib import closing
+
+        from pnl_core import find_telemetry_databases
+
+        artifact = getattr(self, "run_artifact_path", None)
+        if artifact is None:
+            return set()
+        session_root = Path(artifact).parent
+        try:
+            runs = [path for path in session_root.iterdir() if path.is_dir()]
+        except OSError:
+            return set()
+        runs.sort(key=lambda path: path.stat().st_mtime if path.exists() else 0, reverse=True)
+        tickers: set = set()
+        for run in runs[: self.TRADED_TICKERS_RUN_LIMIT]:
+            for database in find_telemetry_databases(run):
+                try:
+                    uri = f"file:{database.as_posix()}?mode=ro"
+                    with closing(sqlite3.connect(uri, uri=True, timeout=0.25)) as db:
+                        tables = {str(row[0]) for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                        if "fills" not in tables:
+                            continue
+                        tickers.update(
+                            str(row[0]) for row in db.execute("SELECT DISTINCT ticker FROM fills") if row[0]
+                        )
+                except Exception as exc:
+                    LOGGER.debug("telemetry fills unreadable for carryover: %s: %s", database, exc)
+        return tickers
+
+    async def _fleet_traded_tickers(self) -> set:
+        try:
+            return await asyncio.to_thread(self._fleet_traded_tickers_sync)
+        except Exception as exc:
+            LOGGER.warning("STARTUP_EXCHANGE_POSITIONS | fleet fill history unavailable: %s", exc)
+            return set()
+
+    async def _with_startup_carryover(
+        self, picks: tuple[ScreenerPick, ...]
+    ) -> tuple[tuple[ScreenerPick, ...], tuple[str, ...], list[str]]:
+        """Direct seed paths: append reduce-only picks for open exchange positions."""
+        positions = await self._startup_exchange_positions()
+        if not positions:
+            return picks, (), []
+        traded = await self._fleet_traded_tickers()
+        selected, carried, warnings = await asyncio.to_thread(
+            self.screener.carry_exchange_positions, list(picks), positions, traded_tickers=traded,
+        )
+        return tuple(selected), tuple(sorted(carried)), warnings
+
     async def _seed_from_csv(self) -> None:
         if not self.screen_path.exists():
             return
@@ -310,6 +462,7 @@ class Launcher:
             for pick in legacy
             if pick.ticker not in load_disable_list(self.watchdog_disable_file)
         )
+        picks, carried, warnings = await self._with_startup_carryover(picks)
         update = ScreenerUpdate(
             generation_id=0,
             generated_at_ms=int(time.time() * 1000),
@@ -319,8 +472,9 @@ class Launcher:
             kept=(),
             changed=(),
             removed=(),
+            inventory_carried=carried,
         )
-        self.screener.accept_snapshot(update)
+        self.screener.accept_snapshot(update, warnings=warnings)
         if self.shutdown_requested.is_set():
             return
         await self.manager.apply_update(update)
@@ -335,19 +489,28 @@ class Launcher:
             ranking={"Ticker": ticker, "SearchText": ticker},
             selection_reason="fixed_session_ticker",
         )
+        picks, carried, warnings = await self._with_startup_carryover((pick,))
         update = ScreenerUpdate(
             generation_id=0,
             generated_at_ms=int(time.time() * 1000),
             reason="fixed_session_ticker",
-            picks=(pick,), added=(ticker,), kept=(), changed=(), removed=(),
+            picks=picks, added=tuple(item.market_id for item in picks), kept=(), changed=(), removed=(),
+            inventory_carried=carried,
         )
-        self.screener.accept_snapshot(update)
+        self.screener.accept_snapshot(update, warnings=warnings)
         await self.manager.apply_update(update)
         self._save_screener_snapshot()
 
     async def refresh(self, reason: str) -> bool:
+        # Fleet start: every open exchange position becomes a (reduce-only)
+        # carryover pick even when the screener does not re-pick its market.
+        exchange_positions = await self._startup_exchange_positions() if reason == "startup" else None
+        traded_tickers = await self._fleet_traded_tickers() if exchange_positions else None
         refresh_task = asyncio.create_task(
-            self.screener.refresh(self.manager.current_picks, reason=reason)
+            self.screener.refresh(
+                self.manager.current_picks, reason=reason, exchange_positions=exchange_positions,
+                traded_tickers=traded_tickers,
+            )
         )
         while not refresh_task.done():
             self.publish_status("stopping" if self.shutdown_requested.is_set() else "running")
@@ -417,6 +580,13 @@ class Launcher:
             elif request.action == "refresh":
                 refreshed = await self.refresh("operator_refresh")
                 result = {"refreshed": refreshed, "activeBots": len(self.manager.bots)}
+            elif request.action == "shutdown":
+                # Console-independent stop: on Windows the launcher runs on its
+                # own hidden console, so the dashboard's CTRL_BREAK never
+                # reaches it; the control endpoint is the reliable path.
+                self.manager.begin_shutdown()
+                self.shutdown_requested.set()
+                result = {"shutdownRequested": True}
             else:
                 raise ValueError(f"unsupported action: {request.action}")
             request.result = {"ok": True, "result": result}
@@ -433,17 +603,31 @@ class Launcher:
         control_server = ControlServer(self.socket_path, self.control_requests, self._status_provider)
         control_server.start()
         loop = asyncio.get_running_loop()
+
+        def request_shutdown() -> None:
+            self.manager.begin_shutdown()
+            self.shutdown_requested.set()
+
         installed_signals = []
         for sig in (signal.SIGINT, signal.SIGTERM):
             try:
-                def request_shutdown() -> None:
-                    self.manager.begin_shutdown()
-                    self.shutdown_requested.set()
-
                 loop.add_signal_handler(sig, request_shutdown)
                 installed_signals.append(sig)
             except NotImplementedError:
                 pass
+        if not installed_signals:
+            # Windows: asyncio has no loop signal handlers, so SIGINT/SIGBREAK
+            # go through signal.signal and wake the loop from the main thread.
+            def _signal_fallback(_signum: int, _frame: object) -> None:
+                loop.call_soon_threadsafe(request_shutdown)
+
+            for sig in (signal.SIGINT, signal.SIGTERM, getattr(signal, "SIGBREAK", None)):
+                if sig is None:
+                    continue
+                try:
+                    signal.signal(sig, _signal_fallback)
+                except (ValueError, OSError):
+                    pass
         try:
             self._portfolio_task = asyncio.create_task(self.portfolio.refresh())
             fixed_ticker = str(getattr(self.arguments, "fixed_ticker", "") or "").strip()
@@ -490,8 +674,7 @@ class Launcher:
                     self._portfolio_task = asyncio.create_task(self.portfolio.refresh())
                 if self.next_refresh_at is not None and time.time() >= self.next_refresh_at:
                     await self.refresh("scheduled")
-                while not self.manager.events.empty():
-                    await self.manager.events.get()
+                self._drain_manager_events()
                 self.publish_status()
                 try:
                     await asyncio.wait_for(
@@ -524,6 +707,12 @@ class Launcher:
                 shutdown_error = exc
                 self.last_error = str(exc)
             finally:
+                # stop_all's own events (cleanup verified / failed) would
+                # otherwise never be logged: the loop above has exited.
+                try:
+                    self._drain_manager_events()
+                except Exception as exc:
+                    self._record_observability_failure("log manager events", exc)
                 if self._portfolio_task is not None:
                     try:
                         await self._portfolio_task

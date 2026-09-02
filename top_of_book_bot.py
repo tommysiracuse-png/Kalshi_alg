@@ -50,6 +50,7 @@ from clients.models import (
     CreateOrderRequest,
     Fill,
     IncentiveProgram,
+    InsufficientBalanceError,
     Market,
     OrderBookDelta,
     OrderBookSnapshot,
@@ -250,6 +251,49 @@ def is_order_not_found_error(exception: Exception) -> bool:
 
 def is_rate_limit_error(exception: Exception) -> bool:
     return isinstance(exception, RateLimitError)
+
+
+# The venue locks collateral only when an order rests and rejects writes the
+# shard balance cannot cover. Such a rejection parks the market's creates and
+# amends for this long (cancels still run) instead of retrying on every book
+# event, so an oversubscribed fleet cannot burn write budget in a tight loop.
+INSUFFICIENT_BALANCE_COOLDOWN_SECONDS = 30.0
+
+# The flatten exit is an IOC sell at the held side's best bid.  When the book
+# is a vacuum - the other side pulled, a quote flickering - that bid can sit
+# tens of cents below the last traded price, and selling into it locks in the
+# gap for nothing (2026-09-02 KXAAAGASDOH-26SEP03-3.885: 73c-wide book).  An
+# exit is only sent while the quote is two-sided and no wider than this;
+# otherwise the visit is skipped, flatten_only stays latched (adding side
+# suppressed) and the next risk-loop visit retries.  Same reading of "a
+# usable price" as fleet_runtime.risk.DEFAULT_MAX_RELIABLE_SPREAD_UNITS.
+WATCHDOG_EXIT_MAX_SPREAD_UNITS = 2_000   # 20c
+
+
+def watchdog_exit_quote_usable(
+    yes_bid_units: Optional[int],
+    no_bid_units: Optional[int],
+    *,
+    max_spread_units: int = WATCHDOG_EXIT_MAX_SPREAD_UNITS,
+) -> tuple[bool, str, Optional[int]]:
+    """Whether a flatten exit may hit this quote: ``(usable, reason, spread_units)``.
+
+    Requires both bids and a spread (100c - yes bid - no bid) of at most
+    ``max_spread_units``.  A crossed or locked book (spread <= 0) is usable:
+    the exit then fills at or better than the far side.
+    """
+    yes_bid = int(yes_bid_units or 0)
+    no_bid = int(no_bid_units or 0)
+    if yes_bid <= 0 or no_bid <= 0:
+        return False, "one_sided_book", None
+    spread = PRICE_SCALE - yes_bid - no_bid
+    if spread > max(0, int(max_spread_units)):
+        return False, "spread_too_wide", spread
+    return True, "ok", spread
+
+
+def is_insufficient_balance_error(exception: Exception) -> bool:
+    return isinstance(exception, InsufficientBalanceError)
 
 
 # ---------------------------------------------------------------------------
@@ -2518,6 +2562,7 @@ class MarketActor:
             "no": 0,
         }
         self.market_wide_toxicity_cooldown_until_ms = 0
+        self.insufficient_balance_cooldown_until_ms = 0
         self.last_market_probability_guard_state: Optional[bool] = None
         self.last_market_queue_cooldown_logged_state: Optional[bool] = None
         self.last_market_state_log_ms = 0
@@ -3201,6 +3246,20 @@ class MarketActor:
 
     def market_queue_cooldown_active(self) -> bool:
         return now_ms() < self.market_wide_queue_cooldown_until_ms
+
+    def insufficient_balance_cooldown_active(self) -> bool:
+        return now_ms() < self.insufficient_balance_cooldown_until_ms
+
+    def enter_insufficient_balance_cooldown(self, error: str = "") -> int:
+        """Park creates/amends for INSUFFICIENT_BALANCE_COOLDOWN_SECONDS; returns the deadline."""
+        until_ms = now_ms() + int(INSUFFICIENT_BALANCE_COOLDOWN_SECONDS * 1000)
+        self.insufficient_balance_cooldown_until_ms = max(self.insufficient_balance_cooldown_until_ms, until_ms)
+        log_event(
+            "INSUFFICIENT_BALANCE_COOLDOWN",
+            seconds=INSUFFICIENT_BALANCE_COOLDOWN_SECONDS,
+            error=error,
+        )
+        return self.insufficient_balance_cooldown_until_ms
 
     def quote_gate_status(
         self,
@@ -4175,6 +4234,12 @@ class MarketActor:
             await self.cancel_side_quote(side, reason="target_size_zero", reset_quote_cycle=True)
             return
 
+        if self.insufficient_balance_cooldown_active():
+            # The venue could not collateralise our last write on this market:
+            # no create or amend until the cooldown ends. Cancels (above and
+            # the emergency paths) are unaffected.
+            return
+
         if state.has_active_resting_order and self.order_needs_expiration_refresh(state):
             await self.cancel_side_quote(side, reason="refresh_expiring_quote", reset_quote_cycle=False)
 
@@ -4875,6 +4940,11 @@ class MarketActor:
                         log_event("REQUOTE_RATE_LIMIT_BACKOFF", seconds=self.api_client.rate_limit_backoff_seconds, error=str(exc))
                         await asyncio.sleep(self.api_client.rate_limit_backoff_seconds)
                         self.requote_event.set()
+                    elif is_insufficient_balance_error(exc):
+                        # Bounded per-market back-off; deliberately no
+                        # requote_event.set() so the next attempt waits for a
+                        # book event after the cooldown, not a tight retry loop.
+                        self.enter_insufficient_balance_cooldown(str(exc))
                     else:
                         log_event("REQUOTE_ERROR", error=str(exc))
                         traceback.print_exc()
@@ -4999,7 +5069,8 @@ class MarketActor:
             if not self.shutdown_orders_verified:
                 try:
                     async with self.requote_lock:
-                        canceled = self.cancel_owned_resting_quotes(
+                        canceled = await asyncio.to_thread(
+                            self.cancel_owned_resting_quotes,
                             reason="shutdown",
                             verify=True,
                         )
@@ -5029,7 +5100,7 @@ class MarketActor:
         await self.cancel_side_quote("no", reason=reason, reset_quote_cycle=True)
 
     async def submit_watchdog_exit_order(self) -> bool:
-        net_position_units = int(self.sync_position_from_rest())
+        net_position_units = int(await asyncio.to_thread(self.sync_position_from_rest))
         if net_position_units == 0:
             return True
 
@@ -5038,6 +5109,25 @@ class MarketActor:
         best_bid_units = int(quote.yes_bid_units or 0) if held_side == "yes" else int(quote.no_bid_units or 0)
         if best_bid_units <= 0:
             log_event("WATCHDOG_EXIT_NO_BID", side=held_side, net_position_contracts=format_count_fp(net_position_units))
+            return False
+        usable, why, spread_units = watchdog_exit_quote_usable(quote.yes_bid_units, quote.no_bid_units)
+        if not usable:
+            # Never sell into a vacuum: skip this visit, keep the position and
+            # the flatten latch, retry when the book is a price again.
+            log_event(
+                "WATCHDOG_EXIT_SKIPPED",
+                side=held_side,
+                reason=why,
+                spread_cents=("unknown" if spread_units is None else f"{spread_units / PRICE_UNITS_PER_CENT:.1f}"),
+                max_spread_cents=f"{WATCHDOG_EXIT_MAX_SPREAD_UNITS / PRICE_UNITS_PER_CENT:.1f}",
+                bid_dollars=format_price_dollars(best_bid_units),
+                net_position_contracts=format_count_fp(net_position_units),
+            )
+            self.telemetry_store.record_runtime_event(
+                ticker=self.settings.market_ticker, source="watchdog", event_type="exit_skipped",
+                severity="warning",
+                payload={"reason": why, "spread_units": spread_units, "side": held_side, "bid_units": best_bid_units},
+            )
             return False
 
         exit_count_units = abs(net_position_units)
@@ -5258,8 +5348,10 @@ class MarketActor:
             queue_guard=self.settings.enable_queue_abandonment_guard,
             runtime="market_actor",
         )
-        self.load_startup_position()
-        self.cancel_owned_resting_quotes_on_startup()
+        # REST round-trips run off the event loop: in the fleet worker a slow
+        # broker/venue must not stall heartbeats and control commands.
+        await asyncio.to_thread(self.load_startup_position)
+        await asyncio.to_thread(self.cancel_owned_resting_quotes_on_startup)
         await asyncio.to_thread(self.refresh_external_models)
         self.background_tasks = [
             asyncio.create_task(self.requote_worker()),

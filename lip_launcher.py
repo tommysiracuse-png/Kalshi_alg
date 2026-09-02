@@ -40,14 +40,74 @@ from cryptography.hazmat.primitives.asymmetric import padding
 from fleet_models import DEFAULT_MAX_BOTS, MAX_CONCURRENT_BOTS
 from runtime_control import ControlRequest, ControlServer, STATUS_SCHEMA_VERSION
 
+import contextlib
+
 try:
     import fcntl
 except ImportError:  # pragma: no cover - launcher control is Linux-only in production
     fcntl = None
+try:
+    import msvcrt
+except ImportError:  # non-Windows
+    msvcrt = None
 
+
+# Serializes disable-list read-modify-write across threads in THIS process
+# (the launcher's watchdog-exit handlers). fcntl/msvcrt below add best-effort
+# cross-process exclusion on top.
+_DISABLE_LIST_LOCK = threading.Lock()
+
+
+@contextlib.contextmanager
+def _exclusive_file_lock(lock_path: Path):
+    """Cross-platform exclusive lock guarding disable-list read-modify-write.
+
+    The market disable list is a kill-switch: a lost concurrent write could
+    leave a market quoting after a watchdog flatten-exit. The in-process
+    threading lock is authoritative for same-process writers; POSIX fcntl adds
+    cross-process exclusion, and Windows msvcrt is attempted best-effort (its
+    failures are swallowed rather than propagated, so a write is never dropped).
+    """
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with _DISABLE_LIST_LOCK:
+        with lock_path.open("a+", encoding="utf-8") as handle:
+            locked_win = False
+            if fcntl is not None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            elif msvcrt is not None:
+                handle.seek(0)
+                if not handle.read(1):
+                    try:
+                        handle.write("x")
+                        handle.flush()
+                    except OSError:
+                        pass
+                handle.seek(0)
+                for _ in range(200):
+                    try:
+                        msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                        locked_win = True
+                        break
+                    except OSError:
+                        time.sleep(0.02)
+            try:
+                yield
+            finally:
+                if fcntl is not None:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                elif locked_win:
+                    handle.seek(0)
+                    try:
+                        msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                    except OSError:
+                        pass
 
 
 WATCHDOG_EXIT_CODES = {61, 62, 63, 64}
+
+
+ATOMIC_REPLACE_ATTEMPTS = 6
+ATOMIC_REPLACE_RETRY_SECONDS = 0.05
 
 
 def atomic_write_json(path: Path, payload: Dict[str, object]) -> None:
@@ -56,7 +116,27 @@ def atomic_write_json(path: Path, payload: Dict[str, object]) -> None:
         json.dump(payload, tmp, indent=2, sort_keys=False)
         tmp.write("\n")
         tmp_path = Path(tmp.name)
-    os.replace(tmp_path, path)
+    # On Windows a reader (dashboard API, editor, indexer) holding the target
+    # open makes the rename fail with EACCES for a few milliseconds; retry so
+    # the snapshot keeps updating, and never leave the temp file behind.
+    for attempt in range(ATOMIC_REPLACE_ATTEMPTS):
+        try:
+            os.replace(tmp_path, path)
+            return
+        except PermissionError:
+            if attempt + 1 >= ATOMIC_REPLACE_ATTEMPTS:
+                try:
+                    tmp_path.unlink()
+                except OSError:
+                    pass
+                raise
+            time.sleep(ATOMIC_REPLACE_RETRY_SECONDS * (attempt + 1))
+        except OSError:
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+            raise
 
 
 def load_json_file(path: Path) -> Dict[str, object]:
@@ -82,20 +162,14 @@ def load_disable_list(path: Path) -> Dict[str, object]:
 def write_disable_list(path: Path, payload: Dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = path.with_suffix(path.suffix + ".lock")
-    with lock_path.open("a+", encoding="utf-8") as lock_handle:
-        if fcntl is not None:
-            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+    with _exclusive_file_lock(lock_path):
         atomic_write_json(path, payload)
-        if fcntl is not None:
-            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
 
 
 def disable_ticker(path: Path, ticker: str, reason: str, *, exit_code: Optional[int] = None) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = path.with_suffix(path.suffix + ".lock")
-    with lock_path.open("a+", encoding="utf-8") as lock_handle:
-        if fcntl is not None:
-            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+    with _exclusive_file_lock(lock_path):
         payload = load_disable_list(path)
         payload[str(ticker)] = {
             "ticker": str(ticker),
@@ -104,21 +178,15 @@ def disable_ticker(path: Path, ticker: str, reason: str, *, exit_code: Optional[
             "exit_code": exit_code,
         }
         atomic_write_json(path, payload)
-        if fcntl is not None:
-            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
 
 
 def clear_disabled_ticker(path: Path, ticker: str) -> bool:
     path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = path.with_suffix(path.suffix + ".lock")
-    with lock_path.open("a+", encoding="utf-8") as lock_handle:
-        if fcntl is not None:
-            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+    with _exclusive_file_lock(lock_path):
         payload = load_disable_list(path)
         removed = payload.pop(str(ticker), None) is not None
         atomic_write_json(path, payload)
-        if fcntl is not None:
-            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_UN)
         return removed
 
 
@@ -782,6 +850,9 @@ def spawn_single_bot(
         settings_file = market_artifacts / "settings.json"
         settings_payload = bot_settings_payload(
             session_configuration,
+            # Per-market-class overrides (ScreenerPick.settings_overrides);
+            # legacy LaunchPick rows carry none.
+            overrides=tuple(getattr(pick, "settings_overrides", ()) or ()),
             market_ticker=pick.ticker,
             yes_budget_cents=pick.yes_budget_cents,
             no_budget_cents=pick.no_budget_cents,
@@ -1352,6 +1423,14 @@ def monitor_and_refresh(
     previous_sigterm = signal.getsignal(signal.SIGTERM)
     signal.signal(signal.SIGINT, request_shutdown)
     signal.signal(signal.SIGTERM, request_shutdown)
+    # Windows: the fleet runs in its own process group so a stray console Ctrl+C
+    # (e.g. restarting the dashboard that spawned it) cannot kill live trading.
+    # CTRL_BREAK is then the only signal that reaches the group, so it must run
+    # the same graceful shutdown as SIGINT rather than hard-exiting.
+    previous_sigbreak = None
+    if hasattr(signal, "SIGBREAK"):
+        previous_sigbreak = signal.getsignal(signal.SIGBREAK)
+        signal.signal(signal.SIGBREAK, request_shutdown)
     runtime_dir.mkdir(parents=True, exist_ok=True)
     publish_status("starting")
     control_server = ControlServer(socket_path, control_requests, status_provider)
@@ -1411,6 +1490,11 @@ def monitor_and_refresh(
                     elif control.action == "refresh":
                         next_refresh_at = time.time()
                         refresh_requests.append(control)
+                    elif control.action == "shutdown":
+                        control.result = {"ok": True, "result": {"shutdownRequested": True}}
+                        control.done.set()
+                        pending_action = None
+                        shutdown_requested.set()
                     else:
                         raise ValueError(f"unsupported action: {control.action}")
                 except Exception as exc:
@@ -1549,6 +1633,8 @@ def monitor_and_refresh(
         publish_status("stopped")
         signal.signal(signal.SIGINT, previous_sigint)
         signal.signal(signal.SIGTERM, previous_sigterm)
+        if previous_sigbreak is not None:
+            signal.signal(signal.SIGBREAK, previous_sigbreak)
     return 0
 
 

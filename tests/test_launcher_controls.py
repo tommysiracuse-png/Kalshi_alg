@@ -36,7 +36,9 @@ class DisableListTests(unittest.TestCase):
             control_socket=Path("runtime/bots/MKT.sock"),
         )
         self.assertIn("--control-socket", command)
-        self.assertIn("runtime/bots/MKT.sock", command)
+        # Compare as a path so the assertion is OS-agnostic (Windows renders the
+        # separator as a backslash); build_child_command passes it through str().
+        self.assertIn(str(Path("runtime/bots/MKT.sock")), command)
 
 
 if __name__ == "__main__":

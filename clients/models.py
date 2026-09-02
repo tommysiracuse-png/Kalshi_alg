@@ -30,6 +30,10 @@ class AmendTargetUnavailableError(ClientError):
     """An order can no longer be amended because it is not resting."""
 
 
+class InsufficientBalanceError(ClientError):
+    """The venue rejected an order because the account balance cannot collateralise it."""
+
+
 @dataclass(frozen=True)
 class PriceRangeData:
     start_units: int
@@ -98,6 +102,11 @@ class Market:
     expiration_time_ms: Optional[int] = None
     market_url: Optional[str] = None
     series_title: str = ""
+    # Kalshi exchange shard hosting this market (0 = default; 2 = crypto,
+    # 3 = tennis/baseball as of 2026-08-24). Orders must be routed to, and
+    # funded on, this shard — a market on an unfunded shard rejects every
+    # order with user_not_found.
+    exchange_index: int = 0
 
 
 @dataclass(frozen=True)
@@ -118,6 +127,10 @@ class AccountBalance:
     available_cash_units: int
     portfolio_value_units: int
     updated_at_ms: Optional[int] = None
+    # Cash per exchange shard as (exchange_index, cash_units) pairs. Balances
+    # are local to a shard, so capital allocation must be done per shard;
+    # empty means the venue reported no breakdown (treat all cash as shard 0).
+    balance_by_exchange: Tuple[Tuple[int, int], ...] = ()
 
 
 @dataclass(frozen=True)
