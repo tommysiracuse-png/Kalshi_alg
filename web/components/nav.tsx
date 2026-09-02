@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { signOut } from "@/auth";
 
-const links = [["/", "Overview"], ["/markets", "Markets"], ["/portfolio", "Portfolio"], ["/monitoring", "Monitoring"], ["/sessions", "Sessions"], ["/metrics", "Metrics"], ["/activity", "Activity"], ["/system", "System"]];
+const links = [["/", "Overview"], ["/markets", "Markets"], ["/portfolio", "Portfolio"], ["/monitoring", "Monitoring"], ["/sessions", "Sessions"], ["/metrics", "Metrics"], ["/optimization", "Optimization"], ["/activity", "Activity"], ["/system", "System"]];
 
 export function Nav() {
   return <aside className="sidebar">

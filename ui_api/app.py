@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 import json
 import logging
 import os
@@ -23,6 +24,32 @@ store = OperationsStore(settings)
 app = FastAPI(title="Kalshi Operations API", version="1.0.0", docs_url=None, redoc_url=None)
 LOGGER = logging.getLogger(__name__)
 SSE_CONNECTION_MAX_SECONDS = 30
+
+
+def _start_fleet_guardian() -> None:
+    """Auto-restart a wedged or crashed fleet; KALSHI_FLEET_GUARDIAN=0 disables it."""
+    if os.getenv("KALSHI_FLEET_GUARDIAN", "1").strip().lower() in {"0", "false", "off", "no"}:
+        LOGGER.info("fleet guardian disabled by KALSHI_FLEET_GUARDIAN")
+        return
+    from ui_api.guardian import FleetGuardian
+
+    app.state.fleet_guardian = FleetGuardian(store)
+    app.state.fleet_guardian.start()
+    LOGGER.info("fleet guardian started")
+
+
+@asynccontextmanager
+async def _lifespan(_: FastAPI) -> AsyncIterator[None]:
+    _start_fleet_guardian()
+    try:
+        yield
+    finally:
+        watch = getattr(app.state, "fleet_guardian", None)
+        if watch is not None:
+            watch.stop()
+
+
+app.router.lifespan_context = _lifespan
 
 
 async def authorize(x_internal_token: Annotated[Optional[str], Header()] = None) -> str:
@@ -182,6 +209,7 @@ def _audit_session(action: str, target: str, operator: str, request_id: Optional
 
 @app.get("/api/v1/sessions")
 async def sessions(include_archived: bool = False, _: str = Depends(authorize)) -> dict:
+    await asyncio.to_thread(store.reconcile_stale_runs)
     return {"generatedAt": now_ms(), "items": store.sessions.list_sessions(include_archived=include_archived), "activeRun": store.sessions.active_run()}
 
 
@@ -370,3 +398,44 @@ async def fleet_control(action: Literal["start", "stop", "refresh"], operator: s
 @app.post("/api/v1/controls/markets/{ticker}/{action}")
 async def market_control(ticker: str, action: Literal["disable", "enable"], operator: str = Depends(authorize), x_request_id: Annotated[Optional[str], Header()] = None) -> dict:
     return await asyncio.to_thread(store.control, action, ticker=ticker, operator=operator, request_id=_request_id(x_request_id))
+
+
+@app.get("/api/v1/optimizer/data-availability")
+async def optimizer_data_availability(_: str = Depends(authorize)) -> dict:
+    return await asyncio.to_thread(store.optimizer.data_availability)
+
+
+@app.get("/api/v1/optimizer/runs")
+async def optimizer_runs(_: str = Depends(authorize)) -> dict:
+    return await asyncio.to_thread(store.optimizer.list_runs)
+
+
+@app.get("/api/v1/optimizer/runs/{run_id}")
+async def optimizer_run_detail(run_id: str, _: str = Depends(authorize)) -> dict:
+    return await asyncio.to_thread(store.optimizer.run_detail, run_id)
+
+
+@app.get("/api/v1/optimizer/params")
+async def optimizer_params(tier: int = Query(1, ge=1, le=2), _: str = Depends(authorize)) -> dict:
+    return await asyncio.to_thread(store.optimizer.params, tier)
+
+
+@app.get("/api/v1/optimizer/options")
+async def optimizer_options(_: str = Depends(authorize)) -> dict:
+    return await asyncio.to_thread(store.optimizer.options)
+
+
+@app.post("/api/v1/controls/optimizer/queue/{queue_id}/cancel")
+async def optimizer_queue_cancel(queue_id: str, operator: str = Depends(authorize), x_request_id: Annotated[Optional[str], Header()] = None) -> dict:
+    return await asyncio.to_thread(store.optimizer.cancel_queued, queue_id, operator, _request_id(x_request_id))
+
+
+@app.post("/api/v1/controls/optimizer/start")
+async def optimizer_start(request: Request, operator: str = Depends(authorize), x_request_id: Annotated[Optional[str], Header()] = None) -> dict:
+    body = await _json_body(request)
+    return await asyncio.to_thread(store.optimizer.start, body, operator, _request_id(x_request_id))
+
+
+@app.post("/api/v1/controls/optimizer/stop")
+async def optimizer_stop(operator: str = Depends(authorize), x_request_id: Annotated[Optional[str], Header()] = None) -> dict:
+    return await asyncio.to_thread(store.optimizer.stop, operator, _request_id(x_request_id))

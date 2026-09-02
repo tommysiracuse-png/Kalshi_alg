@@ -10,7 +10,6 @@ afterEach(() => {
 
 describe("ControlPanel", () => {
   it("sends controls when randomUUID is unavailable on plain HTTP", async () => {
-    vi.spyOn(window, "confirm").mockReturnValue(true);
     vi.stubGlobal("crypto", undefined);
     const request = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ requestId: "server-request-id" }), {
       status: 200,
@@ -18,7 +17,10 @@ describe("ControlPanel", () => {
     }));
 
     render(<ControlPanel />);
+    // Two-click confirmation: the first click arms, the second executes.
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    expect(request).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm stop?" }));
 
     expect(screen.getByRole("button", { name: "Working…" })).toBeDisabled();
     await waitFor(() => expect(request).toHaveBeenCalledWith(

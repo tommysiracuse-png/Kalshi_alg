@@ -185,25 +185,32 @@ async def test_run_market_activity_contract_limits_and_path_validation():
         run = operations.sessions.prepare_run()
         database = Path(run["artifactPath"]) / "markets" / "TEST-1" / "telemetry.sqlite3"
         telemetry = TelemetryStore(str(database), enabled=True)
-        telemetry.record_market_metadata(
-            ticker="TEST-1", title="Test market", series_ticker="TEST", event_ticker="TEST-EVENT",
-            market_url="https://kalshi.com/markets/test/test-market/test-event",
-        )
-        telemetry.start_order_revision(
-            revision_key="rejected", action="create", side="yes", client_order_id="client",
-            order_id=None, placed_at_ms=2_000_000, size_units=100, price_units=4_000,
-            book_bid_units=3_900, book_ask_units=4_100, book_mid_units=4_000,
-        )
-        telemetry.reject_order_revision("rejected", "rejected")
-        app_module.store = operations
-        headers = {"x-internal-token": "test-token"}
-        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app_module.app, raise_app_exceptions=False), base_url="http://test") as client:
-            assert (await client.get(f"/api/v1/runs/{run['id']}/markets")).status_code == 401
-            markets = await client.get(f"/api/v1/runs/{run['id']}/markets", headers=headers)
-            activity = await client.get(f"/api/v1/runs/{run['id']}/markets/TEST-1/activity?fill_limit=25&order_limit=25", headers=headers)
-            too_small = await client.get(f"/api/v1/runs/{run['id']}/markets/TEST-1/activity?fill_limit=0", headers=headers)
-            too_large = await client.get(f"/api/v1/runs/{run['id']}/markets/TEST-1/activity?order_limit=501", headers=headers)
-            traversal = await client.get(f"/api/v1/runs/{run['id']}/markets/BAD%5C..%5CTEST-1/activity", headers=headers)
+        try:
+            telemetry.record_market_metadata(
+                ticker="TEST-1", title="Test market", series_ticker="TEST", event_ticker="TEST-EVENT",
+                market_url="https://kalshi.com/markets/test/test-market/test-event",
+            )
+            telemetry.start_order_revision(
+                revision_key="rejected", action="create", side="yes", client_order_id="client",
+                order_id=None, placed_at_ms=2_000_000, size_units=100, price_units=4_000,
+                book_bid_units=3_900, book_ask_units=4_100, book_mid_units=4_000,
+            )
+            telemetry.reject_order_revision("rejected", "rejected")
+            app_module.store = operations
+            headers = {"x-internal-token": "test-token"}
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app_module.app, raise_app_exceptions=False), base_url="http://test") as client:
+                assert (await client.get(f"/api/v1/runs/{run['id']}/markets")).status_code == 401
+                markets = await client.get(f"/api/v1/runs/{run['id']}/markets", headers=headers)
+                activity = await client.get(f"/api/v1/runs/{run['id']}/markets/TEST-1/activity?fill_limit=25&order_limit=25", headers=headers)
+                too_small = await client.get(f"/api/v1/runs/{run['id']}/markets/TEST-1/activity?fill_limit=0", headers=headers)
+                too_large = await client.get(f"/api/v1/runs/{run['id']}/markets/TEST-1/activity?order_limit=501", headers=headers)
+                traversal = await client.get(f"/api/v1/runs/{run['id']}/markets/BAD%5C..%5CTEST-1/activity", headers=headers)
+        finally:
+            # TelemetryStore keeps a persistent sqlite3 connection; on Windows the
+            # TemporaryDirectory cleanup fails unless it is closed first.
+            telemetry.flush()
+            if telemetry._connection is not None:
+                telemetry._connection.close()
         assert markets.status_code == 200
         assert markets.json()["items"][0]["ticker"] == "TEST-1"
         assert activity.status_code == 200

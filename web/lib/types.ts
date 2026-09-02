@@ -1,11 +1,53 @@
 export type SourceState = { available: boolean; updatedAt: number | null; stale: boolean; error?: string };
+export type BotSettingValue = boolean | number | string | Array<number | string>;
+// Schema v3 per-market-class overrides: each entry names a session-exposed
+// BotSettings field and the value that class uses instead of `bot[field]`.
+export type BotClassOverride = { field: string; value: BotSettingValue };
+export type BotClassName = "thickCalm" | "thinWide" | "toxic" | "default";
+export type BotClassOverrides = { overrides: BotClassOverride[] };
+export type BotClassesConfiguration = {
+  enabled: boolean;
+  classifier: Record<string, number>;
+} & Record<BotClassName, BotClassOverrides>;
+// Schema v4 market-screener filters (defaults mirror kalshi_screener_config.py).
+// The fleet reads them at Start; a running fleet keeps the snapshot it launched with.
+export type ScreenerStatus = "open" | "unopened" | "paused" | "closed" | "settled";
+export type ScreenerMveFilter = "exclude" | "only" | "all" | "";
+// Markout horizons the fill telemetry records; markoutFilterHorizonSeconds must be one of them.
+export const SCREENER_MARKOUT_HORIZONS = [1, 5, 30, 120] as const;
+export type ScreenerConfiguration = {
+  status: ScreenerStatus;
+  mveFilter: ScreenerMveFilter;
+  maxMarketsToScan: number;
+  topN: number;
+  minSpreadCents: number;
+  maxSpreadCents: number;
+  minYesBidCents: number;
+  minNoBidCents: number;
+  minVol24h: number;
+  minOpenInterest: number;
+  minTimeToCloseHours: number;
+  maxTimeToCloseHours: number;
+  excludedTickerKeywords: string[];
+  targetEdgeCents: number;
+  quoteSize: number;
+  markoutFilterEnabled: boolean;
+  markoutFilterNetThresholdCents: number;
+  markoutFilterTickerMinFills: number;
+  markoutFilterSeriesMinFills: number;
+  markoutFilterHorizonSeconds: number;
+  markoutFilterLookbackDays: number;
+  markoutFilterTotalNetThresholdCents: number;
+};
 export type SessionConfiguration = {
   schemaVersion: number;
   execution: Record<string, boolean | number | string>;
   launcher: Record<string, boolean | number | string>;
   watchdog: Record<string, boolean | number | string>;
   fleetRuntime?: Record<string, boolean | number | string>;
-  bot: Record<string, boolean | number | string | Array<number | string>>;
+  bot: Record<string, BotSettingValue>;
+  botClasses?: BotClassesConfiguration;
+  screener?: ScreenerConfiguration;
 };
 export type SavedSession = {
   id: string; name: string; description: string; configuration: SessionConfiguration; version: number;
@@ -106,7 +148,7 @@ export type Monitoring = {
   broker?: { pid?: number | null; running?: boolean };
   capacity?: Record<string, unknown> | null;
   allocation?: Record<string, unknown> | null;
-  screener: { running?: boolean; currentReason?: string; currentStartedAtMs?: number; currentDurationMs?: number; lastStartedAtMs?: number; lastCompletedAtMs?: number; lastDurationMs?: number; lastSuccessAtMs?: number; lastError?: string; generationId?: number; generatedAtMs?: number; reason?: string; picks?: Array<{ marketId: string; title: string; yesBudgetCents: number; noBudgetCents: number; selectionReason: string; rank?: number }>; changes?: Record<string, string[]>; apiActivity?: ApiActivity };
+  screener: { running?: boolean; currentReason?: string; currentStartedAtMs?: number; currentDurationMs?: number; lastStartedAtMs?: number; lastCompletedAtMs?: number; lastDurationMs?: number; lastSuccessAtMs?: number; lastError?: string; generationId?: number; generatedAtMs?: number; reason?: string; picks?: Array<{ marketId: string; title: string; yesBudgetCents: number; noBudgetCents: number; selectionReason: string; marketClass?: string; rank?: number }>; changes?: Record<string, string[]>; apiActivity?: ApiActivity };
 };
 
 export type PortfolioPosition = {
@@ -173,6 +215,74 @@ export type PortfolioOrderLine = {
   midPriceUnits?: number | null; totalMarketValueUnits?: number | null; runningInCurrentSession: boolean;
   sideBreakdown: Array<{ side: string; openOrderCount: number; remainingContractsUnits: number; midPriceUnits?: number | null; marketValueUnits?: number | null }>;
 };
+export type OptimizerRunArgs = {
+  candidates?: number | null; workers?: number | null; markets?: number | null;
+  budgetMinutes?: number | null; writeBack?: boolean; seed?: number | null; baseParams?: boolean;
+  baseParamsJson?: string | null; tier?: number; recordRoot?: string | null; marketClass?: string | null;
+  onlyParams?: string[]; topParams?: number | null; splits?: number | null; fillShare?: number | null;
+  baseSession?: string | null; screenerSession?: string | null; screenerFilter?: boolean | null;
+  screenerSource?: string | null; screenerEvalHours?: number | null; lastDays?: number | null;
+  fromDate?: string | null; toDate?: string | null;
+};
+export type OptimizerRun = {
+  id: string; status: string; startedMs?: number | null; finishedMs?: number | null;
+  dataFromMs?: number | null; dataToMs?: number | null; marketCount: number; args: OptimizerRunArgs;
+};
+export type OptimizerQueueItem = {
+  id: string; position?: number | null; status: string; requestId?: string | null; operator?: string | null;
+  queuedAtMs?: number | null; launchedMs?: number | null; finishedMs?: number | null; error?: string | null;
+  options: Record<string, unknown>; commandLine?: string | null; pid?: number | null;
+};
+export type OptimizerRunsResponse = {
+  generatedAt: number; running: boolean; items: OptimizerRun[]; queue?: OptimizerQueueItem[]; lastLogLines: string[];
+};
+export type OptimizerParamDim = {
+  name: string; kind: "bool" | "int" | "float"; low: number; high: number; default: unknown; group: string;
+};
+export type OptimizerParams = {
+  generatedAt?: number; tier: number; searchable: OptimizerParamDim[]; pinned: Array<{ name: string; reason: string }>;
+  presets: Record<string, string[]>; groups: string[];
+};
+export type OptimizerSessionOption = {
+  id: string; name: string; hasScreener: boolean; selected: boolean; updatedAt?: number | null; description?: string | null;
+};
+export type OptimizerRecorderCoverage = {
+  available: boolean; recordRoot?: string; hours: number; days: number; markets: number; bytes?: number;
+  fromMs?: number | null; toMs?: number | null;
+};
+export type OptimizerOptions = {
+  generatedAt?: number; classes: string[]; sessions: OptimizerSessionOption[];
+  tiers: Array<{ tier: number; label: string; available: boolean }>; recorder: OptimizerRecorderCoverage;
+  workers: { default: number; max: number };
+  defaults?: { topParams?: number; splits?: number; fillShare?: number; screenerEvalHours?: number | null };
+  presets?: Record<string, string[]>; previousSessionToken: string; baseParamsWinnerAvailable: boolean;
+  commandPrefix: string[]; outputDir: string;
+};
+export type OptimizerStartPayload = {
+  tier?: number; recordRoot?: string; marketClass?: string; onlyParams?: string[];
+  topParams?: number; workers?: number; splits?: number; fillShare?: number; seed?: number;
+  baseSession?: string; screenerSession?: string; screenerFilter?: boolean; screenerEvalHours?: number;
+  writeBack?: boolean; useBaseParams?: boolean; candidates?: number; markets?: number; budgetMinutes?: number;
+  lastDays?: number; fromDate?: string; toDate?: string; queueAfterCurrent?: boolean;
+};
+export type OptimizerDataAvailability = {
+  available: boolean;
+  marketCount?: number; marketsWithTrades?: number; settledCount?: number;
+  tradeCount?: number; candleCount?: number;
+  fromMs?: number | null; toMs?: number | null; spanDays?: number | null;
+};
+export type OptimizerCandidate = {
+  candidateId: string; scoreUnits?: number | null; trainScoreUnits?: number | null;
+  fills: number; errorCount: number; params: Record<string, unknown>;
+};
+export type OptimizerSensitivity = { field: string; deltaUnits: number; rank: number };
+export type OptimizerRunDetail = {
+  generatedAt: number; run: OptimizerRun; leaderboard: OptimizerCandidate[];
+  sensitivity: OptimizerSensitivity[]; report?: string | null;
+  argsFull?: Record<string, unknown>; commandLine?: string | null;
+  launch?: { launchId?: string | null; requestId?: string | null; operator?: string | null; launchedMs?: number | null; pid?: number | null; queueId?: string | null } | null;
+};
+
 export type PortfolioOrdersAnalytics = {
   generatedAt: number; snapshotAtMs?: number | null; source: AnalyticsSource; coverage: AnalyticsCoverage; warnings: string[];
   summary: {

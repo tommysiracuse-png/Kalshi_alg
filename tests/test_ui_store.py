@@ -38,6 +38,18 @@ class OperationsStoreTests(unittest.TestCase):
         with self.assertRaises(KeyError):
             self.store.market_detail("../../secret")
 
+    def test_fleet_bot_row_reason_is_used_when_the_watchdog_file_has_none(self):
+        (self.root / "runtime" / "launcher_status.json").write_text(json.dumps({
+            "launcher": {"lifecycle": "running", "heartbeatAt": 9999999999999},
+            "bots": [{"ticker": "TEST-1", "botRunning": True, "watchdogMode": "reduction_only", "watchdogReason": "elevated_price_move"}],
+            "counts": {},
+        }))
+        market = self.store.markets()[0]
+        self.assertEqual(market["watchdogReason"], "elevated_price_move")
+        # A watchdog state file with its own reason still wins.
+        (self.root / "watchdog_state" / "TEST-1.json").write_text(json.dumps({"mode": "normal", "reason": "profiled"}))
+        self.assertEqual(self.store.markets()[0]["watchdogReason"], "profiled")
+
     def test_malformed_watchdog_is_partial_not_fatal(self):
         (self.root / "watchdog_state" / "TEST-1.json").write_text("{")
         market = self.store.markets()[0]
