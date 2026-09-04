@@ -559,6 +559,7 @@ export function LiveMetrics({ initial, sessions, query, markoutHorizonMs = 30_00
     try {
       const params = new URLSearchParams(query);
       params.set("include_artifact_bytes", "false");
+      params.set("include_market_metrics", "false");
       const response = await fetchJson<MetricsResponse>(`/api/v1/metrics?${params}`);
       setData(previous => {
         const prior = new Map(previous.runs.map(run => [run.id, run]));
@@ -625,7 +626,7 @@ export function LiveMetrics({ initial, sessions, query, markoutHorizonMs = 30_00
   }, [loadActivity, loadRunMarkets, refreshMetrics]);
 
   useEffect(() => {
-    const events = new EventSource("/api/backend/api/v1/events");
+    const events = new EventSource("/api/backend/api/v1/events?topics=metrics_heartbeat");
     events.addEventListener("metrics_heartbeat", event => {
       applyHeartbeat(JSON.parse((event as MessageEvent).data) as MetricsHeartbeat);
     });

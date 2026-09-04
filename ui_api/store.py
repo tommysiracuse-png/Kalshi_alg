@@ -1831,13 +1831,16 @@ class OperationsStore:
             # runs now, has nobody managing it (a restart does not carry
             # inventory over the way a refresh does). Say so.
             managed = {str(bot.get("ticker") or "") for bot in status["data"].get("bots") or [] if isinstance(bot, dict)}
+            unmanaged = {
+                ticker for ticker, net in exchange["positions"].items()
+                if net and ticker not in managed
+            }
             try:
-                fleet_traded = {str(row.get("ticker") or "") for row in self.pnl("all", scope="all")["tickers"]}
+                fleet_traded = self.portfolio_analytics.bot_traded_markets(unmanaged)
             except Exception:
                 fleet_traded = set()
             orphaned = sorted(
-                ticker for ticker, net in exchange["positions"].items()
-                if net and ticker not in managed and ticker in fleet_traded
+                ticker for ticker in unmanaged if ticker in fleet_traded
             )
             if orphaned:
                 warnings.append(

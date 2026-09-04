@@ -23,7 +23,7 @@ export function LiveMonitoring({ initial }: { initial: Monitoring }) {
   const [connected, setConnected] = useState(false);
   const [clockMs, setClockMs] = useState(initial.generatedAt);
   useEffect(() => {
-    const events = new EventSource("/api/backend/api/v1/events");
+    const events = new EventSource("/api/backend/api/v1/events?topics=monitoring");
     events.addEventListener("monitoring", event => { setData(JSON.parse((event as MessageEvent).data)); setConnected(true); });
     events.onerror = () => setConnected(false);
     const fallback = window.setInterval(async () => {

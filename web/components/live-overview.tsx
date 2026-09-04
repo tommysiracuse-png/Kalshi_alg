@@ -11,7 +11,7 @@ export function LiveOverview({ initial, sessions, activeRun }: { initial: Overvi
   const [connected, setConnected] = useState(false);
   const failures = useRef(0);
   useEffect(() => {
-    const events = new EventSource("/api/backend/api/v1/events");
+    const events = new EventSource("/api/backend/api/v1/events?topics=overview");
     events.addEventListener("overview", event => { setData(JSON.parse((event as MessageEvent).data)); setConnected(true); failures.current = 0; });
     events.onerror = () => { setConnected(false); failures.current += 1; };
     const fallback = window.setInterval(async () => {

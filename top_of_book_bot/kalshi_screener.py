@@ -52,7 +52,7 @@ D1 = Decimal("1")
 # A market snapshot is held in memory while it is scored. Keep this guard in
 # code as well as in the default config so stale session settings or a CLI
 # override cannot restore the old effectively-unbounded scan.
-MARKET_SCAN_HARD_LIMIT = 20_000
+MARKET_SCAN_HARD_LIMIT = 2_000_000
 
 
 def bounded_market_scan_limit(value: Any) -> int:

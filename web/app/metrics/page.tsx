@@ -15,6 +15,8 @@ export default async function MetricsPage({ searchParams }: { searchParams: Prom
   if (status) query.set("status", status);
   if (from && Number.isFinite(Date.parse(`${from}T00:00:00`))) query.set("from_ms", String(Date.parse(`${from}T00:00:00`)));
   if (to && Number.isFinite(Date.parse(`${to}T23:59:59.999`))) query.set("to_ms", String(Date.parse(`${to}T23:59:59.999`)));
+  query.set("include_artifact_bytes", "false");
+  query.set("include_market_metrics", "false");
   const [data, sessionData] = await Promise.all([
     apiGet<MetricsResponse>(`/api/v1/metrics?${query}`),
     apiGet<{ items: SavedSession[] }>("/api/v1/sessions?include_archived=true"),

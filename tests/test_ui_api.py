@@ -273,3 +273,74 @@ async def test_sse_source_failure_does_not_end_other_producers(monkeypatch: pyte
     assert '"sourceName":"overview"' in first
     assert "event: monitoring" in second
     assert '"healthy":true' in second
+
+
+@pytest.mark.anyio
+async def test_live_event_cache_shares_a_topic_between_subscribers():
+    cache = app_module.LiveEventCache(ttl_seconds=60)
+    source = object()
+    calls = 0
+
+    def producer():
+        nonlocal calls
+        calls += 1
+        return {"revision": calls}
+
+    first = await cache.get(source, "overview", producer)
+    second = await cache.get(source, "overview", producer)
+
+    assert first == second == ("overview", {"revision": 1})
+    assert calls == 1
+
+
+@pytest.mark.anyio
+async def test_metrics_endpoint_can_omit_large_per_market_payloads():
+    with tempfile.TemporaryDirectory() as temporary:
+        operations = fixture_store(Path(temporary))
+        run = operations.sessions.claim_run()
+        operations.sessions.record_metrics(run["id"], {
+            "orders": 3,
+            "markets": {"TEST-1": {"orders": 3, "fills": 1}},
+        }, sample=False)
+        app_module.store = operations
+        headers = {"x-internal-token": "test-token"}
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app_module.app), base_url="http://test") as client:
+            response = await client.get(
+                "/api/v1/metrics?include_artifact_bytes=false&include_market_metrics=false",
+                headers=headers,
+            )
+
+        assert response.status_code == 200
+        assert response.json()["runs"][0]["metrics"]["orders"] == 3
+        assert "markets" not in response.json()["runs"][0]["metrics"]
+
+
+@pytest.mark.anyio
+async def test_events_reject_unknown_topics():
+    with tempfile.TemporaryDirectory() as temporary:
+        app_module.store = fixture_store(Path(temporary))
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app_module.app), base_url="http://test") as client:
+            response = await client.get(
+                "/api/v1/events?topics=overview,unknown",
+                headers={"x-internal-token": "test-token"},
+            )
+        assert response.status_code == 422
+        assert "unknown event topic" in response.json()["message"]
+
+
+def test_overview_does_not_scan_account_wide_pnl_history(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    operations = fixture_store(tmp_path)
+    original = operations.pnl
+    calls: list[tuple[str, str]] = []
+
+    def tracked_pnl(window: str = "all", scope: str = "session"):
+        calls.append((window, scope))
+        if scope == "all":
+            raise AssertionError("overview must not scan every historical run")
+        return original(window, scope)
+
+    monkeypatch.setattr(operations, "pnl", tracked_pnl)
+    operations.overview()
+
+    assert calls
+    assert all(scope == "session" for _, scope in calls)

@@ -423,28 +423,38 @@ class PortfolioAnalyticsStore:
         snapshot_at_ms, current = self._current()
         active_start = self._active_start(active_run)
         items = [dict(item) for item in current.get("positions", []) if isinstance(item, dict)]
+        market_ids = {
+            str(item.get("marketId") or item.get("ticker") or "")
+            for item in items
+            if item.get("marketId") or item.get("ticker")
+        }
+        order_counts: Dict[str, int] = {}
+        fill_activity: Dict[str, Dict[str, Optional[int]]] = {}
+        session_markets: set[str] = set()
         with self._connect() as db:
-            order_counts = {
-                str(row["market_id"]): int(row["count"])
-                for row in db.execute("SELECT market_id,COUNT(*) AS count FROM orders GROUP BY market_id")
-            }
-            fill_activity = {
-                str(row["market_id"]): {
+            # The account order archive can contain millions of rows.  The old
+            # GROUP BY queries scanned the complete archive even though this
+            # response only annotates the handful of positions in the current
+            # snapshot.  Point lookups use the existing market indexes and keep
+            # request cost proportional to the number of displayed positions.
+            for market_id in market_ids:
+                order_counts[market_id] = int(db.execute(
+                    "SELECT COUNT(*) FROM orders WHERE market_id=?", (market_id,),
+                ).fetchone()[0])
+                row = db.execute(
+                    "SELECT COUNT(*) AS count,MAX(created_at_ms) AS last_trade_at_ms "
+                    "FROM fills WHERE market_id=?",
+                    (market_id,),
+                ).fetchone()
+                fill_activity[market_id] = {
                     "count": int(row["count"]),
                     "lastTradeAtMs": int(row["last_trade_at_ms"]) if row["last_trade_at_ms"] is not None else None,
                 }
-                for row in db.execute(
-                    "SELECT market_id,COUNT(*) AS count,MAX(created_at_ms) AS last_trade_at_ms FROM fills GROUP BY market_id"
-                )
-            }
-            session_markets = set()
-            if active_start is not None:
-                session_markets = {
-                    str(row["market_id"])
-                    for row in db.execute(
-                        "SELECT DISTINCT market_id FROM fills WHERE created_at_ms>=?", (active_start,)
-                    )
-                }
+                if active_start is not None and db.execute(
+                    "SELECT 1 FROM fills WHERE market_id=? AND created_at_ms>=? LIMIT 1",
+                    (market_id, active_start),
+                ).fetchone():
+                    session_markets.add(market_id)
         for item in items:
             market_id = str(item.get("marketId") or item.get("ticker") or "")
             item["totalOrderCount"] = order_counts.get(market_id, 0)
@@ -472,6 +482,36 @@ class PortfolioAnalyticsStore:
             "items": items,
             "warnings": list(current.get("warnings") or []),
         }
+
+    def bot_traded_markets(self, market_ids: Iterable[str]) -> set[str]:
+        """Return candidate markets with fills from a bot-owned order.
+
+        This intentionally performs indexed candidate lookups.  It replaces an
+        account-wide walk of every historical shard database that Overview used
+        solely to decide whether an unmanaged exchange position merits a warning.
+        """
+        candidates = {str(market_id) for market_id in market_ids if market_id}
+        if not candidates:
+            return set()
+        result: set[str] = set()
+        with self._connect() as db:
+            for market_id in candidates:
+                row = db.execute(
+                    """
+                    SELECT 1
+                    FROM fills AS f JOIN orders AS o ON o.order_id=f.order_id
+                    WHERE f.market_id=? AND (
+                        o.client_order_id LIKE 'mm:%' OR
+                        o.client_order_id LIKE 'tob:%' OR
+                        o.client_order_id LIKE 'wd:%'
+                    )
+                    LIMIT 1
+                    """,
+                    (market_id,),
+                ).fetchone()
+                if row is not None:
+                    result.add(market_id)
+        return result
 
     @staticmethod
     def _encode_cursor(created_at_ms: Optional[int], fill_id: str) -> str:

@@ -7,7 +7,7 @@ import logging
 import os
 import time
 import uuid
-from typing import Annotated, AsyncIterator, Literal, Optional
+from typing import Annotated, Any, AsyncIterator, Callable, Literal, Optional, Sequence
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
@@ -24,6 +24,41 @@ store = OperationsStore(settings)
 app = FastAPI(title="Kalshi Operations API", version="1.0.0", docs_url=None, redoc_url=None)
 LOGGER = logging.getLogger(__name__)
 SSE_CONNECTION_MAX_SECONDS = 30
+SSE_REFRESH_SECONDS = 2.0
+SSE_EVENT_NAMES = ("overview", "monitoring", "portfolio", "metrics", "metrics_heartbeat")
+
+
+class LiveEventCache:
+    """Share each live payload across subscribers without blocking asyncio."""
+
+    def __init__(self, ttl_seconds: float = SSE_REFRESH_SECONDS) -> None:
+        self.ttl_seconds = ttl_seconds
+        self._entries: dict[tuple[int, str], tuple[float, str, Any]] = {}
+        self._locks: dict[tuple[int, str], asyncio.Lock] = {}
+
+    async def get(
+        self,
+        source: object,
+        name: str,
+        producer: Callable[[], Any],
+    ) -> tuple[str, Any]:
+        key = (id(source), name)
+        current = time.monotonic()
+        cached = self._entries.get(key)
+        if cached is not None and current - cached[0] < self.ttl_seconds:
+            return cached[1], cached[2]
+        lock = self._locks.setdefault(key, asyncio.Lock())
+        async with lock:
+            current = time.monotonic()
+            cached = self._entries.get(key)
+            if cached is not None and current - cached[0] < self.ttl_seconds:
+                return cached[1], cached[2]
+            event_type, payload = await _produce_live_event(name, producer)
+            self._entries[key] = (time.monotonic(), event_type, payload)
+            return event_type, payload
+
+
+live_event_cache = LiveEventCache()
 
 
 def _start_fleet_guardian() -> None:
@@ -295,8 +330,15 @@ async def run_market_activity(
 
 
 @app.get("/api/v1/metrics")
-async def historical_metrics(session_id: str = "", status: str = "", from_ms: Optional[int] = None, to_ms: Optional[int] = None, include_artifact_bytes: bool = True, _: str = Depends(authorize)) -> dict:
-    return store.sessions.metrics(session_id=session_id, status=status, from_ms=from_ms, to_ms=to_ms, include_artifact_bytes=include_artifact_bytes)
+async def historical_metrics(
+    session_id: str = "", status: str = "", from_ms: Optional[int] = None,
+    to_ms: Optional[int] = None, include_artifact_bytes: bool = True,
+    include_market_metrics: bool = True, _: str = Depends(authorize),
+) -> dict:
+    return store.sessions.metrics(
+        session_id=session_id, status=status, from_ms=from_ms, to_ms=to_ms,
+        include_artifact_bytes=include_artifact_bytes, include_market_metrics=include_market_metrics,
+    )
 
 
 @app.get("/api/v1/metrics/heartbeat")
@@ -318,42 +360,65 @@ def legacy_metrics_heartbeat() -> dict:
     }
 
 
-async def event_stream(request: Request) -> AsyncIterator[str]:
+def _live_event_producers() -> dict[str, Callable[[], Any]]:
+    return {
+        "overview": store.overview,
+        "monitoring": store.monitoring,
+        "portfolio": store.portfolio,
+        "metrics": legacy_metrics_heartbeat,
+        "metrics_heartbeat": store.metrics_heartbeat,
+    }
+
+
+async def _produce_live_event(name: str, producer: Callable[[], Any]) -> tuple[str, Any]:
+    try:
+        return name, producer()
+    except Exception as exc:
+        # Each source is independent. A broken observability store must not
+        # tear down the shared stream or hide healthy data.
+        LOGGER.exception("SSE producer %s failed", name)
+        return "source_error", {
+            "generatedAt": now_ms(),
+            "sourceName": name,
+            "source": {"available": False, "updatedAt": None, "stale": True, "error": str(exc)},
+        }
+
+
+async def event_stream(
+    request: Request,
+    topics: Optional[Sequence[str]] = None,
+    cache: Optional[LiveEventCache] = None,
+) -> AsyncIterator[str]:
     event_id = 0
     deadline = time.monotonic() + SSE_CONNECTION_MAX_SECONDS
-    producers = (
-        ("overview", store.overview),
-        ("monitoring", store.monitoring),
-        ("portfolio", store.portfolio),
-        ("metrics", legacy_metrics_heartbeat),
-        ("metrics_heartbeat", store.metrics_heartbeat),
-    )
+    selected = tuple(topics or SSE_EVENT_NAMES)
     try:
         while time.monotonic() < deadline and not await request.is_disconnected():
-            for event_name, producer in producers:
+            producers = _live_event_producers()
+            for event_name in selected:
                 event_id += 1
-                try:
-                    payload = producer()
-                    event_type = event_name
-                except Exception as exc:
-                    # Each source is independent. A broken observability store
-                    # must not tear down the shared stream or hide healthy data.
-                    LOGGER.exception("SSE producer %s failed", event_name)
-                    event_type = "source_error"
-                    payload = {
-                        "generatedAt": now_ms(),
-                        "sourceName": event_name,
-                        "source": {"available": False, "updatedAt": None, "stale": True, "error": str(exc)},
-                    }
+                producer = producers[event_name]
+                if cache is None:
+                    event_type, payload = await _produce_live_event(event_name, producer)
+                else:
+                    event_type, payload = await cache.get(store, event_name, producer)
                 yield f"id: {event_id}\nevent: {event_type}\ndata: {json.dumps(payload, separators=(',', ':'))}\n\n"
-            await asyncio.sleep(2)
+            await asyncio.sleep(SSE_REFRESH_SECONDS)
     except asyncio.CancelledError:
         return
 
 
 @app.get("/api/v1/events")
-async def events(request: Request, _: str = Depends(authorize)) -> StreamingResponse:
-    return StreamingResponse(event_stream(request), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+async def events(request: Request, topics: str = "", _: str = Depends(authorize)) -> StreamingResponse:
+    selected = tuple(dict.fromkeys(item.strip() for item in topics.split(",") if item.strip()))
+    unknown = sorted(set(selected) - set(SSE_EVENT_NAMES))
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"unknown event topic: {', '.join(unknown)}")
+    return StreamingResponse(
+        event_stream(request, selected or SSE_EVENT_NAMES, live_event_cache),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/api/v1/logs/{ticker}/stream")

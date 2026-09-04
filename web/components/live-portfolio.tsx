@@ -165,7 +165,7 @@ export function LivePortfolio({
   }, [historyWindow]);
 
   useEffect(() => {
-    const events = new EventSource("/api/backend/api/v1/events");
+    const events = new EventSource("/api/backend/api/v1/events?topics=portfolio");
     events.addEventListener("portfolio", event => {
       const payload = JSON.parse((event as MessageEvent).data) as AccountPortfolio;
       setConnected(true);

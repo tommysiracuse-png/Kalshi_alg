@@ -106,6 +106,26 @@ def test_missing_marks_stay_unavailable(tmp_path):
     assert result["history"]["positionsLiquidationValue"]["changeUnits"] is None
 
 
+def test_bot_traded_markets_uses_filled_bot_orders_and_ignores_manual_orders(tmp_path):
+    store = PortfolioAnalyticsStore(tmp_path / "portfolio.sqlite3")
+    at_ms = 1_000_000
+    bot_order = AccountOrder(
+        "bot-order", "BOT-1", "yes", client_order_id="tob:yes:1", status="executed",
+        fill_count_units=100, initial_count_units=100, created_at_ms=at_ms - 2_000,
+    )
+    manual_order = AccountOrder(
+        "manual-order", "MANUAL-1", "yes", client_order_id="manual-order", status="executed",
+        fill_count_units=100, initial_count_units=100, created_at_ms=at_ms - 2_000,
+    )
+    fills = [
+        AccountFill("bot-fill", "bot-trade", "bot-order", "BOT-1", "yes", 100, 4_000, created_at_ms=at_ms - 1_000),
+        AccountFill("manual-fill", "manual-trade", "manual-order", "MANUAL-1", "yes", 100, 4_000, created_at_ms=at_ms - 1_000),
+    ]
+    store.record_refresh(snapshot(at_ms), [bot_order, manual_order], fills, [])
+
+    assert store.bot_traded_markets({"BOT-1", "MANUAL-1", "ABSENT-1"}) == {"BOT-1"}
+
+
 def test_full_window_with_zero_baseline_has_no_percent_change(tmp_path):
     store = PortfolioAnalyticsStore(tmp_path / "portfolio.sqlite3")
     first_at = 1_000_000

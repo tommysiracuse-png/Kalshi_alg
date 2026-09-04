@@ -593,6 +593,7 @@ class SessionStore:
         return total
 
     def metrics(self, **filters: Any) -> Dict[str, Any]:
+        include_market_metrics = bool(filters.pop("include_market_metrics", True))
         runs = self.list_runs(**filters)
         totals: Dict[str, Any] = {
             "timesRun": len(runs), "runtimeMs": 0, "orders": 0, "fills": 0,
@@ -627,6 +628,11 @@ class SessionStore:
             totals["markoutsByHorizon"].setdefault(
                 str(horizon_ms), empty_markout_aggregate(horizon_ms)
             )
+        if not include_market_metrics:
+            for run in runs:
+                metrics = dict(run.get("metrics") or {})
+                metrics.pop("markets", None)
+                run["metrics"] = metrics
         return {"generatedAt": now_ms(), "summary": totals, "runs": runs}
 
     @staticmethod
