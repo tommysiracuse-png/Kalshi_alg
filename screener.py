@@ -222,6 +222,8 @@ class Screener:
         self._last_success_at_ms: Optional[int] = None
         self._last_error: Optional[str] = None
         self._last_warnings: tuple[str, ...] = ()
+        self._last_scan_metadata: Dict[str, object] = {}
+        self._last_run_metrics: Dict[str, object] = {}
 
     def get_latest_picks(self) -> tuple[ScreenerPick, ...]:
         return self._latest_update.picks if self._latest_update is not None else ()
@@ -267,6 +269,8 @@ class Screener:
             "lastSuccessAtMs": self._last_success_at_ms,
             "lastError": self._last_error,
             "warnings": list(self._last_warnings),
+            "lastRun": dict(self._last_run_metrics),
+            "scanMetadata": dict(self._last_scan_metadata),
             "shardCaps": {key: dict(value) for key, value in self._last_shard_caps.items()},
             "exchangeCarryover": dict(self._last_exchange_carryover),
             "generationId": update.generation_id if update else None,
@@ -283,6 +287,10 @@ class Screener:
             },
             "apiActivity": api_activity,
         }
+
+    def last_run_metrics(self) -> Dict[str, object]:
+        """Return the completed refresh metrics for persistence by the launcher."""
+        return dict(self._last_run_metrics)
 
     def _atomic_export(self, frame: pd.DataFrame) -> None:
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -371,6 +379,7 @@ class Screener:
         band, or are disabled give up their place.
         """
         screen_frame = screen_markets(_BaseClientMarketSource(self.client), self.settings)
+        self._last_scan_metadata = dict(screen_frame.attrs.get("market_scan") or {})
         warnings = [str(item) for item in screen_frame.attrs.get("warnings", ())]
         export_frame = build_export_dataframe(screen_frame, self.settings)
         disabled = set(self.disabled_market_ids())
@@ -830,6 +839,32 @@ class Screener:
         self._current_reason = reason
         self._current_started_at_ms = started_at_ms
         self._last_started_at_ms = started_at_ms
+        self._last_run_metrics = {
+            "status": "running",
+            "reason": reason,
+            "startedAtMs": started_at_ms,
+            "endedAtMs": None,
+            "durationMs": None,
+            "generationId": None,
+            "configuredLimit": self.settings.get("max_markets_to_scan"),
+            "scannedMarkets": None,
+            "apiRequests": None,
+            "apiErrors": None,
+            "added": 0,
+            "changed": 0,
+            "removed": 0,
+            "inventoryCarried": 0,
+            "inventoryUnknown": 0,
+            "warnings": [],
+            "error": None,
+        }
+        self._last_scan_metadata = {}
+        self._last_warnings = ()
+        activity_before: Dict[str, object] = {}
+        try:
+            activity_before = dict((self.client.activity_snapshot().get("rest") or {}))
+        except Exception:
+            pass
         try:
             update = await asyncio.to_thread(
                 self._refresh_sync, dict(current_picks), reason,
@@ -839,11 +874,13 @@ class Screener:
             completed_at_ms = int(time.time() * 1000)
             self._last_success_at_ms = completed_at_ms
             self._last_error = None
+            status = "succeeded"
             await self.events.put(ScreenerEvent(True, reason, update.generated_at_ms, update=update))
             return update
         except Exception as exc:
             completed_at_ms = int(time.time() * 1000)
             self._last_error = str(exc)
+            status = "failed"
             await self.events.put(
                 ScreenerEvent(False, reason, completed_at_ms, error=str(exc))
             )
@@ -852,6 +889,47 @@ class Screener:
             completed_at_ms = int(time.time() * 1000)
             self._last_completed_at_ms = completed_at_ms
             self._last_duration_ms = max(0, completed_at_ms - started_at_ms)
+            activity_after: Dict[str, object] = {}
+            try:
+                activity_after = dict((self.client.activity_snapshot().get("rest") or {}))
+            except Exception:
+                pass
+            before_requests = activity_before.get("total")
+            after_requests = activity_after.get("total")
+            before_errors = activity_before.get("errors")
+            after_errors = activity_after.get("errors")
+            request_delta = (
+                max(0, int(after_requests) - int(before_requests))
+                if isinstance(before_requests, (int, float)) and isinstance(after_requests, (int, float))
+                else None
+            )
+            error_delta = (
+                max(0, int(after_errors) - int(before_errors))
+                if isinstance(before_errors, (int, float)) and isinstance(after_errors, (int, float))
+                else None
+            )
+            update_value = locals().get("update")
+            run_status = locals().get("status", "failed")
+            self._last_run_metrics = {
+                "status": run_status,
+                "reason": reason,
+                "startedAtMs": started_at_ms,
+                "endedAtMs": completed_at_ms,
+                "durationMs": self._last_duration_ms,
+                "generationId": update_value.generation_id if update_value is not None else None,
+                "configuredLimit": self.settings.get("max_markets_to_scan"),
+                "scannedMarkets": self._last_scan_metadata.get("scannedMarkets"),
+                "effectiveLimit": self._last_scan_metadata.get("effectiveLimit"),
+                "apiRequests": request_delta,
+                "apiErrors": error_delta,
+                "added": len(update_value.added) if update_value is not None else 0,
+                "changed": len(update_value.changed) if update_value is not None else 0,
+                "removed": len(update_value.removed) if update_value is not None else 0,
+                "inventoryCarried": len(update_value.inventory_carried) if update_value is not None else 0,
+                "inventoryUnknown": len(update_value.inventory_unknown) if update_value is not None else 0,
+                "warnings": list(self._last_warnings),
+                "error": self._last_error,
+            }
             self._running = False
             self._current_reason = None
             self._current_started_at_ms = None

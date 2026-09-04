@@ -148,7 +148,35 @@ export type Monitoring = {
   broker?: { pid?: number | null; running?: boolean };
   capacity?: Record<string, unknown> | null;
   allocation?: Record<string, unknown> | null;
-  screener: { running?: boolean; currentReason?: string; currentStartedAtMs?: number; currentDurationMs?: number; lastStartedAtMs?: number; lastCompletedAtMs?: number; lastDurationMs?: number; lastSuccessAtMs?: number; lastError?: string; generationId?: number; generatedAtMs?: number; reason?: string; picks?: Array<{ marketId: string; title: string; yesBudgetCents: number; noBudgetCents: number; selectionReason: string; marketClass?: string; rank?: number }>; changes?: Record<string, string[]>; apiActivity?: ApiActivity };
+  screener: {
+    running?: boolean; currentReason?: string; currentStartedAtMs?: number; currentDurationMs?: number;
+    lastStartedAtMs?: number; lastCompletedAtMs?: number; lastDurationMs?: number; lastSuccessAtMs?: number;
+    lastError?: string; generationId?: number; generatedAtMs?: number; reason?: string;
+    picks?: Array<{ marketId: string; title: string; yesBudgetCents: number; noBudgetCents: number; selectionReason: string; marketClass?: string; rank?: number }>;
+    changes?: Record<string, string[]>; apiActivity?: ApiActivity;
+    lastRun?: ScreenerRunMetrics; scanMetadata?: Record<string, unknown>;
+    history?: ScreenerRun[]; historySummary?: ScreenerRunSummary; historyNextCursor?: string | null; historyWarnings?: string[];
+  };
+};
+
+export type ScreenerRunMetrics = {
+  status?: "running" | "succeeded" | "failed" | "interrupted" | string;
+  reason?: string; startedAt?: number | null; endedAt?: number | null;
+  startedAtMs?: number | null; endedAtMs?: number | null; durationMs?: number | null;
+  generationId?: number | null; configuredLimit?: number | null; effectiveLimit?: number | null;
+  scannedMarkets?: number | null; apiRequests?: number | null; apiErrors?: number | null;
+  added?: number; changed?: number; removed?: number; inventoryCarried?: number; inventoryUnknown?: number;
+  warnings?: string[]; error?: string | null;
+};
+
+export type ScreenerRun = ScreenerRunMetrics & {
+  id: string; fleetRunId: string; sessionId: string; sessionName: string;
+};
+
+export type ScreenerRunSummary = {
+  totalRuns: number; succeeded: number; failed: number; interrupted: number; running: number;
+  scannedMarkets: number; apiRequests: number; averageDurationMs?: number | null;
+  added: number; changed: number; removed: number;
 };
 
 export type PortfolioPosition = {

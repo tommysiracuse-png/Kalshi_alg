@@ -1983,6 +1983,20 @@ class OperationsStore:
         if status["source"].get("stale"):
             warnings.append("launcher monitoring snapshot is stale or unavailable")
         clients = data.get("clients") if isinstance(data.get("clients"), list) else []
+        try:
+            screener_history = self.sessions.screener_runs(limit=100)
+        except (OSError, sqlite3.Error, ValueError) as exc:
+            screener_history = {
+                "items": [], "summary": {}, "nextCursor": None,
+            }
+            warnings.append(f"screener history unavailable: {exc}")
+        screener = dict(data.get("screener") or {})
+        screener.update({
+            "history": screener_history.get("items", []),
+            "historySummary": screener_history.get("summary", {}),
+            "historyNextCursor": screener_history.get("nextCursor"),
+            "historyWarnings": screener_history.get("warnings", []),
+        })
         return {
             "generatedAt": now_ms(),
             "schemaVersion": data.get("schemaVersion"),
@@ -1993,9 +2007,25 @@ class OperationsStore:
             "capacity": data.get("capacity"),
             "allocation": data.get("allocation"),
             "clients": clients,
-            "screener": data.get("screener") or {},
+            "screener": screener,
             "warnings": warnings,
         }
+
+    def screener_runs(self, *, session_id: str = "", limit: int = 100, cursor: str = "") -> Dict[str, Any]:
+        """Return local, persisted screener refresh history and aggregates."""
+        generated = now_ms()
+        try:
+            payload = self.sessions.screener_runs(session_id=session_id, limit=limit, cursor=cursor)
+        except (OSError, sqlite3.Error) as exc:
+            return {
+                "items": [], "summary": {}, "nextCursor": None, "generatedAt": generated,
+                "source": {"available": False, "updatedAt": generated, "stale": True},
+                "warnings": [f"screener history unavailable: {exc}"],
+            }
+        payload["generatedAt"] = generated
+        payload["source"] = {"available": True, "updatedAt": generated, "stale": False}
+        payload.setdefault("warnings", [])
+        return payload
 
     def portfolio(self) -> Dict[str, Any]:
         status = self.status()

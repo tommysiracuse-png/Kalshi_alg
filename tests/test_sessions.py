@@ -652,3 +652,105 @@ def test_metrics_accumulator_keeps_completed_process_counters():
     assert result["orderPlacementsAttempted"] == 6
     assert result["markets"]["A"]["orderPlacementsAttempted"] == 6
     assert result["apiByComponent"]["screener"] == 4
+
+
+def test_screener_run_history_persists_and_aggregates(tmp_path: Path):
+    store = SessionStore(tmp_path / "session_data")
+    run = store.claim_run(store.prepare_run()["id"])
+    record_id = store.start_screener_run(
+        run["id"], reason="scheduled", started_at_ms=1000, configured_limit=20000,
+    )
+    store.finish_screener_run(
+        record_id, status="succeeded",
+        metrics={"startedAtMs": 1000, "endedAtMs": 1250, "durationMs": 250,
+                 "configuredLimit": 20000, "scannedMarkets": 18000,
+                 "apiRequests": 12, "added": 3, "changed": 4, "removed": 2},
+        ended_at_ms=1250,
+    )
+    result = store.screener_runs(limit=10)
+    assert result["items"][0]["scannedMarkets"] == 18000
+    assert result["items"][0]["configuredLimit"] == 20000
+    assert result["summary"] == {
+        "totalRuns": 1, "succeeded": 1, "failed": 0, "interrupted": 0, "running": 0,
+        "scannedMarkets": 18000, "apiRequests": 12, "averageDurationMs": 250.0,
+        "added": 3, "changed": 4, "removed": 2,
+    }
+
+
+def test_screener_artifact_backfill_keeps_unknown_counts_null(tmp_path: Path):
+    store = SessionStore(tmp_path / "session_data")
+    run = store.claim_run(store.prepare_run()["id"])
+    artifact = Path(run["artifactPath"]) / "screener"
+    artifact.mkdir(parents=True)
+    (artifact / "1000.json").write_text(json.dumps({
+        "lastStartedAtMs": 1000, "lastCompletedAtMs": 1400,
+        "lastDurationMs": 400, "generationId": 2,
+        "changes": {"added": ["A"], "changed": [], "removed": ["B"]},
+    }))
+    result = store.screener_runs(limit=10)
+    row = next(item for item in result["items"] if item["fleetRunId"] == run["id"])
+    assert row["status"] == "succeeded"
+    assert row["durationMs"] == 400
+    assert row["added"] == 1 and row["removed"] == 1
+    assert row["scannedMarkets"] is None
+    assert row["apiRequests"] is None
+    assert len(store.screener_runs(limit=10)["items"]) == 1
+
+
+def test_screener_run_failure_and_parent_finalization_preserve_partial_metrics(tmp_path: Path):
+    store = SessionStore(tmp_path / "session_data")
+    run = store.claim_run(store.prepare_run()["id"])
+    failed_id = store.start_screener_run(
+        run["id"], reason="scheduled", started_at_ms=1_000, configured_limit=20_000,
+    )
+    pending_id = store.start_screener_run(
+        run["id"], reason="scheduled", started_at_ms=2_000, configured_limit=20_000,
+    )
+    store.finish_screener_run(
+        failed_id, status="failed", ended_at_ms=1_500,
+        metrics={
+            "startedAtMs": 1_000, "durationMs": 500, "scannedMarkets": 125,
+            "apiRequests": 4, "apiErrors": 1, "warnings": ["partial response"],
+            "error": "venue unavailable",
+        },
+    )
+    store.finish_run(run["id"], "failed", error="launcher stopped")
+
+    result = store.screener_runs(limit=10)
+    failed = next(item for item in result["items"] if item["id"] == failed_id)
+    interrupted = next(item for item in result["items"] if item["id"] == pending_id)
+    assert failed["status"] == "failed"
+    assert failed["scannedMarkets"] == 125
+    assert failed["apiRequests"] == 4
+    assert failed["warnings"] == ["partial response"]
+    assert failed["error"] == "venue unavailable"
+    assert interrupted["status"] == "interrupted"
+    assert interrupted["endedAt"] is not None
+    assert result["summary"]["failed"] == 1
+    assert result["summary"]["interrupted"] == 1
+
+
+def test_screener_run_cursor_paginates_without_changing_aggregate(tmp_path: Path):
+    store = SessionStore(tmp_path / "session_data")
+    run = store.claim_run(store.prepare_run()["id"])
+    ids = []
+    for started_at in (1_000, 2_000, 3_000):
+        record_id = store.start_screener_run(
+            run["id"], reason="scheduled", started_at_ms=started_at,
+            configured_limit=20_000,
+        )
+        ids.append(record_id)
+        store.finish_screener_run(
+            record_id, status="succeeded", ended_at_ms=started_at + 100,
+            metrics={"startedAtMs": started_at, "durationMs": 100},
+        )
+
+    first = store.screener_runs(limit=2)
+    second = store.screener_runs(limit=2, cursor=first["nextCursor"])
+    assert [item["id"] for item in first["items"]] == [ids[2], ids[1]]
+    assert [item["id"] for item in second["items"]] == [ids[0]]
+    assert second["nextCursor"] is None
+    assert first["summary"] == second["summary"]
+    assert first["summary"]["totalRuns"] == 3
+    with pytest.raises(ValueError, match="cursor"):
+        store.screener_runs(cursor="invalid")

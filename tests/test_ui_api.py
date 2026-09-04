@@ -86,6 +86,41 @@ async def test_monitoring_contract_and_client_detail():
 
 
 @pytest.mark.anyio
+async def test_screener_history_endpoint_and_monitoring_contract():
+    with tempfile.TemporaryDirectory() as temporary:
+        operations = fixture_store(Path(temporary))
+        run = operations.sessions.claim_run(operations.sessions.prepare_run()["id"])
+        record_id = operations.sessions.start_screener_run(
+            run["id"], reason="startup", started_at_ms=1_000,
+            configured_limit=20_000,
+        )
+        operations.sessions.finish_screener_run(
+            record_id, status="succeeded", ended_at_ms=1_250,
+            metrics={
+                "startedAtMs": 1_000, "durationMs": 250,
+                "scannedMarkets": 18_000, "apiRequests": 12,
+                "added": 3, "changed": 1, "removed": 2,
+            },
+        )
+        app_module.store = operations
+        headers = {"x-internal-token": "test-token"}
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app_module.app), base_url="http://test") as client:
+            history = await client.get("/api/v1/screener/runs?limit=1", headers=headers)
+            monitoring = await client.get("/api/v1/monitoring", headers=headers)
+
+        assert history.status_code == 200
+        payload = history.json()
+        assert payload["items"][0]["scannedMarkets"] == 18_000
+        assert payload["summary"]["apiRequests"] == 12
+        assert payload["source"]["available"] is True
+        assert payload["warnings"] == []
+        screener = monitoring.json()["screener"]
+        assert screener["history"][0]["id"] == record_id
+        assert screener["historySummary"]["totalRuns"] == 1
+        assert "historyNextCursor" in screener
+
+
+@pytest.mark.anyio
 async def test_portfolio_contract_is_authenticated_and_uses_launcher_snapshot():
     with tempfile.TemporaryDirectory() as temporary:
         app_module.store = fixture_store(Path(temporary))

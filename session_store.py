@@ -95,6 +95,39 @@ class SessionStore:
                     payload_json TEXT NOT NULL, FOREIGN KEY(run_id) REFERENCES runs(id)
                 );
                 CREATE INDEX IF NOT EXISTS idx_metric_samples_run_ts ON metric_samples(run_id, timestamp_ms);
+                CREATE TABLE IF NOT EXISTS screener_runs (
+                    id TEXT PRIMARY KEY,
+                    source_key TEXT NOT NULL UNIQUE,
+                    fleet_run_id TEXT NOT NULL,
+                    session_id TEXT NOT NULL,
+                    session_name TEXT NOT NULL,
+                    generation_id INTEGER,
+                    reason TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    started_at_ms INTEGER NOT NULL,
+                    ended_at_ms INTEGER,
+                    duration_ms INTEGER,
+                    configured_limit INTEGER,
+                    effective_limit INTEGER,
+                    scanned_markets INTEGER,
+                    api_requests INTEGER,
+                    api_errors INTEGER,
+                    added_count INTEGER NOT NULL DEFAULT 0,
+                    changed_count INTEGER NOT NULL DEFAULT 0,
+                    removed_count INTEGER NOT NULL DEFAULT 0,
+                    inventory_carried_count INTEGER NOT NULL DEFAULT 0,
+                    inventory_unknown_count INTEGER NOT NULL DEFAULT 0,
+                    warnings_json TEXT NOT NULL DEFAULT '[]',
+                    error TEXT,
+                    artifact_path TEXT,
+                    created_at_ms INTEGER NOT NULL,
+                    FOREIGN KEY(fleet_run_id) REFERENCES runs(id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_screener_runs_started ON screener_runs(started_at_ms DESC, id DESC);
+                CREATE INDEX IF NOT EXISTS idx_screener_runs_session_started ON screener_runs(session_id, started_at_ms DESC, id DESC);
+                CREATE TABLE IF NOT EXISTS screener_run_backfill (
+                    singleton INTEGER PRIMARY KEY CHECK(singleton=1), completed_at_ms INTEGER NOT NULL
+                );
                 PRAGMA user_version=1;
             """)
 
@@ -285,6 +318,14 @@ class SessionStore:
                 (json.dumps(metrics, separators=(",", ":")), interrupted["id"]),
             )
         db.execute("UPDATE runs SET status='interrupted',ended_at_ms=COALESCE(heartbeat_at_ms,?),error=COALESCE(error,'launcher exited without finalizing') WHERE status IN ('starting','running')", (timestamp,))
+        db.execute(
+            """UPDATE screener_runs SET status='interrupted',ended_at_ms=?,
+               duration_ms=MAX(0,? - started_at_ms),
+               error=COALESCE(error,'fleet run exited without finalizing screener refresh')
+               WHERE fleet_run_id IN (SELECT id FROM runs WHERE status='interrupted')
+                 AND status='running'""",
+            (timestamp, timestamp),
+        )
         return len(interrupted_runs)
 
     def claim_run(self, run_id: Optional[str] = None) -> Dict[str, Any]:
@@ -334,6 +375,268 @@ class SessionStore:
                 )
                 db.execute("INSERT INTO metric_samples(run_id,timestamp_ms,payload_json) VALUES(?,?,?)", (run_id, timestamp, sample_payload))
 
+    @staticmethod
+    def _screener_run_dict(row: sqlite3.Row) -> Dict[str, Any]:
+        try:
+            warnings = json.loads(row["warnings_json"] or "[]")
+        except (TypeError, ValueError):
+            warnings = []
+        if not isinstance(warnings, list):
+            warnings = []
+        return {
+            "id": row["id"], "fleetRunId": row["fleet_run_id"],
+            "sessionId": row["session_id"], "sessionName": row["session_name"],
+            "generationId": row["generation_id"], "reason": row["reason"],
+            "status": row["status"], "startedAt": row["started_at_ms"],
+            "endedAt": row["ended_at_ms"], "durationMs": row["duration_ms"],
+            "configuredLimit": row["configured_limit"], "effectiveLimit": row["effective_limit"],
+            "scannedMarkets": row["scanned_markets"], "apiRequests": row["api_requests"],
+            "apiErrors": row["api_errors"], "added": row["added_count"],
+            "changed": row["changed_count"], "removed": row["removed_count"],
+            "inventoryCarried": row["inventory_carried_count"],
+            "inventoryUnknown": row["inventory_unknown_count"],
+            "warnings": warnings, "error": row["error"],
+        }
+
+    def start_screener_run(
+        self, fleet_run_id: str, *, reason: str, started_at_ms: int,
+        configured_limit: Optional[int], artifact_path: Optional[str] = None,
+    ) -> Optional[str]:
+        """Create a durable running screener record for a fleet refresh."""
+        with self._connect() as db:
+            parent = db.execute(
+                "SELECT session_id,session_name FROM runs WHERE id=?", (fleet_run_id,)
+            ).fetchone()
+            if not parent:
+                return None
+            record_id = str(uuid.uuid4())
+            source_key = f"live:{record_id}"
+            db.execute(
+                """INSERT INTO screener_runs(
+                    id,source_key,fleet_run_id,session_id,session_name,reason,status,
+                    started_at_ms,configured_limit,artifact_path,created_at_ms
+                ) VALUES(?,?,?,?,?,?, 'running',?,?,?,?)""",
+                (
+                    record_id, source_key, fleet_run_id, parent["session_id"], parent["session_name"],
+                    str(reason or "scheduled"), int(started_at_ms),
+                    int(configured_limit) if configured_limit is not None else None,
+                    artifact_path, now_ms(),
+                ),
+            )
+        return record_id
+
+    def finish_screener_run(
+        self, record_id: Optional[str], *, status: str, metrics: Mapping[str, Any],
+        ended_at_ms: Optional[int] = None,
+    ) -> None:
+        if not record_id:
+            return
+        if status not in {"succeeded", "failed", "interrupted"}:
+            raise ValueError("invalid screener run status")
+        ended = int(ended_at_ms or now_ms())
+        values = dict(metrics)
+        started = int(values.get("startedAtMs") or ended)
+        duration = values.get("durationMs")
+        if duration is None:
+            duration = max(0, ended - started)
+        warnings = values.get("warnings") or []
+        if not isinstance(warnings, list):
+            warnings = [str(warnings)]
+        with self._connect() as db:
+            db.execute(
+                """UPDATE screener_runs SET status=?,generation_id=?,ended_at_ms=?,duration_ms=?,
+                   configured_limit=?,effective_limit=?,scanned_markets=?,api_requests=?,api_errors=?,
+                   added_count=?,changed_count=?,removed_count=?,inventory_carried_count=?,
+                   inventory_unknown_count=?,warnings_json=?,error=? WHERE id=?""",
+                (
+                    status, values.get("generationId"), ended, int(duration),
+                    values.get("configuredLimit"), values.get("effectiveLimit"),
+                    values.get("scannedMarkets"), values.get("apiRequests"), values.get("apiErrors"),
+                    int(values.get("added") or 0), int(values.get("changed") or 0),
+                    int(values.get("removed") or 0), int(values.get("inventoryCarried") or 0),
+                    int(values.get("inventoryUnknown") or 0), json.dumps([str(item) for item in warnings]),
+                    values.get("error"), record_id,
+                ),
+            )
+
+    def interrupt_screener_runs(self, fleet_run_id: str, *, ended_at_ms: Optional[int] = None) -> int:
+        ended = int(ended_at_ms or now_ms())
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT id,started_at_ms FROM screener_runs WHERE fleet_run_id=? AND status='running'",
+                (fleet_run_id,),
+            ).fetchall()
+            for row in rows:
+                db.execute(
+                    "UPDATE screener_runs SET status='interrupted',ended_at_ms=?,duration_ms=?,error=COALESCE(error,?) WHERE id=?",
+                    (ended, max(0, ended - int(row["started_at_ms"])), "fleet run ended before screener refresh completed", row["id"]),
+                )
+        return len(rows)
+
+    def _backfill_screener_runs(self) -> int:
+        """Import recoverable numeric screener snapshots incrementally and idempotently."""
+        with self._connect() as db:
+            marker = db.execute(
+                "SELECT completed_at_ms FROM screener_run_backfill WHERE singleton=1"
+            ).fetchone()
+            # Live refreshes create durable rows directly, so artifact import is
+            # a one-time migration for runs that predate this table. Rewalking
+            # every artifact directory on each two-second monitoring poll makes
+            # the UI progressively slower as session history grows.
+            if marker:
+                return 0
+            runs = db.execute(
+                "SELECT id,session_id,session_name,configuration_json,artifact_path FROM runs"
+            ).fetchall()
+            imported = 0
+            for run in runs:
+                artifact = Path(str(run["artifact_path"]))
+                screener_dir = artifact / "screener"
+                try:
+                    paths = sorted(
+                        (path for path in screener_dir.glob("*.json") if path.name != "latest.json"),
+                        key=lambda path: path.name,
+                    )
+                except OSError:
+                    continue
+                try:
+                    configuration = json.loads(run["configuration_json"] or "{}")
+                    configured = ((configuration.get("screener") or {}).get("maxMarketsToScan"))
+                except (TypeError, ValueError, AttributeError):
+                    configured = None
+                for path in paths:
+                    source_key = str(path.resolve())
+                    try:
+                        payload = json.loads(path.read_text(encoding="utf-8"))
+                    except (OSError, ValueError, TypeError):
+                        continue
+                    if not isinstance(payload, dict):
+                        continue
+                    last_run = payload.get("lastRun") if isinstance(payload.get("lastRun"), dict) else {}
+                    started = last_run.get("startedAtMs", payload.get("lastStartedAtMs"))
+                    ended = last_run.get("endedAtMs", payload.get("lastCompletedAtMs"))
+                    if not isinstance(started, (int, float)):
+                        continue
+                    status = str(last_run.get("status") or ("failed" if payload.get("lastError") else "succeeded"))
+                    if status == "running":
+                        status = "interrupted"
+                    changes = payload.get("changes") if isinstance(payload.get("changes"), dict) else {}
+                    scan = payload.get("scanMetadata") if isinstance(payload.get("scanMetadata"), dict) else {}
+                    record_id = str(uuid.uuid5(uuid.NAMESPACE_URL, source_key))
+                    duration = last_run.get("durationMs", payload.get("lastDurationMs"))
+                    if duration is None and isinstance(ended, (int, float)):
+                        duration = max(0, int(ended) - int(started))
+                    # A completed live refresh writes a numeric snapshot after
+                    # its durable row is finalized. Treat that snapshot as the
+                    # same refresh instead of creating a second history row.
+                    generation = last_run.get("generationId", payload.get("generationId"))
+                    if generation is not None:
+                        existing = db.execute(
+                            "SELECT 1 FROM screener_runs WHERE fleet_run_id=? AND generation_id=? LIMIT 1",
+                            (run["id"], generation),
+                        ).fetchone()
+                    else:
+                        existing = db.execute(
+                            "SELECT 1 FROM screener_runs WHERE fleet_run_id=? AND generation_id IS NULL "
+                            "AND ABS(started_at_ms-?) <= 5000 LIMIT 1",
+                            (run["id"], int(started)),
+                        ).fetchone()
+                    if existing:
+                        continue
+                    try:
+                        changes_before = db.total_changes
+                        db.execute(
+                            """INSERT OR IGNORE INTO screener_runs(
+                                id,source_key,fleet_run_id,session_id,session_name,generation_id,reason,status,
+                                started_at_ms,ended_at_ms,duration_ms,configured_limit,effective_limit,scanned_markets,
+                                api_requests,api_errors,added_count,changed_count,removed_count,inventory_carried_count,
+                                inventory_unknown_count,warnings_json,error,artifact_path,created_at_ms
+                            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                            (
+                                record_id, source_key, run["id"], run["session_id"], run["session_name"],
+                                generation,
+                                str(last_run.get("reason") or payload.get("reason") or "unknown"), status,
+                                int(started), int(ended) if isinstance(ended, (int, float)) else None,
+                                int(duration) if isinstance(duration, (int, float)) else None,
+                                last_run.get("configuredLimit", scan.get("requestedLimit", configured)),
+                                last_run.get("effectiveLimit", scan.get("effectiveLimit")),
+                                last_run.get("scannedMarkets", scan.get("scannedMarkets")),
+                                last_run.get("apiRequests"), last_run.get("apiErrors"),
+                                int(last_run.get("added", len(changes.get("added") or [])) or 0),
+                                int(last_run.get("changed", len(changes.get("changed") or [])) or 0),
+                                int(last_run.get("removed", len(changes.get("removed") or [])) or 0),
+                                int(last_run.get("inventoryCarried", len(changes.get("inventoryCarried") or [])) or 0),
+                                int(last_run.get("inventoryUnknown", len(changes.get("inventoryUnknown") or [])) or 0),
+                                json.dumps(last_run.get("warnings") or payload.get("warnings") or []),
+                                last_run.get("error", payload.get("lastError")), source_key, now_ms(),
+                            ),
+                        )
+                        imported += int(db.total_changes > changes_before)
+                    except sqlite3.Error:
+                        continue
+            timestamp = now_ms()
+            db.execute(
+                "INSERT INTO screener_run_backfill(singleton,completed_at_ms) VALUES(1,?) "
+                "ON CONFLICT(singleton) DO UPDATE SET completed_at_ms=excluded.completed_at_ms",
+                (timestamp,),
+            )
+            return imported
+
+    def screener_runs(
+        self, *, session_id: str = "", limit: int = 100, cursor: str = "",
+    ) -> Dict[str, Any]:
+        self._backfill_screener_runs()
+        limit = min(max(int(limit), 1), 500)
+        clauses: list[str] = []
+        values: list[Any] = []
+        if session_id:
+            clauses.append("session_id=?"); values.append(session_id)
+        if cursor:
+            try:
+                cursor_started, cursor_id = cursor.split("|", 1)
+                cursor_started_i = int(cursor_started)
+            except (ValueError, TypeError):
+                raise ValueError("invalid screener history cursor")
+            clauses.append("(started_at_ms < ? OR (started_at_ms=? AND id<?))")
+            values.extend((cursor_started_i, cursor_started_i, cursor_id))
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT * FROM screener_runs" + where + " ORDER BY started_at_ms DESC,id DESC LIMIT ?",
+                values + [limit + 1],
+            ).fetchall()
+            summary_clauses = [item for item in clauses if not item.startswith("(started_at_ms <")]
+            summary_values = values[: len(values) - (3 if cursor else 0)]
+            summary_where = " WHERE " + " AND ".join(summary_clauses) if summary_clauses else ""
+            summary = db.execute(
+                """SELECT COUNT(*) AS total,
+                    SUM(status='succeeded') AS succeeded, SUM(status='failed') AS failed,
+                    SUM(status='interrupted') AS interrupted, SUM(status='running') AS running,
+                    SUM(COALESCE(scanned_markets,0)) AS scanned, SUM(COALESCE(api_requests,0)) AS requests,
+                    AVG(CASE WHEN status<>'running' THEN duration_ms END) AS average_duration,
+                    SUM(added_count) AS added, SUM(changed_count) AS changed, SUM(removed_count) AS removed
+                   FROM screener_runs""" + summary_where,
+                summary_values,
+            ).fetchone()
+        page = rows[:limit]
+        next_cursor = None
+        if len(rows) > limit:
+            last = page[-1]
+            next_cursor = f"{last['started_at_ms']}|{last['id']}"
+        return {
+            "items": [self._screener_run_dict(row) for row in page],
+            "nextCursor": next_cursor,
+            "summary": {
+                "totalRuns": int(summary["total"] or 0), "succeeded": int(summary["succeeded"] or 0),
+                "failed": int(summary["failed"] or 0), "interrupted": int(summary["interrupted"] or 0),
+                "running": int(summary["running"] or 0), "scannedMarkets": int(summary["scanned"] or 0),
+                "apiRequests": int(summary["requests"] or 0),
+                "averageDurationMs": float(summary["average_duration"]) if summary["average_duration"] is not None else None,
+                "added": int(summary["added"] or 0), "changed": int(summary["changed"] or 0),
+                "removed": int(summary["removed"] or 0),
+            },
+        }
+
     def finish_run(self, run_id: str, status: str, *, metrics: Optional[Mapping[str, Any]] = None, error: Optional[str] = None) -> None:
         if status not in {"stopped", "failed", "shutdown_failed", "interrupted"}:
             raise ValueError("invalid final run status")
@@ -347,6 +650,13 @@ class SessionStore:
             db.execute(
                 "UPDATE runs SET status=?,ended_at_ms=?,heartbeat_at_ms=?,error=? WHERE id=?",
                 (status, finished_at, finished_at, error, run_id),
+            )
+            db.execute(
+                """UPDATE screener_runs SET status='interrupted',ended_at_ms=?,
+                   duration_ms=MAX(0,? - started_at_ms),
+                   error=COALESCE(error,'fleet run ended before screener refresh completed')
+                   WHERE fleet_run_id=? AND status='running'""",
+                (finished_at, finished_at, run_id),
             )
         if row:
             self._finalize_order_revisions(Path(row["artifact_path"]), finished_at)

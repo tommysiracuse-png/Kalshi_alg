@@ -188,6 +188,7 @@ class Launcher:
         self.status_path = self.runtime_dir / "launcher_status.json"
         self.socket_path = self.runtime_dir / "launcher.sock"
         self._portfolio_task: Optional["asyncio.Task[bool]"] = None
+        self._active_screener_record_id: Optional[str] = None
         self._run_error: Optional[str] = None
         self._last_metric_sample_ms = 0
         self._observability_warning: Optional[str] = None
@@ -506,39 +507,76 @@ class Launcher:
         # carryover pick even when the screener does not re-pick its market.
         exchange_positions = await self._startup_exchange_positions() if reason == "startup" else None
         traded_tickers = await self._fleet_traded_tickers() if exchange_positions else None
+        record_id: Optional[str] = None
+        if self.session_store is not None and self.run_id:
+            try:
+                configured_limit = self.screener.settings.get("max_markets_to_scan")
+                record_id = self.session_store.start_screener_run(
+                    self.run_id,
+                    reason=reason,
+                    started_at_ms=int(time.time() * 1000),
+                    configured_limit=int(configured_limit) if configured_limit is not None else None,
+                    artifact_path=str(self.run_artifact_path) if self.run_artifact_path else None,
+                )
+                self._active_screener_record_id = record_id
+            except Exception as exc:
+                self._record_observability_failure("start screener history", exc)
         refresh_task = asyncio.create_task(
             self.screener.refresh(
                 self.manager.current_picks, reason=reason, exchange_positions=exchange_positions,
                 traded_tickers=traded_tickers,
             )
         )
-        while not refresh_task.done():
-            self.publish_status("stopping" if self.shutdown_requested.is_set() else "running")
-            try:
-                await asyncio.wait_for(asyncio.shield(refresh_task), timeout=0.5)
-            except asyncio.TimeoutError:
-                pass
-        update = await refresh_task
-        event = await self.screener.events.get()
-        if self.shutdown_requested.is_set():
-            return False
-        if update is None:
-            self.last_error = event.error or "screener refresh failed"
+        try:
+            while not refresh_task.done():
+                self.publish_status("stopping" if self.shutdown_requested.is_set() else "running")
+                try:
+                    await asyncio.wait_for(asyncio.shield(refresh_task), timeout=0.5)
+                except asyncio.TimeoutError:
+                    pass
+            update = await refresh_task
+            event = await self.screener.events.get()
+            run_metrics = self.screener.last_run_metrics()
+            if record_id and self.session_store is not None:
+                try:
+                    self.session_store.finish_screener_run(
+                        record_id, status="succeeded" if update is not None else "failed",
+                        metrics=run_metrics,
+                    )
+                except Exception as exc:
+                    self._record_observability_failure("finish screener history", exc)
+                record_id = None
+                self._active_screener_record_id = None
+            self._save_screener_snapshot()
+            if self.shutdown_requested.is_set():
+                return False
+            if update is None:
+                self.last_error = event.error or "screener refresh failed"
+                self.next_refresh_at = (
+                    time.time() + self.arguments.refresh_interval_seconds
+                    if self.arguments.refresh_interval_seconds > 0
+                    else None
+                )
+                return False
+            await self.manager.apply_update(update)
+            self.last_error = None
             self.next_refresh_at = (
                 time.time() + self.arguments.refresh_interval_seconds
                 if self.arguments.refresh_interval_seconds > 0
                 else None
             )
-            return False
-        await self.manager.apply_update(update)
-        self._save_screener_snapshot()
-        self.last_error = None
-        self.next_refresh_at = (
-            time.time() + self.arguments.refresh_interval_seconds
-            if self.arguments.refresh_interval_seconds > 0
-            else None
-        )
-        return True
+            return True
+        except asyncio.CancelledError:
+            if record_id and self.session_store is not None:
+                try:
+                    self.session_store.finish_screener_run(
+                        record_id, status="interrupted",
+                        metrics=self.screener.last_run_metrics(),
+                    )
+                except Exception as exc:
+                    self._record_observability_failure("interrupt screener history", exc)
+                self._active_screener_record_id = None
+            raise
 
     async def _handle_control(self, request: ControlRequest) -> None:
         self.pending_action = {

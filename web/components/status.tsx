@@ -1,6 +1,6 @@
 export function StatusBadge({ value }: { value?: string }) {
   const normalized = (value ?? "unknown").toLowerCase();
-  const tone = ["running", "normal", "ok", "active"].includes(normalized) ? "good" : ["stopped", "failed", "flatten_only", "error"].includes(normalized) ? "bad" : "warn";
+  const tone = ["running", "normal", "ok", "active", "succeeded"].includes(normalized) ? "good" : ["stopped", "failed", "flatten_only", "error"].includes(normalized) ? "bad" : "warn";
   return <span className={`status ${tone}`}><span aria-hidden />{value ?? "Unknown"}</span>;
 }
 

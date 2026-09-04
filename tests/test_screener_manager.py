@@ -71,6 +71,45 @@ def test_screener_diff_inventory_fail_safe_csv_and_last_good(tmp_path, monkeypat
     assert {item["marketId"] for item in status["picks"]} == {"NEW", "UNKNOWN"}
 
 
+def test_screener_refresh_reports_scan_metadata_and_request_delta(tmp_path, monkeypatch):
+    pd = pytest.importorskip("pandas")
+    import screener as screener_module
+    from screener import Screener
+
+    frame = pd.DataFrame([{"Ticker": "NEW", "SearchText": "New market", "Best EV(c)": 4.0}])
+    frame.attrs["market_scan"] = {
+        "requestedLimit": 20_000, "effectiveLimit": 20_000,
+        "scannedMarkets": 18_500, "truncated": False,
+    }
+    monkeypatch.setattr(screener_module, "screen_markets", lambda source, settings: frame)
+    monkeypatch.setattr(screener_module, "build_export_dataframe", lambda value, settings: value)
+
+    class ActivityClient(FakeScreenClient):
+        snapshots = 0
+
+        def activity_snapshot(self):
+            self.snapshots += 1
+            return {"rest": {"total": 10 if self.snapshots == 1 else 17, "errors": 1 if self.snapshots == 1 else 2}}
+
+    screener = Screener(
+        client=ActivityClient(), settings={"max_markets_to_scan": 20_000},
+        output_path=tmp_path / "screen.csv", default_yes_budget_cents=100,
+        default_no_budget_cents=100, max_bots=10,
+        minimum_carryover_value_cents=20,
+    )
+    update = asyncio.run(screener.refresh({}, reason="scheduled"))
+
+    assert update is not None
+    metrics = screener.last_run_metrics()
+    assert metrics["status"] == "succeeded"
+    assert metrics["configuredLimit"] == 20_000
+    assert metrics["effectiveLimit"] == 20_000
+    assert metrics["scannedMarkets"] == 18_500
+    assert metrics["apiRequests"] == 7
+    assert metrics["apiErrors"] == 1
+    assert screener.status_snapshot()["scanMetadata"] == frame.attrs["market_scan"]
+
+
 def test_screener_inventory_carryover_consumes_cap_and_displaces_lowest_rank(tmp_path, monkeypatch):
     pd = pytest.importorskip("pandas")
     import screener as screener_module
@@ -160,13 +199,13 @@ def test_market_scan_is_hard_capped_and_reports_truncation():
     frame = screen_markets(source, {
         "status": "open",
         "mve_filter": "exclude",
-        "max_markets_to_scan": 600_000,
+        "max_markets_to_scan": MARKET_SCAN_HARD_LIMIT + 1,
         "markout_filter_enabled": False,
     })
 
     assert source.max_total == MARKET_SCAN_HARD_LIMIT
     assert frame.attrs["market_scan"] == {
-        "requestedLimit": 600_000,
+        "requestedLimit": MARKET_SCAN_HARD_LIMIT + 1,
         "effectiveLimit": MARKET_SCAN_HARD_LIMIT,
         "scannedMarkets": 0,
         "truncated": True,

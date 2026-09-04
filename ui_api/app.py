@@ -180,6 +180,14 @@ async def monitoring(_: str = Depends(authorize)) -> dict:
     return store.monitoring()
 
 
+@app.get("/api/v1/screener/runs")
+async def screener_runs(
+    session_id: str = "", limit: int = Query(100, ge=1, le=500), cursor: str = "",
+    _: str = Depends(authorize),
+) -> dict:
+    return store.screener_runs(session_id=session_id, limit=limit, cursor=cursor)
+
+
 @app.get("/api/v1/monitoring/clients/{market_id}")
 async def client_monitoring(market_id: str, _: str = Depends(authorize)) -> dict:
     return store.client_monitoring(market_id)
