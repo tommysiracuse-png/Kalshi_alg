@@ -70,8 +70,8 @@ describe("LiveMetrics", () => {
     fireEvent.change(screen.getByLabelText("Markout horizon"), { target: { value: "5000" } });
     expect(window.location.search).toContain("markout_horizon_ms=5000");
     fireEvent.change(screen.getByLabelText("Markout horizon"), { target: { value: "30000" } });
-    await waitFor(() => expect(screen.getByLabelText("Fills")).toHaveValue("25"));
-    expect(screen.getByLabelText("Orders")).toHaveValue("50");
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Fills" })).toHaveValue("25"));
+    expect(screen.getByRole("combobox", { name: "Orders" })).toHaveValue("50");
     expect(screen.getByLabelText("Total Cost minimum")).toBeDisabled();
     expect(screen.getByLabelText("Markets: Name / Description / Link / Ticker")).toBeChecked();
     expect(screen.getByLabelText("Markets: Name / Description / Link / Ticker")).toBeDisabled();
@@ -91,7 +91,7 @@ describe("LiveMetrics", () => {
     expect(headings.map(item => item.textContent)).toEqual(["Fills", "Orders"]);
     expect(request).toHaveBeenCalledWith(expect.stringContaining("fill_limit=25&order_limit=50"), { cache: "no-store" });
 
-    fireEvent.change(screen.getByLabelText("Fills"), { target: { value: "250" } });
+    fireEvent.change(screen.getByRole("combobox", { name: "Fills" }), { target: { value: "250" } });
     expect(window.localStorage.getItem("kalshi.metrics.fillLimit")).toBe("250");
     await waitFor(() => expect(request).toHaveBeenCalledWith(expect.stringContaining("fill_limit=250&order_limit=50"), { cache: "no-store" }));
 
@@ -153,17 +153,17 @@ describe("LiveMetrics", () => {
     }
     vi.stubGlobal("EventSource", MockEventSource);
     const source = { available: true, updatedAt: 4_000_000, stale: false };
-    const market = (ticker: string, lastFillAtMs: number, totalCostUnits: number, contractsUnits: number) => ({
+    const market = (ticker: string, lastFillAtMs: number, totalCostUnits: number, contractsUnits: number, fillCount = 2, orderCount = 2) => ({
       ticker, description: `${ticker} market`, marketUrl: null, side: "YES" as const,
       yesContractsUnits: contractsUnits, noContractsUnits: 0, yesAverageCostPriceUnits: 4_000, noAverageCostPriceUnits: null,
       totalCostUnits, realizedPnlUnits: ticker === "NEW" ? 1_000 : 500, realizedReturnBps: 500,
       markoutsByHorizon: { "30000": aggregate(ticker === "NEW" ? 1_000 : 500, 2, 300) },
-      fillCount: 2, orderCount: 2, firstFillAtMs: lastFillAtMs - 500, lastFillAtMs,
+      fillCount, orderCount, firstFillAtMs: lastFillAtMs - 500, lastFillAtMs,
       coverage: { fillsComplete: true, ordersComplete: true }, warnings: [],
     });
     const markets: RunMarketsResponse = {
       generatedAt: 4_000_000, runId: "run-12345678", source, warnings: [],
-      items: [market("OLD", 2_000_000, 10_000, 100), market("NEW", 4_000_000, 30_000, 300)],
+      items: [market("OLD", 2_000_000, 10_000, 100, 2, 5), market("NEW", 4_000_000, 30_000, 300, 4, 1)],
     };
     const activity: RunMarketActivityResponse = {
       generatedAt: 4_000_000, runId: "run-12345678", market: markets.items[1], source, warnings: [],
@@ -197,6 +197,23 @@ describe("LiveMetrics", () => {
     expect(screen.getByRole("columnheader", { name: "Last fill" })).toHaveAttribute("aria-sort", "descending");
     fireEvent.click(screen.getByRole("button", { name: "Last fill" }));
     expect(marketRows()[0]).toContain("OLD");
+    expect(screen.getByRole("columnheader", { name: "Fills" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Orders" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Fills" }));
+    expect(marketRows()[0]).toContain("NEW");
+    fireEvent.click(screen.getByRole("button", { name: "Orders" }));
+    expect(marketRows()[0]).toContain("OLD");
+    const fillsHeader = screen.getByRole("columnheader", { name: "Fills" });
+    const resizeHandle = fillsHeader.querySelector(".metrics-column-resize-handle");
+    expect(resizeHandle).not.toBeNull();
+    fireEvent.pointerDown(resizeHandle as Element, { clientX: 100 });
+    fireEvent.pointerMove(window, { clientX: 160 });
+    fireEvent.pointerUp(window, { clientX: 160 });
+    expect(fillsHeader).toHaveStyle({ width: "210px" });
+    await waitFor(() => {
+      const stored = JSON.parse(window.localStorage.getItem("kalshi.metrics.widths.v1") ?? "null") as { tables: { markets: Record<string, number> } };
+      expect(stored.tables.markets.fillCount).toBe(210);
+    });
 
     fireEvent.click(screen.getByRole("button", { name: "Expand NEW" }));
     expect(await screen.findByText("fill-new")).toBeInTheDocument();

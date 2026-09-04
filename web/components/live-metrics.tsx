@@ -21,7 +21,11 @@ const MARKOUT_HORIZONS = [1_000, 5_000, 30_000, 120_000] as const;
 const ACTIVE_STATES = new Set(["pending", "starting", "running"]);
 const COLUMN_STORAGE_KEY = "kalshi.metrics.columns.v1";
 const COLUMN_STORAGE_VERSION = 2;
+const COLUMN_WIDTH_STORAGE_KEY = "kalshi.metrics.widths.v1";
+const COLUMN_WIDTH_STORAGE_VERSION = 1;
 const COLUMN_DRAG_TYPE = "application/x-kalshi-metrics-column";
+const MIN_COLUMN_WIDTH = 72;
+const MAX_COLUMN_WIDTH = 720;
 
 type TableKind = "markets" | "fills" | "orders";
 type SortDirection = "asc" | "desc";
@@ -29,6 +33,7 @@ type DropPosition = "before" | "after";
 type SortState = { id: string; direction: SortDirection };
 type ColumnPreference = { id: string; enabled: boolean };
 type ColumnPreferences = Record<TableKind, ColumnPreference[]>;
+type ColumnWidths = Record<TableKind, Record<string, number>>;
 type SortValue = string | number | null | undefined;
 type ColumnDefinition<T> = {
   id: string;
@@ -71,7 +76,8 @@ const COLUMN_OPTIONS: Record<TableKind, Array<{ id: string; label: string; locke
     { id: "averageCost", label: "Avg Cost" },
     { id: "totalCost", label: "Total Cost" },
     { id: "markout", label: "Net Markout" },
-    { id: "activityCount", label: "Amount of Fills / Orders" },
+    { id: "fillCount", label: "Fills" },
+    { id: "orderCount", label: "Orders" },
     { id: "firstFill", label: "First Fill Time" },
     { id: "lastFill", label: "Last Fill Time" },
   ],
@@ -106,6 +112,50 @@ const EMPTY_METRICS_FILTERS: MetricsFilters = {
   averageMarkoutMin: "", averageMarkoutMax: "",
   contractsMin: "", contractsMax: "",
 };
+
+const DEFAULT_COLUMN_WIDTHS: Record<TableKind, Record<string, number>> = {
+  markets: { identity: 320 },
+  fills: { contracts: 190, signedMarkout: 170, futureMidpoint: 170, netMarkout: 170 },
+  orders: { orderId: 190, book: 170, latestState: 150 },
+};
+
+function defaultColumnWidths(): ColumnWidths {
+  const widths = {} as ColumnWidths;
+  for (const kind of Object.keys(COLUMN_OPTIONS) as TableKind[]) {
+    widths[kind] = {};
+    for (const column of COLUMN_OPTIONS[kind]) widths[kind][column.id] = DEFAULT_COLUMN_WIDTHS[kind][column.id] ?? 150;
+  }
+  return widths;
+}
+
+function clampColumnWidth(value: number) {
+  return Math.max(MIN_COLUMN_WIDTH, Math.min(MAX_COLUMN_WIDTH, Math.round(value)));
+}
+
+function sanitizeColumnWidths(value: unknown): ColumnWidths {
+  const result = defaultColumnWidths();
+  if (!value || typeof value !== "object") return result;
+  const candidate = value as { version?: unknown; tables?: unknown };
+  if (candidate.version !== COLUMN_WIDTH_STORAGE_VERSION || !candidate.tables || typeof candidate.tables !== "object") return result;
+  const tables = candidate.tables as Partial<Record<TableKind, unknown>>;
+  for (const kind of Object.keys(COLUMN_OPTIONS) as TableKind[]) {
+    const saved = tables[kind];
+    if (!saved || typeof saved !== "object" || Array.isArray(saved)) continue;
+    const known = new Set(COLUMN_OPTIONS[kind].map(column => column.id));
+    for (const [id, width] of Object.entries(saved)) {
+      if (known.has(id) && typeof width === "number" && Number.isFinite(width)) result[kind][id] = clampColumnWidth(width);
+    }
+  }
+  return result;
+}
+
+function getColumnWidth(widths: ColumnWidths, kind: TableKind, id: string) {
+  return widths[kind][id] ?? DEFAULT_COLUMN_WIDTHS[kind][id] ?? 150;
+}
+
+function tableWidth(widths: ColumnWidths, kind: TableKind, columns: Array<{ id: string }>) {
+  return columns.reduce((total, column) => total + getColumnWidth(widths, kind, column.id), 0);
+}
 
 function defaultColumnPreferences(): ColumnPreferences {
   return {
@@ -408,13 +458,15 @@ function NumericFilterGroup({ label, minimum, maximum, valid, onMinimum, onMaxim
   </div>;
 }
 
-function SortableHeader<T>({ kind, column, sort, dragRef, onSort, onReorder }: {
+function SortableHeader<T>({ kind, column, width, sort, dragRef, onSort, onReorder, onResize }: {
   kind: TableKind;
   column: ColumnDefinition<T>;
+  width: number;
   sort: SortState;
   dragRef: ColumnDragRef;
   onSort: (column: ColumnDefinition<T>) => void;
   onReorder: ColumnReorder;
+  onResize: (width: number) => void;
 }) {
   const active = sort.id === column.id;
   const [dropPosition, setDropPosition] = useState<DropPosition | null>(null);
@@ -429,6 +481,7 @@ function SortableHeader<T>({ kind, column, sort, dragRef, onSort, onReorder }: {
     }
   };
   return <th
+    style={{ width, minWidth: width }}
     aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : undefined}
     className={`${draggable ? "metrics-column-draggable" : "metrics-column-locked"}${dropPosition ? ` column-drop-${dropPosition}` : ""}`}
     draggable={draggable}
@@ -463,7 +516,74 @@ function SortableHeader<T>({ kind, column, sort, dragRef, onSort, onReorder }: {
     <button className="metrics-sort-button" type="button" onClick={() => onSort(column)}>
       <span className="metrics-sort-label">{draggable && <span className="column-drag-grip" aria-hidden="true">⋮⋮</span>}{column.header}</span><span className="sort-indicator" aria-hidden="true">{active ? sort.direction === "asc" ? "↑" : "↓" : "↕"}</span>
     </button>
+    <span
+      className="metrics-column-resize-handle"
+      aria-hidden="true"
+      title={`Resize ${column.header} column`}
+      onPointerDown={event => {
+        event.preventDefault();
+        event.stopPropagation();
+        const startX = event.clientX;
+        const startWidth = width;
+        const move = (moveEvent: PointerEvent) => onResize(clampColumnWidth(startWidth + moveEvent.clientX - startX));
+        const finish = () => {
+          window.removeEventListener("pointermove", move);
+          window.removeEventListener("pointerup", finish);
+          document.body.classList.remove("metrics-column-resizing");
+        };
+        document.body.classList.add("metrics-column-resizing");
+        window.addEventListener("pointermove", move);
+        window.addEventListener("pointerup", finish, { once: true });
+      }}
+    />
   </th>;
+}
+
+function MetricsTableScroll({ className, children }: { className: string; children: React.ReactNode }) {
+  const tableWrapRef = useRef<HTMLDivElement>(null);
+  const topScrollRef = useRef<HTMLDivElement>(null);
+  const [contentWidth, setContentWidth] = useState(0);
+  const [viewportWidth, setViewportWidth] = useState(0);
+  const updateWidth = useCallback(() => {
+    const tableWrap = tableWrapRef.current;
+    if (tableWrap) {
+      setViewportWidth(tableWrap.clientWidth);
+      setContentWidth(Math.max(tableWrap.scrollWidth, tableWrap.clientWidth));
+    }
+  }, []);
+  useEffect(() => {
+    updateWidth();
+    const tableWrap = tableWrapRef.current;
+    if (!tableWrap) return undefined;
+    const resizeObserver = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(updateWidth);
+    resizeObserver?.observe(tableWrap);
+    const table = tableWrap.querySelector("table");
+    if (table) resizeObserver?.observe(table);
+    window.addEventListener("resize", updateWidth);
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", updateWidth);
+    };
+  }, [updateWidth]);
+  const overflow = contentWidth > viewportWidth + 1;
+  return <div className="metrics-table-scroll">
+    <div
+      ref={topScrollRef}
+      className="metrics-top-scroll"
+      style={{ display: overflow ? "block" : "none" }}
+      onScroll={event => {
+        if (tableWrapRef.current && tableWrapRef.current.scrollLeft !== event.currentTarget.scrollLeft) tableWrapRef.current.scrollLeft = event.currentTarget.scrollLeft;
+      }}
+      aria-label="Horizontal table scrollbar"
+    ><div style={{ width: contentWidth, height: 1 }} /></div>
+    <div
+      ref={tableWrapRef}
+      className={className}
+      onScroll={event => {
+        if (topScrollRef.current && topScrollRef.current.scrollLeft !== event.currentTarget.scrollLeft) topScrollRef.current.scrollLeft = event.currentTarget.scrollLeft;
+      }}
+    >{children}</div>
+  </div>;
 }
 
 function Limits({ fillLimit, orderLimit, onChange }: { fillLimit: number; orderLimit: number; onChange: (kind: "fill" | "order", value: number) => void }) {
@@ -485,7 +605,9 @@ export function LiveMetrics({ initial, sessions, query, markoutHorizonMs = 30_00
   const [fillLimit, setFillLimit] = useState(100);
   const [orderLimit, setOrderLimit] = useState(100);
   const [columnPreferences, setColumnPreferences] = useState<ColumnPreferences>(defaultColumnPreferences);
+  const [columnWidths, setColumnWidths] = useState<ColumnWidths>(defaultColumnWidths);
   const [columnsHydrated, setColumnsHydrated] = useState(false);
+  const [widthsHydrated, setWidthsHydrated] = useState(false);
   const [metricFilters, setMetricFilters] = useState<MetricsFilters>(EMPTY_METRICS_FILTERS);
   const [selectedHorizonMs, setSelectedHorizonMs] = useState(markoutHorizonMs);
   const [marketSort, setMarketSort] = useState<SortState>({ id: "lastFill", direction: "desc" });
@@ -533,6 +655,24 @@ export function LiveMetrics({ initial, sessions, query, markoutHorizonMs = 30_00
       // Browser storage can be disabled; table preferences remain usable for this page view.
     }
   }, [columnPreferences, columnsHydrated]);
+  useEffect(() => {
+    try {
+      const stored = window.localStorage.getItem(COLUMN_WIDTH_STORAGE_KEY);
+      if (stored) setColumnWidths(sanitizeColumnWidths(JSON.parse(stored)));
+    } catch {
+      setColumnWidths(defaultColumnWidths());
+    } finally {
+      setWidthsHydrated(true);
+    }
+  }, []);
+  useEffect(() => {
+    if (!widthsHydrated) return;
+    try {
+      window.localStorage.setItem(COLUMN_WIDTH_STORAGE_KEY, JSON.stringify({ version: COLUMN_WIDTH_STORAGE_VERSION, tables: columnWidths }));
+    } catch {
+      // Browser storage can be disabled; widths remain usable for this page view.
+    }
+  }, [columnWidths, widthsHydrated]);
 
   const loadRunMarkets = useCallback(async (runId: string) => {
     setRunMarkets(previous => ({ ...previous, [runId]: { ...previous[runId], loading: true, error: undefined } }));
@@ -691,6 +831,14 @@ export function LiveMetrics({ initial, sessions, query, markoutHorizonMs = 30_00
     });
   };
 
+  const resizeColumn = (kind: TableKind, id: string, width: number) => {
+    setColumnWidths(previous => {
+      const nextWidth = clampColumnWidth(width);
+      if (previous[kind][id] === nextWidth) return previous;
+      return { ...previous, [kind]: { ...previous[kind], [id]: nextWidth } };
+    });
+  };
+
   const changeLimit = (kind: "fill" | "order", value: number) => {
     const nextFill = kind === "fill" ? value : fillLimit;
     const nextOrder = kind === "order" ? value : orderLimit;
@@ -727,15 +875,15 @@ export function LiveMetrics({ initial, sessions, query, markoutHorizonMs = 30_00
           : undefined;
         return <section className="metrics-session" key={session.id}>
           <button className="metrics-session-row" type="button" aria-expanded={open} onClick={() => toggleSet(setExpandedSessions, session.id)}><span className="tree-chevron">{open ? "−" : "+"}</span><span><strong>{session.name}</strong><small>{runs.length} run{runs.length === 1 ? "" : "s"}</small></span><span><small>Runtime</small>{duration(runtime)}</span><span><small>Orders / fills</small>{orders} / {fills}</span><span><small>{horizonLabel} net markout</small>{moneyUnits(sessionMarkout, true)}</span></button>
-          {open && <div className="metrics-runs table-wrap"><table><thead><tr><th>Run</th><th>Status</th><th>Started / runtime</th><th>Orders / fills</th><th>{horizonLabel} net markout</th><th>API</th><th>Artifacts</th></tr></thead><tbody>
+          {open && <MetricsTableScroll className="metrics-runs table-wrap"><table><thead><tr><th>Run</th><th>Status</th><th>Started / runtime</th><th>Orders / fills</th><th>{horizonLabel} net markout</th><th>API</th><th>Artifacts</th></tr></thead><tbody>
             {runs.map(run => {
               const runOpen = expandedRuns.has(run.id);
               const state = runMarkets[run.id];
               return <Fragment key={run.id}><tr className="expandable-position" onClick={() => { toggleSet(setExpandedRuns, run.id); if (!runOpen && !state?.data) void loadRunMarkets(run.id); }}><td><div className="market-cell"><button type="button" className="row-toggle" aria-label={`${runOpen ? "Collapse" : "Expand"} run ${run.id}`} aria-expanded={runOpen}>{runOpen ? "−" : "+"}</button><span className="mono">{run.id.slice(0, 8)}{ACTIVE_STATES.has(run.status) && <small className="session-tag">Live run</small>}</span></div></td><td><StatusBadge value={run.status} /></td><td><Time value={run.startedAt ?? run.createdAt} /><small>{duration(metric(run, "runtimeMs"))}</small></td><td>{metric(run, "orders")} / {metric(run, "fills")}</td><td>{moneyUnits(runMarkout(run, selectedHorizonMs)?.netMarkoutUnits, true)}</td><td>{metric(run, "apiCalls")}<small>{metric(run, "apiErrors")} errors</small></td><td>{bytes(run.artifactBytes)}</td></tr>
-                {runOpen && <tr className="metrics-nested-row"><td colSpan={7}><RunMarkets run={run} state={state} horizonMs={selectedHorizonMs} expandedMarkets={expandedMarkets} activity={marketActivity} columnPreferences={columnPreferences} filters={parsedMetricFilters} marketSort={marketSort} fillSort={fillSort} orderSort={orderSort} columnDragRef={columnDragRef} onMarketSort={column => selectSort(setMarketSort, column)} onFillSort={column => selectSort(setFillSort, column)} onOrderSort={column => selectSort(setOrderSort, column)} onColumnReorder={reorderColumn} onToggle={(ticker, isOpen) => { const key = `${run.id}:${ticker}`; toggleSet(setExpandedMarkets, key); if (!isOpen && !marketActivity[key]?.data) void loadActivity(run.id, ticker); }} /></td></tr>}
+                {runOpen && <tr className="metrics-nested-row"><td colSpan={7}><RunMarkets run={run} state={state} horizonMs={selectedHorizonMs} expandedMarkets={expandedMarkets} activity={marketActivity} columnPreferences={columnPreferences} columnWidths={columnWidths} filters={parsedMetricFilters} marketSort={marketSort} fillSort={fillSort} orderSort={orderSort} columnDragRef={columnDragRef} onMarketSort={column => selectSort(setMarketSort, column)} onFillSort={column => selectSort(setFillSort, column)} onOrderSort={column => selectSort(setOrderSort, column)} onColumnReorder={reorderColumn} onColumnResize={resizeColumn} onToggle={(ticker, isOpen) => { const key = `${run.id}:${ticker}`; toggleSet(setExpandedMarkets, key); if (!isOpen && !marketActivity[key]?.data) void loadActivity(run.id, ticker); }} /></td></tr>}
               </Fragment>;
             })}
-          </tbody></table></div>}
+          </tbody></table></MetricsTableScroll>}
         </section>;
       })}
       {!grouped.length && <p className="empty">No session-aware runs match these filters. Legacy artifacts were intentionally not guessed into sessions.</p>}
@@ -743,13 +891,14 @@ export function LiveMetrics({ initial, sessions, query, markoutHorizonMs = 30_00
   </>;
 }
 
-function RunMarkets({ run, state, horizonMs, expandedMarkets, activity, columnPreferences, filters, marketSort, fillSort, orderSort, columnDragRef, onMarketSort, onFillSort, onOrderSort, onColumnReorder, onToggle }: {
+function RunMarkets({ run, state, horizonMs, expandedMarkets, activity, columnPreferences, columnWidths, filters, marketSort, fillSort, orderSort, columnDragRef, onMarketSort, onFillSort, onOrderSort, onColumnReorder, onColumnResize, onToggle }: {
   run: HistoricalRun;
   state?: LoadState<RunMarketsResponse>;
   horizonMs: number;
   expandedMarkets: Set<string>;
   activity: Record<string, LoadState<RunMarketActivityResponse>>;
   columnPreferences: ColumnPreferences;
+  columnWidths: ColumnWidths;
   filters: ParsedFilters;
   marketSort: SortState;
   fillSort: SortState;
@@ -759,6 +908,7 @@ function RunMarkets({ run, state, horizonMs, expandedMarkets, activity, columnPr
   onFillSort: (column: ColumnDefinition<RunFillActivity>) => void;
   onOrderSort: (column: ColumnDefinition<RunOrderRevision>) => void;
   onColumnReorder: ColumnReorder;
+  onColumnResize: (kind: TableKind, id: string, width: number) => void;
   onToggle: (ticker: string, isOpen: boolean) => void;
 }) {
   const marketColumns: ColumnDefinition<RunMarketMetrics>[] = [
@@ -775,7 +925,8 @@ function RunMarkets({ run, state, horizonMs, expandedMarkets, activity, columnPr
     { id: "averageCost", header: "Avg cost", initialDirection: "desc", sortValue: marketAverageCost, render: market => <><span>YES {priceUnits(market.yesAverageCostPriceUnits)}</span><small>NO {priceUnits(market.noAverageCostPriceUnits)}</small></> },
     { id: "totalCost", header: "Total cost", initialDirection: "desc", sortValue: market => market.totalCostUnits, render: market => moneyUnits(market.totalCostUnits) },
     { id: "markout", header: `${horizonMs / 1000}s net markout`, initialDirection: "desc", sortValue: market => selectedMarkout(market.markoutsByHorizon, horizonMs)?.netMarkoutUnits, render: market => { const markout = selectedMarkout(market.markoutsByHorizon, horizonMs); return <span className={markout == null ? "muted" : markout.netMarkoutUnits < 0 ? "negative" : markout.netMarkoutUnits > 0 ? "positive" : ""}>{moneyUnits(markout?.netMarkoutUnits, true)}<small>{priceUnits(markout?.averageNetMarkoutPriceUnits)} / contract · {markout?.coveredFillCount ?? 0}/{markout?.totalFillCount ?? market.fillCount} fills</small></span>; } },
-    { id: "activityCount", header: "Fills / orders", initialDirection: "desc", sortValue: market => market.fillCount + market.orderCount, render: market => `${market.fillCount} / ${market.orderCount}` },
+    { id: "fillCount", header: "Fills", initialDirection: "desc", sortValue: market => market.fillCount, render: market => market.fillCount },
+    { id: "orderCount", header: "Orders", initialDirection: "desc", sortValue: market => market.orderCount, render: market => market.orderCount },
     { id: "firstFill", header: "First fill", initialDirection: "desc", sortValue: market => market.firstFillAtMs, render: market => <Time value={market.firstFillAtMs} /> },
     { id: "lastFill", header: "Last fill", initialDirection: "desc", sortValue: market => market.lastFillAtMs, render: market => <Time value={market.lastFillAtMs} /> },
   ];
@@ -788,23 +939,24 @@ function RunMarkets({ run, state, horizonMs, expandedMarkets, activity, columnPr
     <div className="nested-heading"><strong>Markets</strong><span>{visibleMarkets.length !== state.data.items.length ? `${visibleMarkets.length} of ${state.data.items.length} match · ` : ""}<Time value={state.data.source.updatedAt} />{state.data.source.stale ? " · stale" : ""}</span></div>
     {state.error && <div className="coverage-warning">Refresh failed; showing last-known markets. {state.error}</div>}
     {state.data.warnings.length > 0 && <div className="coverage-warning">{state.data.warnings.join(" ")}</div>}
-    <div className="table-wrap market-metrics-table"><table style={{ minWidth: Math.max(360, visibleColumns.length * 150 + 180) }}><thead><tr>{visibleColumns.map(column => <SortableHeader key={column.id} kind="markets" column={column} sort={marketSort} dragRef={columnDragRef} onSort={onMarketSort} onReorder={onColumnReorder} />)}</tr></thead><tbody>
+    <MetricsTableScroll className="table-wrap market-metrics-table"><table style={{ minWidth: Math.max(360, tableWidth(columnWidths, "markets", visibleColumns)) }}><colgroup>{visibleColumns.map(column => <col key={column.id} style={{ width: getColumnWidth(columnWidths, "markets", column.id) }} />)}</colgroup><thead><tr>{visibleColumns.map(column => <SortableHeader key={column.id} kind="markets" column={column} width={getColumnWidth(columnWidths, "markets", column.id)} sort={marketSort} dragRef={columnDragRef} onSort={onMarketSort} onReorder={onColumnReorder} onResize={width => onColumnResize("markets", column.id, width)} />)}</tr></thead><tbody>
       {visibleMarkets.map(market => {
         const key = `${run.id}:${market.ticker}`;
         const open = expandedMarkets.has(key);
         return <Fragment key={market.ticker}>
-          <tr className="expandable-position" onClick={() => onToggle(market.ticker, open)}>{visibleColumns.map(column => <td key={column.id}>{column.render(market)}</td>)}</tr>
-          {open && <tr className="metrics-nested-row"><td colSpan={visibleColumns.length}><MarketActivity state={activity[key]} horizonMs={horizonMs} columnPreferences={columnPreferences} filters={filters} fillSort={fillSort} orderSort={orderSort} columnDragRef={columnDragRef} onFillSort={onFillSort} onOrderSort={onOrderSort} onColumnReorder={onColumnReorder} /></td></tr>}
+          <tr className="expandable-position" onClick={() => onToggle(market.ticker, open)}>{visibleColumns.map(column => <td style={{ width: getColumnWidth(columnWidths, "markets", column.id) }} key={column.id}>{column.render(market)}</td>)}</tr>
+          {open && <tr className="metrics-nested-row"><td colSpan={visibleColumns.length}><MarketActivity state={activity[key]} horizonMs={horizonMs} columnPreferences={columnPreferences} columnWidths={columnWidths} filters={filters} fillSort={fillSort} orderSort={orderSort} columnDragRef={columnDragRef} onFillSort={onFillSort} onOrderSort={onOrderSort} onColumnReorder={onColumnReorder} onColumnResize={onColumnResize} /></td></tr>}
         </Fragment>;
       })}
-    </tbody></table>{visibleMarkets.length === 0 && <p className="empty">No markets match the current filters.</p>}</div>
+    </tbody></table>{visibleMarkets.length === 0 && <p className="empty">No markets match the current filters.</p>}</MetricsTableScroll>
   </div>;
 }
 
-function MarketActivity({ state, horizonMs, columnPreferences, filters, fillSort, orderSort, columnDragRef, onFillSort, onOrderSort, onColumnReorder }: {
+function MarketActivity({ state, horizonMs, columnPreferences, columnWidths, filters, fillSort, orderSort, columnDragRef, onFillSort, onOrderSort, onColumnReorder, onColumnResize }: {
   state?: LoadState<RunMarketActivityResponse>;
   horizonMs: number;
   columnPreferences: ColumnPreferences;
+  columnWidths: ColumnWidths;
   filters: ParsedFilters;
   fillSort: SortState;
   orderSort: SortState;
@@ -812,6 +964,7 @@ function MarketActivity({ state, horizonMs, columnPreferences, filters, fillSort
   onFillSort: (column: ColumnDefinition<RunFillActivity>) => void;
   onOrderSort: (column: ColumnDefinition<RunOrderRevision>) => void;
   onColumnReorder: ColumnReorder;
+  onColumnResize: (kind: TableKind, id: string, width: number) => void;
 }) {
   if (state?.loading && !state.data) return <p className="empty">Loading fills and orders…</p>;
   if (state?.error && !state.data) return <p className="error">{state.error}</p>;
@@ -855,10 +1008,10 @@ function MarketActivity({ state, horizonMs, columnPreferences, filters, fillSort
     <div className="nested-heading"><strong>Fills</strong><span>{fillCount}</span></div>
     {visibleFillColumns.length === 0
       ? <p className="empty column-empty">No columns enabled for Fills. Use Columns at the top of the page to enable one.</p>
-      : <div className="table-wrap activity-table"><table style={{ minWidth: Math.max(420, visibleFillColumns.length * 155) }}><thead><tr>{visibleFillColumns.map(column => <SortableHeader key={column.id} kind="fills" column={column} sort={fillSort} dragRef={columnDragRef} onSort={onFillSort} onReorder={onColumnReorder} />)}</tr></thead><tbody>{visibleFills.map(fill => <tr key={`${fill.fillId}:${fill.filledAtMs}`}>{visibleFillColumns.map(column => <td key={column.id}>{column.render(fill)}</td>)}</tr>)}</tbody></table>{visibleFills.length === 0 && <p className="empty">{fills.items.length ? "No fills match the current filters." : "No fills recorded."}</p>}</div>}
+      : <MetricsTableScroll className="table-wrap activity-table"><table style={{ minWidth: Math.max(420, tableWidth(columnWidths, "fills", visibleFillColumns)) }}><colgroup>{visibleFillColumns.map(column => <col key={column.id} style={{ width: getColumnWidth(columnWidths, "fills", column.id) }} />)}</colgroup><thead><tr>{visibleFillColumns.map(column => <SortableHeader key={column.id} kind="fills" column={column} width={getColumnWidth(columnWidths, "fills", column.id)} sort={fillSort} dragRef={columnDragRef} onSort={onFillSort} onReorder={onColumnReorder} onResize={width => onColumnResize("fills", column.id, width)} />)}</tr></thead><tbody>{visibleFills.map(fill => <tr key={`${fill.fillId}:${fill.filledAtMs}`}>{visibleFillColumns.map(column => <td style={{ width: getColumnWidth(columnWidths, "fills", column.id) }} key={column.id}>{column.render(fill)}</td>)}</tr>)}</tbody></table>{visibleFills.length === 0 && <p className="empty">{fills.items.length ? "No fills match the current filters." : "No fills recorded."}</p>}</MetricsTableScroll>}
     <div className="nested-heading orders-heading"><strong>Orders</strong><span>{orderCount}</span></div>
     {visibleOrderColumns.length === 0
       ? <p className="empty column-empty">No columns enabled for Orders. Use Columns at the top of the page to enable one.</p>
-      : <div className="table-wrap activity-table"><table style={{ minWidth: Math.max(420, visibleOrderColumns.length * 155) }}><thead><tr>{visibleOrderColumns.map(column => <SortableHeader key={column.id} kind="orders" column={column} sort={orderSort} dragRef={columnDragRef} onSort={onOrderSort} onReorder={onColumnReorder} />)}</tr></thead><tbody>{visibleOrders.map(order => <tr key={order.revisionKey}>{visibleOrderColumns.map(column => <td key={column.id}>{column.render(order)}</td>)}</tr>)}</tbody></table>{visibleOrders.length === 0 && <p className="empty">{orders.items.length ? "No orders match the current filters." : warnings.length ? "Detailed orders unavailable for this run." : "No order attempts recorded."}</p>}</div>}
+      : <MetricsTableScroll className="table-wrap activity-table"><table style={{ minWidth: Math.max(420, tableWidth(columnWidths, "orders", visibleOrderColumns)) }}><colgroup>{visibleOrderColumns.map(column => <col key={column.id} style={{ width: getColumnWidth(columnWidths, "orders", column.id) }} />)}</colgroup><thead><tr>{visibleOrderColumns.map(column => <SortableHeader key={column.id} kind="orders" column={column} width={getColumnWidth(columnWidths, "orders", column.id)} sort={orderSort} dragRef={columnDragRef} onSort={onOrderSort} onReorder={onColumnReorder} onResize={width => onColumnResize("orders", column.id, width)} />)}</tr></thead><tbody>{visibleOrders.map(order => <tr key={order.revisionKey}>{visibleOrderColumns.map(column => <td style={{ width: getColumnWidth(columnWidths, "orders", column.id) }} key={column.id}>{column.render(order)}</td>)}</tr>)}</tbody></table>{visibleOrders.length === 0 && <p className="empty">{orders.items.length ? "No orders match the current filters." : warnings.length ? "Detailed orders unavailable for this run." : "No order attempts recorded."}</p>}</MetricsTableScroll>}
   </div>;
 }
