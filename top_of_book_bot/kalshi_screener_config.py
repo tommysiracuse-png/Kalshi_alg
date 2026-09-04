@@ -14,7 +14,7 @@ MVE_FILTER = "exclude"          # excludes multivariate combo markets
 # Keep the public-market snapshot bounded. A scan materializes normalized
 # market objects before scoring them, so an effectively unbounded value can
 # exhaust the launcher's memory.
-MAX_MARKETS_TO_SCAN = 20_000
+MAX_MARKETS_TO_SCAN = 20_000_000
 TOP_N = 200
 
 # Liquidity / time filters
