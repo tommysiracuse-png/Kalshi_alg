@@ -120,7 +120,15 @@ npm run build
 cd ..
 ```
 
-If Node was installed with a per-user version manager, update `ExecStart` in `kalshi-ui-web.service`; the supplied unit expects `/usr/bin/npm`.
+If Node was installed with a per-user version manager, make its `node` and
+`npm` binaries available in the systemd service `PATH`; the launcher first
+uses `/usr/bin/node` and `/usr/bin/npm`, then falls back to `PATH`.
+
+The supplied web service starts `web/start-production.sh`. It installs the
+locked npm dependencies when `node_modules/.bin/next` is missing, builds the
+standalone Next.js server when necessary, and then runs that server directly.
+This makes a fresh checkout or a deployment that pruned `node_modules`
+self-healing instead of failing with `next: not found`.
 
 ### 3. Install the Kalshi private key
 

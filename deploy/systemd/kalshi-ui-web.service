@@ -9,7 +9,7 @@ WorkingDirectory=%h/Kalshi_alg/web
 EnvironmentFile=%h/.config/kalshi-alg/ui.env
 Environment=HOSTNAME=127.0.0.1
 Environment=PORT=3000
-ExecStart=/usr/bin/npm run start
+ExecStart=%h/Kalshi_alg/web/start-production.sh
 Restart=on-failure
 RestartSec=3
 UMask=0077
