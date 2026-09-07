@@ -20,7 +20,8 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional
 
-from adaptors.kalshi import KalshiApiClient, KalshiClientConfig
+from clients.base_client import BaseClient
+from clients.factory import build_client
 from clients.models import (
     Fill,
     OrderBookDelta,
@@ -290,7 +291,8 @@ class FleetWorkerProcess(mp.Process):
         self,
         *,
         worker_id: str,
-        client_config: KalshiClientConfig,
+        venue: str = "kalshi",
+        client_config: Any = None,
         session_configuration: Mapping[str, Any],
         artifact_root: Path,
         broker_request_queue: Any,
@@ -301,6 +303,7 @@ class FleetWorkerProcess(mp.Process):
     ) -> None:
         super().__init__(name=f"fleet-{worker_id}", daemon=False)
         self.worker_id = worker_id
+        self.venue = str(venue or "kalshi")
         self.client_config = client_config
         self.session_configuration = dict(session_configuration)
         self.artifact_root = Path(artifact_root)
@@ -325,7 +328,7 @@ class FleetWorkerProcess(mp.Process):
         log = logging.getLogger("kalshi_top_of_book_bot")
         markets_dir = self.artifact_root / "markets"
         markets_dir.mkdir(parents=True, exist_ok=True)
-        direct = KalshiApiClient(self.client_config)
+        direct: BaseClient = build_client(self.venue, self.client_config)
         client = BrokerRpcClient(
             direct,
             self.broker_request_queue,
@@ -792,6 +795,7 @@ class FleetWorkerProcess(mp.Process):
                 self.heartbeat_queue.put(WorkerHeartbeat(
                     self.worker_id, tuple(sorted(actors)), health, _rss_bytes(),
                     len(pending_adds), max((item.book_age_ms or 0 for item in health.values()), default=0), now,
+                    self.venue,
                 ))
                 if actors:
                     telemetry = next(iter(actors.values())).telemetry_store

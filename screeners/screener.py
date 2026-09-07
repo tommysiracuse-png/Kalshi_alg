@@ -7,6 +7,7 @@ import logging
 import math
 import os
 import tempfile
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +19,7 @@ import pandas as pd
 from clients.base_client import BaseClient
 from clients.models import Market, MarketQuery
 from core.fleet_models import ScreenerEvent, ScreenerPick, ScreenerUpdate
+from screeners.base_screener import BaseScreener, ScreeningResult
 from screeners.kalshi_screener import bounded_market_scan_limit, build_export_dataframe, screen_markets
 
 # Running markets keep their fleet slot while they rank within this multiple of
@@ -108,7 +110,9 @@ def market_to_screen_payload(market: Market) -> Dict[str, object]:
         return None if value is None else f"{value / 100:.2f}"
 
     return {
+        "venue": market.venue,
         "ticker": market.market_id,
+        "native_market_id": market.native_market_id or market.market_id,
         "exchange_index": market.exchange_index,
         "title": market.title,
         "status": market.status,
@@ -158,7 +162,14 @@ class _BaseClientMarketSource:
         return (market_to_screen_payload(market) for market in self.client.list_markets(query))
 
 
-class Screener:
+class Screener(BaseScreener):
+    """Kalshi screener compatibility implementation.
+
+    The historical class remains importable as ``Screener`` while exposing
+    the venue-neutral ``BaseScreener`` contract to shared runtime code.
+    """
+
+    venue = "kalshi"
     def __init__(
         self,
         *,
@@ -225,6 +236,27 @@ class Screener:
         self._last_scan_metadata: Dict[str, object] = {}
         self._last_run_metrics: Dict[str, object] = {}
 
+    def screen(self, settings: Mapping[str, object]) -> ScreeningResult:
+        """Return the normalized result for a synchronous screening cycle."""
+
+        previous_settings = self.settings
+        self.settings = dict(settings or previous_settings)
+        try:
+            picks, _frame, warnings = self._screen_picks({})
+            metadata = dict(self._last_scan_metadata)
+            return ScreeningResult(
+                venue=self.venue,
+                picks=tuple(picks),
+                scanned_markets=int(metadata.get("scannedMarkets") or 0),
+                selected_markets=len(picks),
+                warnings=tuple(str(item) for item in warnings),
+                truncated=bool(metadata.get("truncated", False)),
+                metadata=metadata,
+                api_activity=self.client.activity_snapshot(),
+            )
+        finally:
+            self.settings = previous_settings
+
     def get_latest_picks(self) -> tuple[ScreenerPick, ...]:
         return self._latest_update.picks if self._latest_update is not None else ()
 
@@ -244,6 +276,7 @@ class Screener:
             api_activity = {"rest": {}, "stream": {}}
         picks = [
             {
+                "venue": pick.venue,
                 "marketId": pick.market_id,
                 "title": pick.title,
                 "yesBudgetCents": pick.yes_budget_cents,
@@ -255,6 +288,7 @@ class Screener:
             for pick in self.get_latest_picks()
         ]
         return {
+            "venue": self.venue,
             "running": self._running,
             "currentReason": self._current_reason,
             "currentStartedAtMs": self._current_started_at_ms,
@@ -449,6 +483,7 @@ class Screener:
                     selection_reason="screen",
                     market_class=market_class,
                     settings_overrides=settings_overrides,
+                    venue=self.venue,
                 )
             )
             if retention_band > 0 and len(picks) >= retention_band:
@@ -557,6 +592,7 @@ class Screener:
                 # to avoid a restart, so its runtime key must not change.
                 market_class=previous.market_class,
                 settings_overrides=previous.settings_overrides,
+                venue=previous.venue,
             )
             priority = (0, 0.0, order) if is_unknown else (1, -marked_value_cents, order)
             carry_candidates.append((priority, carry_pick, is_unknown))
@@ -690,6 +726,7 @@ class Screener:
                     "Series Ticker": series_id, "Position": units / 100.0,
                 },
                 selection_reason=EXCHANGE_POSITION_REASON,
+                venue=self.venue,
             )))
         candidates.sort(key=lambda item: (-item[0], item[1].market_id))
         selected = list(picks)
@@ -866,11 +903,33 @@ class Screener:
         except Exception:
             pass
         try:
-            update = await asyncio.to_thread(
-                self._refresh_sync, dict(current_picks), reason,
-                list(exchange_positions) if exchange_positions is not None else None,
-                set(traded_tickers) if traded_tickers is not None else None,
+            # Use an explicit worker and poll its liveness.  This keeps the
+            # event loop responsive without relying on the interpreter's
+            # default executor (which can be left waiting during shutdown).
+            result: list[object] = []
+            worker_error: list[BaseException] = []
+            def run_refresh() -> None:
+                try:
+                    result.append(self._refresh_sync(
+                        dict(current_picks), reason,
+                        list(exchange_positions) if exchange_positions is not None else None,
+                        set(traded_tickers) if traded_tickers is not None else None,
+                    ))
+                except BaseException as exc:  # propagate the original refresh error
+                    worker_error.append(exc)
+            worker = threading.Thread(
+                target=run_refresh,
+                name="screener-refresh",
+                daemon=True,
             )
+            worker.start()
+            while worker.is_alive():
+                await asyncio.sleep(0.01)
+            if worker_error:
+                raise worker_error[0]
+            if not result:
+                raise RuntimeError("screener refresh worker exited without a result")
+            update = result[0]
             completed_at_ms = int(time.time() * 1000)
             self._last_success_at_ms = completed_at_ms
             self._last_error = None
@@ -933,3 +992,8 @@ class Screener:
             self._running = False
             self._current_reason = None
             self._current_started_at_ms = None
+
+
+# Explicit adapter name for new callers; ``Screener`` remains the historical
+# compatibility import used by CLI scripts and tests.
+KalshiScreener = Screener

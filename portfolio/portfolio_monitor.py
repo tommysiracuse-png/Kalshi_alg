@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from itertools import chain
 from pathlib import Path
 from typing import Dict, Iterable, Optional
@@ -24,6 +24,7 @@ from clients.models import (
 )
 from core.kalshi_urls import canonical_market_url, is_canonical_market_url
 from portfolio.portfolio_analytics import PortfolioAnalyticsStore
+from portfolio.base_portfolio import BasePortfolio, PortfolioSnapshot
 
 
 PRICE_SCALE = 10_000
@@ -128,8 +129,13 @@ def _bounded_fills(
     return dict(newest[:maximum]), True
 
 
-class PortfolioMonitor:
+class PortfolioMonitor(BasePortfolio):
+    """Kalshi portfolio adapter retaining the historical monitor API."""
+
+    venue = "kalshi"
+
     def __init__(self, client: BaseClient, config: PortfolioMonitorConfig) -> None:
+        super().__init__(client)
         self.client = client
         self.config = config
         self._orders: Dict[str, AccountOrder] = {}
@@ -163,6 +169,19 @@ class PortfolioMonitor:
             )
         )
 
+    def latest_snapshot(self) -> Optional[PortfolioSnapshot]:
+        snapshot = self._typed_latest
+        if snapshot is None:
+            return None
+        now = _now_ms()
+        stale_after = int(max(45.0, self.config.refresh_interval_seconds * 3) * 1000)
+        stale = bool(
+            self._last_error
+            or self._last_success_at_ms is None
+            or now - self._last_success_at_ms > stale_after
+        )
+        return replace(snapshot, stale=stale)
+
     async def refresh(self) -> bool:
         if self._lock.locked():
             return False
@@ -184,7 +203,7 @@ class PortfolioMonitor:
                 if not ok:
                     self._last_error = str(payload)
                     return False
-                snapshot, orders, fills, limits, limits_updated_at, order_watermark, fill_watermark = payload
+                snapshot, typed_snapshot, orders, fills, limits, limits_updated_at, order_watermark, fill_watermark = payload
                 self._orders = orders
                 self._fills = fills
                 self._limits = limits
@@ -192,6 +211,7 @@ class PortfolioMonitor:
                 self._last_order_watermark_ms = order_watermark
                 self._last_fill_watermark_ms = fill_watermark
                 self._latest = snapshot
+                self._typed_latest = typed_snapshot
                 self._last_success_at_ms = _now_ms()
                 self._last_error = None
                 return True
@@ -343,8 +363,27 @@ class PortfolioMonitor:
         if self._analytics_error:
             warnings.append(f"portfolio analytics storage unavailable: {self._analytics_error}")
         snapshot = self._build_snapshot(now_ms, balance, positions, resting, orders, fills, markets, limits, warnings)
+        typed_snapshot = PortfolioSnapshot(
+            venue=self.venue,
+            generated_at_ms=now_ms,
+            available_cash_units=getattr(balance, "available_cash_units", None),
+            portfolio_value_units=getattr(balance, "portfolio_value_units", None),
+            midpoint_position_value_units=(snapshot.get("summary") or {}).get("midpointPositionValueUnits"),
+            liquidation_value_units=(snapshot.get("summary") or {}).get("positionsLiquidationValueUnits"),
+            positions=tuple(positions),
+            orders=tuple(orders.values()),
+            limits=limits,
+            balance_complete=getattr(balance, "available_cash_units", None) is not None,
+            portfolio_value_complete=(snapshot.get("summary") or {}).get("totalPortfolioValueUnits") is not None,
+            liquidation_value_complete=(snapshot.get("summary") or {}).get("positionsLiquidationValueUnits") is not None,
+            stale=False,
+            warnings=tuple(str(item) for item in snapshot.get("warnings") or ()),
+        )
         if self._analytics is not None:
             try:
+                # Keep the established rich UI payload in the analytics store;
+                # the store also accepts typed PortfolioSnapshot values for
+                # venue-neutral callers.
                 self._analytics.record_refresh(snapshot, orders.values(), fills.values(), resting)
                 self._analytics_error = None
             except Exception as exc:
@@ -367,6 +406,7 @@ class PortfolioMonitor:
         ]
         return (
             snapshot,
+            typed_snapshot,
             orders,
             fills,
             limits,
@@ -562,6 +602,7 @@ class PortfolioMonitor:
         )
         return {
             "schemaVersion": 1,
+            "venue": self.venue,
             "available": True,
             "stale": False,
             "generatedAtMs": now_ms,
@@ -587,6 +628,9 @@ class PortfolioMonitor:
                     {"refillRate": limits.write.refill_rate, "bucketCapacity": limits.write.bucket_capacity}
                     if limits else None
                 ),
+                "balanceComplete": balance.available_cash_units is not None,
+                "portfolioValueComplete": total_portfolio_value is not None,
+                "liquidationValueComplete": aggregate_liquidation is not None,
             },
             "positions": position_rows,
             "orders": {
@@ -608,6 +652,7 @@ class PortfolioMonitor:
         if self._latest is None:
             snapshot: Dict[str, object] = {
                 "schemaVersion": 1,
+                "venue": self.venue,
                 "available": False,
                 "stale": True,
                 "generatedAtMs": None,
@@ -643,3 +688,7 @@ class PortfolioMonitor:
             warnings.append(f"portfolio refresh failed: {self._last_error}")
         snapshot["warnings"] = list(dict.fromkeys(warnings))
         return snapshot
+
+
+# New explicit name; the old import remains the compatibility alias.
+KalshiPortfolio = PortfolioMonitor

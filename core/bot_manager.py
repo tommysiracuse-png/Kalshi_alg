@@ -11,7 +11,7 @@ import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Deque, Dict, Optional
+from typing import Any, Deque, Dict, Mapping, Optional
 
 from clients.base_client import BaseClient
 from clients.models import AccountOrderQuery, OrderNotFoundError
@@ -71,6 +71,10 @@ class BotManagerConfig:
     shutdown_cleanup_delay_seconds: float = 0.5
     session_configuration: Optional[Dict[str, object]] = None
     bot_artifacts_root: Optional[Path] = None
+    # Venue-neutral construction inputs.  The legacy credential fields remain
+    # for CLI compatibility and are translated by the launcher/factory.
+    venue: str = "kalshi"
+    client_config: Optional[Any] = None
 
 
 @dataclass
@@ -113,8 +117,10 @@ class BotManager:
         self._shutdown_started = True
 
     async def _emit(self, event_type: str, market_id: str, **detail: object) -> None:
+        venue = str(self.config.venue or "kalshi")
+        detail.setdefault("venue", venue)
         await self.events.put(
-            BotManagerEvent(event_type, market_id, int(time.time() * 1000), detail)
+            BotManagerEvent(event_type, market_id, int(time.time() * 1000), detail, venue)
         )
 
     def _spawn_sync(self, pick: ScreenerPick, slot_index: int) -> Optional[ChildProcess]:

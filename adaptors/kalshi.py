@@ -200,6 +200,7 @@ def parse_wire_event(data: dict, market_id: str) -> Optional[MarketEvent]:
             sequence,
             _book_levels_from_payload(payload, "yes_dollars_fp", "yes"),
             _book_levels_from_payload(payload, "no_dollars_fp", "no"),
+            venue="kalshi", native_market_id=event_market,
         )
     if event_type == "orderbook_delta":
         side = str(payload.get("side") or "")
@@ -207,7 +208,7 @@ def parse_wire_event(data: dict, market_id: str) -> Optional[MarketEvent]:
         count = _optional_count(payload, "delta_fp", "delta")
         if side not in {"yes", "no"} or price is None or count is None:
             return None
-        return OrderBookDelta(event_market, sequence, side, price, count, _timestamp_ms(payload.get("ts")))
+        return OrderBookDelta(event_market, sequence, side, price, count, _timestamp_ms(payload.get("ts")), venue="kalshi", native_market_id=event_market)
     if event_type == "user_order":
         side = _outcome_side(payload)
         if side not in {"yes", "no"} and "is_yes" in payload:
@@ -225,6 +226,7 @@ def parse_wire_event(data: dict, market_id: str) -> Optional[MarketEvent]:
             _optional_count(payload, "remaining_count_fp", "remaining_count"),
             price,
             _optional_timestamp_ms(payload.get("expiration_time")),
+            venue="kalshi", native_market_id=event_market,
         )
     if event_type == "fill":
         return Fill(
@@ -238,6 +240,7 @@ def parse_wire_event(data: dict, market_id: str) -> Optional[MarketEvent]:
             _optional_price(payload, "fee_cost", "fee"),
             _optional_count(payload, "post_position_fp", "post_position"),
             bool(payload.get("is_taker")),
+            venue="kalshi", native_market_id=event_market,
         )
     if event_type == "trade":
         yes_price = _optional_price(payload, "yes_price_dollars", "yes_price")
@@ -249,7 +252,7 @@ def parse_wire_event(data: dict, market_id: str) -> Optional[MarketEvent]:
             no_price = PRICE_SCALE - yes_price
         if yes_price is None or no_price is None or count is None:
             return None
-        return PublicTrade(event_market, str(payload.get("trade_id") or ""), _timestamp_ms(payload.get("ts")), yes_price, no_price, count, str(payload.get("taker_side") or ""))
+        return PublicTrade(event_market, str(payload.get("trade_id") or ""), _timestamp_ms(payload.get("ts")), yes_price, no_price, count, str(payload.get("taker_side") or ""), venue="kalshi", native_market_id=event_market)
     if event_type == "ticker":
         return TickerUpdate(
             event_market,
@@ -262,10 +265,11 @@ def parse_wire_event(data: dict, market_id: str) -> Optional[MarketEvent]:
             _optional_count(payload, "yes_bid_size_fp", "yes_bid_size"),
             _optional_count(payload, "yes_ask_size_fp", "yes_ask_size"),
             _optional_count(payload, "last_trade_size_fp", "last_trade_size"),
+            venue="kalshi", native_market_id=event_market,
         )
     if event_type == "market_position":
         position = _optional_count(payload, "position_fp", "position")
-        return PositionUpdate(event_market, int(position)) if position is not None else None
+        return PositionUpdate(event_market, int(position), venue="kalshi", native_market_id=event_market) if position is not None else None
     if event_type == "error":
         LOGGER.error("WS_ERROR | payload=%s", data)
     return None
@@ -453,6 +457,7 @@ class KalshiClientConfig:
 
 class KalshiApiClient(BaseClient):
     venue_name = "kalshi"
+    venue = "kalshi"
 
     def __init__(
         self,
@@ -704,6 +709,8 @@ class KalshiApiClient(BaseClient):
         series_id = str(payload.get("series_ticker") or payload.get("series") or payload.get("series_name") or derived_series_id)
         return Market(
             market_id=market_id,
+            venue="kalshi",
+            native_market_id=market_id,
             title=str(payload.get("title") or ""),
             status=str(payload.get("status") or ""),
             series_id=series_id,
@@ -742,6 +749,8 @@ class KalshiApiClient(BaseClient):
         return Order(
             order_id=str(payload.get("order_id") or fallback_id),
             market_id=str(payload.get("ticker") or payload.get("market_ticker") or ""),
+            venue="kalshi",
+            native_market_id=str(payload.get("ticker") or payload.get("market_ticker") or ""),
             side=resolved_side if resolved_side in {"yes", "no"} else None,
             client_order_id=str(payload.get("client_order_id") or ""),
             status=str(payload.get("status") or ""),
@@ -764,6 +773,8 @@ class KalshiApiClient(BaseClient):
         return AccountOrder(
             order_id=str(payload.get("order_id") or ""),
             market_id=str(payload.get("ticker") or payload.get("market_ticker") or ""),
+            venue="kalshi",
+            native_market_id=str(payload.get("ticker") or payload.get("market_ticker") or ""),
             side=resolved_side if resolved_side in {"yes", "no"} else None,
             client_order_id=str(payload.get("client_order_id") or ""),
             status=str(payload.get("status") or ""),
@@ -799,6 +810,8 @@ class KalshiApiClient(BaseClient):
             trade_id=str(payload.get("trade_id") or ""),
             order_id=str(payload.get("order_id") or ""),
             market_id=str(payload.get("ticker") or payload.get("market_ticker") or ""),
+            venue="kalshi",
+            native_market_id=str(payload.get("ticker") or payload.get("market_ticker") or ""),
             side=resolved_side if resolved_side in {"yes", "no"} else None,
             count_units=int(_optional_count(payload, "count_fp", "count") or 0),
             price_units=price,
@@ -840,6 +853,8 @@ class KalshiApiClient(BaseClient):
         self._remember_market_shard(response)
         return MarketQuote(
             market_id=market_id,
+            venue="kalshi",
+            native_market_id=market_id,
             yes_bid_units=_optional_price(response, "yes_bid_dollars", "yes_bid"),
             no_bid_units=_optional_price(response, "no_bid_dollars", "no_bid"),
         )
@@ -874,6 +889,8 @@ class KalshiApiClient(BaseClient):
         return AccountBalance(
             available_cash_units=int(available),
             portfolio_value_units=int(portfolio),
+            venue="kalshi",
+            currency="USD",
             updated_at_ms=_optional_timestamp_ms(response.get("updated_ts")),
             balance_by_exchange=tuple(sorted(breakdown.items())),
         )
@@ -911,6 +928,8 @@ class KalshiApiClient(BaseClient):
                 positions.append(
                     AccountPosition(
                         market_id=str(item.get("ticker") or item.get("market_ticker") or ""),
+                        venue="kalshi",
+                        native_market_id=str(item.get("ticker") or item.get("market_ticker") or ""),
                         position_units=int(_optional_count(item, "position_fp", "position") or 0),
                         total_traded_units=_optional_money(item, "total_traded_dollars", "total_traded"),
                         market_exposure_units=_optional_money(item, "market_exposure_dollars", "market_exposure"),

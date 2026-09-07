@@ -294,6 +294,12 @@ def parse_args() -> argparse.Namespace:
         help="CSV file exported from your screener notebook.",
     )
     parser.add_argument(
+        "--venue",
+        default="kalshi",
+        choices=("kalshi",),
+        help="Trading venue for this launcher (Phase 1 supports Kalshi).",
+    )
+    parser.add_argument(
         "--minimum-carryover-value-cents",
         type=float,
         default=100.0,

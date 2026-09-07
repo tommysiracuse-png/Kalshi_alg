@@ -16,9 +16,9 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterator, Mapping, Optional
 
-from adaptors.kalshi import KalshiClientConfig
 from core.bot_manager import BotManagerConfig
 from clients.base_client import BaseClient
+from clients.factory import build_client_config
 from core.fleet_models import (
     BotManagerEvent,
     FleetCapacity,
@@ -257,7 +257,8 @@ class ShardedBotManager:
         self._response_queues: dict[str, Any] = {}
         self._admin: Optional[_BrokerAdmin] = None
         self._control_results: dict[str, WorkerControlAck] = {}
-        self._client_config: Optional[KalshiClientConfig] = None
+        self.venue = str(getattr(config, "venue", None) or self.configuration.get("venue", "kalshi"))
+        self._client_config: Optional[Any] = config.client_config
         self._capacity: Optional[FleetCapacity] = None
         self._allocation: Optional[AllocationResult] = None
         self._capacity_error: str = ""
@@ -328,7 +329,8 @@ class ShardedBotManager:
         self._shutdown_started = True
 
     async def _emit(self, event_type: str, market_id: str, **detail: object) -> None:
-        await self.events.put(BotManagerEvent(event_type, market_id, int(time.time() * 1000), detail))
+        detail.setdefault("venue", self.venue)
+        await self.events.put(BotManagerEvent(event_type, market_id, int(time.time() * 1000), detail, self.venue))
 
     def _artifact_root(self) -> Path:
         path = self.config.bot_artifacts_root or self.config.logs_directory.parent
@@ -339,6 +341,7 @@ class ShardedBotManager:
         assert self._client_config is not None
         return FleetWorkerProcess(
             worker_id=worker_id,
+            venue=self.venue,
             client_config=self._client_config,
             session_configuration=self.configuration,
             artifact_root=self._artifact_root(),
@@ -352,6 +355,7 @@ class ShardedBotManager:
     def _make_broker(self) -> ExecutionBrokerProcess:
         assert self._client_config is not None
         return ExecutionBrokerProcess(
+            venue=self.venue,
             client_config=self._client_config,
             request_queue=self._request_queue,
             response_queues=self._response_queues,
@@ -762,14 +766,16 @@ class ShardedBotManager:
         response_queues: dict[str, Any] = {"controller": mp.Queue()}
         for index in range(self.worker_count):
             response_queues[f"worker-{index:02d}"] = mp.Queue()
-        self._client_config = KalshiClientConfig(
-            api_key_id=self.config.api_key_id or "",
-            private_key_path=self.config.private_key_path or "",
-            public_only=not bool(self.config.api_key_id and self.config.private_key_path),
-            use_demo_environment=self.config.use_demo,
-            dry_run=self.config.dry_run,
-            subaccount_number=int(self.config.subaccount or 0),
-        )
+        if self._client_config is None:
+            self._client_config = build_client_config(
+                self.venue,
+                api_key_id=self.config.api_key_id or "",
+                private_key_path=self.config.private_key_path or "",
+                public_only=not bool(self.config.api_key_id and self.config.private_key_path),
+                use_demo_environment=self.config.use_demo,
+                dry_run=self.config.dry_run,
+                subaccount_number=int(self.config.subaccount or 0),
+            )
         self._response_queues = response_queues
         self._broker = self._make_broker()
         self._broker.start()
@@ -1046,6 +1052,7 @@ class ShardedBotManager:
             )
         manifest = {
             "schemaVersion": 1,
+            "venue": self.venue,
             "generatedAtMs": int(time.time() * 1000),
             "workers": {worker_id: list(tickers) for worker_id, tickers in assignments.items()},
             "tickerToShard": self._market_shard_history,
@@ -1576,6 +1583,7 @@ class ShardedBotManager:
                 heartbeat.generated_at_ms if heartbeat else 0,
             )
             workers.append({
+                "venue": self.venue,
                 "workerId": worker_id, "pid": managed.process.pid,
                 "running": managed.process.is_alive(),
                 "phase": managed.phase,
@@ -1603,6 +1611,7 @@ class ShardedBotManager:
                     (str(getattr(item, "risk_reason", "") or "") or item.error or None) if item else None
                 )
                 rows.append({
+                    "venue": self.venue,
                     "ticker": ticker, "marketId": ticker, "title": pick.title if pick else ticker,
                     "workerId": worker_id, "pid": managed.process.pid,
                     "botRunning": managed.process.is_alive(), "watchdogRunning": False,
@@ -1618,6 +1627,7 @@ class ShardedBotManager:
                     "socketHealthy": heartbeat is not None,
                 })
                 clients.append({
+                    "venue": self.venue,
                     "marketId": ticker,
                     "title": pick.title if pick else ticker,
                     "pid": managed.process.pid,
@@ -1651,6 +1661,7 @@ class ShardedBotManager:
         capacity = asdict(self._capacity) if self._capacity else None
         allocation = asdict(self._allocation) if self._allocation else None
         return {
+            "venue": self.venue,
             "bots": rows,
             "workers": workers,
             "broker": {

@@ -33,6 +33,9 @@ from .websocket_client import WebsocketClient
 
 class BaseClient(ABC):
     venue_name = "unknown"
+    # ``venue`` is the stable normalized field used by generic consumers;
+    # ``venue_name`` remains for legacy bot logging.
+    venue = "unknown"
     environment_name = "unknown"
     dry_run = False
     rate_limit_backoff_seconds = 1.0
@@ -40,6 +43,10 @@ class BaseClient(ABC):
     def __init__(self, *, http_client: HTTPClient, websocket_client: WebsocketClient) -> None:
         self.http_client = http_client
         self.websocket_client = websocket_client
+
+    @property
+    def normalized_venue(self) -> str:
+        return str(getattr(self, "venue", None) or getattr(self, "venue_name", "unknown"))
 
     @abstractmethod
     def get_market(self, market_id: str) -> Market: ...

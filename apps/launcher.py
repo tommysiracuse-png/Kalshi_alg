@@ -13,8 +13,8 @@ import time
 from pathlib import Path
 from typing import Dict, Optional
 
-from adaptors.kalshi import KalshiApiClient, KalshiClientConfig
 from core.bot_manager import BotManagerConfig
+from clients.factory import build_client_config
 from clients.models import AccountPositionQuery
 from fleet_runtime.manager import ShardedBotManager
 from core.fleet_models import ScreenerPick, ScreenerUpdate
@@ -28,8 +28,8 @@ from apps.lip_launcher import (
     load_screen_picks,
 )
 from core.runtime_control import ControlRequest, ControlServer, STATUS_SCHEMA_VERSION
-from screeners.screener import Screener
-from portfolio.portfolio_monitor import PortfolioMonitor, PortfolioMonitorConfig
+from portfolio.portfolio_monitor import PortfolioMonitorConfig
+from venue_runtime import build_runtime
 from core.session_config import default_session_configuration, validate_session_configuration
 
 
@@ -63,6 +63,7 @@ class Launcher:
                 useDemo=bool(arguments.use_demo), dryRun=bool(arguments.dry_run),
                 subaccount=int(arguments.subaccount or 0),
             )
+            direct_configuration["venue"] = str(getattr(arguments, "venue", "kalshi") or "kalshi").lower()
             direct_configuration["launcher"].update(
                 fixedTicker=str(getattr(arguments, "fixed_ticker", "") or ""),
                 maxBots=int(arguments.max_bots),
@@ -112,7 +113,8 @@ class Launcher:
             else self.bot_script_path.parent / "market_risk_profiler.py"
         )
 
-        client_config = KalshiClientConfig(
+        self.venue = str(self.session_configuration.get("venue", "kalshi"))
+        client_config = build_client_config(self.venue,
             api_key_id=api_key_id or "",
             private_key_path=private_key_path or "",
             public_only=not bool(api_key_id and private_key_path),
@@ -120,35 +122,38 @@ class Launcher:
             dry_run=bool(arguments.dry_run),
             subaccount_number=int(arguments.subaccount or 0),
         )
-        self.client = KalshiApiClient(client_config)
-        self.portfolio_client = KalshiApiClient(client_config)
-        self.portfolio = PortfolioMonitor(
-            self.portfolio_client,
-            PortfolioMonitorConfig(
+        screener_settings = screener_settings_for_session(self.session_configuration, int(arguments.max_bots))
+        fleet_runtime = self.session_configuration.get("fleetRuntime") or {}
+        self.client_config = client_config
+        runtime = build_runtime(
+            self.venue,
+            client_config=client_config,
+            screener_settings=screener_settings,
+            screener_kwargs={
+                "output_path": self.screen_path,
+                "default_yes_budget_cents": arguments.yes_budget_cents,
+                "default_no_budget_cents": arguments.no_budget_cents,
+                "max_bots": int(arguments.max_bots),
+                "minimum_carryover_value_cents": arguments.minimum_carryover_value_cents,
+                "cash_reserve_fraction": float(fleet_runtime.get("cashReserveFraction", 0.0)),
+                "allocation_oversubscription": float(fleet_runtime.get("allocationOversubscription", 1.0)),
+                "yes_budget_column": arguments.yes_budget_column,
+                "no_budget_column": arguments.no_budget_column,
+                "disabled_market_ids": lambda: set(load_disable_list(self.watchdog_disable_file)),
+                "market_class_resolver": build_market_class_resolver(
+                    self.session_configuration,
+                    series_stats=HistorySeriesStatsSource(Path(__file__).resolve().parent.parent / "history_data" / "history.sqlite3"),
+                ),
+            },
+            portfolio_config=PortfolioMonitorConfig(
                 subaccount_number=int(arguments.subaccount or 0),
                 analytics_path=self.runtime_dir / "portfolio_analytics.sqlite3",
             ),
         )
-        screener_settings = screener_settings_for_session(self.session_configuration, int(arguments.max_bots))
-        fleet_runtime = self.session_configuration.get("fleetRuntime") or {}
-        self.screener = Screener(
-            client=self.client,
-            settings=screener_settings,
-            output_path=self.screen_path,
-            default_yes_budget_cents=arguments.yes_budget_cents,
-            default_no_budget_cents=arguments.no_budget_cents,
-            max_bots=int(arguments.max_bots),
-            minimum_carryover_value_cents=arguments.minimum_carryover_value_cents,
-            cash_reserve_fraction=float(fleet_runtime.get("cashReserveFraction", 0.0)),
-            allocation_oversubscription=float(fleet_runtime.get("allocationOversubscription", 1.0)),
-            yes_budget_column=arguments.yes_budget_column,
-            no_budget_column=arguments.no_budget_column,
-            disabled_market_ids=lambda: set(load_disable_list(self.watchdog_disable_file)),
-            market_class_resolver=build_market_class_resolver(
-                self.session_configuration,
-                series_stats=HistorySeriesStatsSource(Path(__file__).resolve().parent.parent / "history_data" / "history.sqlite3"),
-            ),
-        )
+        self.client = runtime.client
+        self.portfolio_client = runtime.client
+        self.screener = runtime.screener
+        self.portfolio = runtime.portfolio
         self.manager = ShardedBotManager(
             BotManagerConfig(
                 bot_script_path=self.bot_script_path,
@@ -173,6 +178,8 @@ class Launcher:
                 watchdog_confidence_reduction_threshold=arguments.watchdog_confidence_reduction_threshold,
                 watchdog_confidence_flatten_threshold=arguments.watchdog_confidence_flatten_threshold,
                 session_configuration=self.session_configuration,
+                venue=self.venue,
+                client_config=client_config,
                 bot_artifacts_root=self.run_artifact_path,
             ),
             cleanup_client=self.client if api_key_id and private_key_path else None,
@@ -459,6 +466,7 @@ class Launcher:
                 no_budget_cents=pick.no_budget_cents,
                 ranking=pick.raw_row,
                 selection_reason="csv_seed",
+                venue=self.venue,
             )
             for pick in legacy
             if pick.ticker not in load_disable_list(self.watchdog_disable_file)
@@ -489,6 +497,7 @@ class Launcher:
             no_budget_cents=int(self.arguments.no_budget_cents),
             ranking={"Ticker": ticker, "SearchText": ticker},
             selection_reason="fixed_session_ticker",
+            venue=self.venue,
         )
         picks, carried, warnings = await self._with_startup_carryover((pick,))
         update = ScreenerUpdate(
@@ -762,7 +771,8 @@ class Launcher:
                     # cannot keep showing orders that cleanup just removed.
                     await self.portfolio.refresh()
                 await self.client.close()
-                await self.portfolio_client.close()
+                if self.portfolio_client is not self.client:
+                    await self.portfolio_client.close()
                 control_server.stop()
                 self.publish_status("shutdown_failed" if shutdown_error else "stopped")
                 if self.session_store is not None and self.run_id:

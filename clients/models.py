@@ -8,6 +8,16 @@ from typing import Dict, Literal, Mapping, Optional, Tuple, Union
 
 Side = Literal["yes", "no"]
 OrderAction = Literal["buy", "sell"]
+# A venue name is intentionally represented as a string in Phase 1.  This
+# keeps serialized sessions forward compatible with venues added later.
+Venue = str
+MarketKey = Tuple[Venue, str]
+
+
+def market_key(venue: str, native_market_id: str) -> MarketKey:
+    """Return the collision-safe identity used by venue-neutral code."""
+
+    return (str(venue or "kalshi").strip().lower(), str(native_market_id))
 
 
 class ClientError(RuntimeError):
@@ -107,6 +117,22 @@ class Market:
     # funded on, this shard — a market on an unfunded shard rejects every
     # order with user_not_found.
     exchange_index: int = 0
+    # Normalized identity.  ``market_id`` remains the compatibility alias for
+    # Kalshi callers; new code should use ``market_key`` when storing records.
+    venue: Venue = "kalshi"
+    native_market_id: Optional[str] = None
+    yes_token_id: Optional[str] = None
+    no_token_id: Optional[str] = None
+    min_order_size_units: Optional[int] = None
+    market_rules: Mapping[str, object] = field(default_factory=dict)
+
+    @property
+    def normalized_market_key(self) -> MarketKey:
+        return market_key(self.venue, self.native_market_id or self.market_id)
+
+    @property
+    def market_key(self) -> MarketKey:
+        return self.normalized_market_key
 
 
 @dataclass(frozen=True)
@@ -114,12 +140,16 @@ class MarketQuote:
     market_id: str
     yes_bid_units: Optional[int]
     no_bid_units: Optional[int]
+    venue: Venue = "kalshi"
+    native_market_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
 class Position:
     market_id: str
     position_units: int
+    venue: Venue = "kalshi"
+    native_market_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -131,6 +161,8 @@ class AccountBalance:
     # are local to a shard, so capital allocation must be done per shard;
     # empty means the venue reported no breakdown (treat all cash as shard 0).
     balance_by_exchange: Tuple[Tuple[int, int], ...] = ()
+    venue: Venue = "kalshi"
+    currency: str = "USD"
 
 
 @dataclass(frozen=True)
@@ -144,6 +176,7 @@ class AccountLimits:
     usage_tier: str
     read: RateLimitBucket = field(default_factory=RateLimitBucket)
     write: RateLimitBucket = field(default_factory=RateLimitBucket)
+    venue: Venue = "kalshi"
 
 
 @dataclass(frozen=True)
@@ -156,6 +189,8 @@ class AccountPosition:
     fees_paid_units: Optional[int] = None
     resting_order_count: int = 0
     updated_at_ms: Optional[int] = None
+    venue: Venue = "kalshi"
+    native_market_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -169,6 +204,8 @@ class Order:
     fill_count_units: int = 0
     remaining_count_units: int = 0
     expiration_time_ms: Optional[int] = None
+    venue: Venue = "kalshi"
+    native_market_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -187,6 +224,8 @@ class AccountOrder:
     created_at_ms: Optional[int] = None
     updated_at_ms: Optional[int] = None
     expiration_time_ms: Optional[int] = None
+    venue: Venue = "kalshi"
+    native_market_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -201,6 +240,8 @@ class AccountFill:
     fee_units: int = 0
     created_at_ms: Optional[int] = None
     is_taker: bool = False
+    venue: Venue = "kalshi"
+    native_market_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -264,6 +305,8 @@ class AmendOrderRequest:
 @dataclass(frozen=True)
 class StreamReset:
     market_id: str
+    venue: Venue = "kalshi"
+    native_market_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -272,6 +315,8 @@ class OrderBookSnapshot:
     sequence: Optional[int]
     yes_levels: Dict[int, int]
     no_levels: Dict[int, int]
+    venue: Venue = "kalshi"
+    native_market_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -282,6 +327,8 @@ class OrderBookDelta:
     price_units: int
     delta_count_units: int
     timestamp_ms: int
+    venue: Venue = "kalshi"
+    native_market_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -295,6 +342,8 @@ class OrderUpdate:
     remaining_count_units: Optional[int] = None
     price_units: Optional[int] = None
     expiration_time_ms: Optional[int] = None
+    venue: Venue = "kalshi"
+    native_market_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -309,6 +358,8 @@ class Fill:
     fee_units: Optional[int] = None
     post_position_units: Optional[int] = None
     is_taker: bool = False
+    venue: Venue = "kalshi"
+    native_market_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -320,6 +371,8 @@ class PublicTrade:
     no_price_units: int
     count_units: int
     taker_side: str = ""
+    venue: Venue = "kalshi"
+    native_market_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -334,12 +387,16 @@ class TickerUpdate:
     yes_bid_size_units: Optional[int] = None
     yes_ask_size_units: Optional[int] = None
     last_trade_size_units: Optional[int] = None
+    venue: Venue = "kalshi"
+    native_market_id: Optional[str] = None
 
 
 @dataclass(frozen=True)
 class PositionUpdate:
     market_id: str
     position_units: int
+    venue: Venue = "kalshi"
+    native_market_id: Optional[str] = None
 
 
 MarketEvent = Union[

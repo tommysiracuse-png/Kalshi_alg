@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, Mapping, Optional
 
 from clients.models import AccountFill, AccountOrder
+from portfolio.base_portfolio import PortfolioSnapshot
 
 
 PRICE_SCALE = 10_000
@@ -203,11 +204,31 @@ class PortfolioAnalyticsStore:
 
     def record_refresh(
         self,
-        snapshot: Mapping[str, object],
+        snapshot: Mapping[str, object] | PortfolioSnapshot,
         orders: Iterable[AccountOrder],
         fills: Iterable[AccountFill],
         resting_orders: Iterable[AccountOrder],
     ) -> None:
+        if isinstance(snapshot, PortfolioSnapshot):
+            typed = snapshot
+            snapshot = {
+                "schemaVersion": 1,
+                "available": True,
+                "stale": typed.stale,
+                "generatedAtMs": typed.generated_at_ms,
+                "summary": {
+                    "availableCashUnits": typed.available_cash_units,
+                    "portfolioValueUnits": typed.portfolio_value_units,
+                    "midpointPositionValueUnits": typed.midpoint_position_value_units,
+                    "totalPortfolioValueUnits": (
+                        typed.available_cash_units + typed.midpoint_position_value_units
+                        if typed.available_cash_units is not None and typed.midpoint_position_value_units is not None
+                        else None
+                    ),
+                    "positionsLiquidationValueUnits": typed.liquidation_value_units,
+                },
+                "warnings": list(typed.warnings),
+            }
         snapshot_at_ms = int(snapshot.get("generatedAtMs") or _now_ms())
         summary = snapshot.get("summary") if isinstance(snapshot.get("summary"), dict) else {}
         available_cash = summary.get("availableCashUnits")

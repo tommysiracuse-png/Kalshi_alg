@@ -85,6 +85,7 @@ class WorkerHeartbeat:
     queue_depth: int
     event_lag_ms: int
     generated_at_ms: int
+    venue: str = "kalshi"
 
 
 @dataclass(frozen=True)
@@ -116,6 +117,7 @@ class FleetCapacity:
     gate_open: bool = False
     reduction_only: bool = True
     error: str = ""
+    venue: str = "kalshi"
 
 
 @dataclass(frozen=True)
@@ -131,20 +133,28 @@ class ScreenerPick:
     # only, so the pick stays picklable across the worker queue and hashable).
     market_class: str = "default"
     settings_overrides: Tuple[Tuple[str, Any], ...] = ()
+    venue: str = "kalshi"
 
     @property
     def ticker(self) -> str:
         return self.market_id
 
     @property
-    def raw_row(self) -> Dict[str, str]:
-        return {str(key): "" if value is None else str(value) for key, value in self.ranking.items()}
+    def market_key(self) -> tuple[str, str]:
+        return (str(self.venue or "kalshi").lower(), self.market_id)
 
-    def runtime_key(self) -> Tuple[int, int, str, Tuple[Tuple[str, Any], ...]]:
+    @property
+    def raw_row(self) -> Dict[str, str]:
+        row = {str(key): "" if value is None else str(value) for key, value in self.ranking.items()}
+        row.setdefault("Venue", self.venue)
+        return row
+
+    def runtime_key(self) -> Tuple[str, int, int, str, Tuple[Tuple[str, Any], ...]]:
         # Everything that changes the running actor's settings belongs here:
         # the screener diffs runtime keys to decide which retained markets
         # must restart, so overrides left out would never be reconciled.
         return (
+            self.venue,
             self.yes_budget_cents,
             self.no_budget_cents,
             self.market_class,
@@ -169,6 +179,10 @@ class ScreenerUpdate:
     def pick_by_market_id(self) -> Dict[str, ScreenerPick]:
         return {pick.market_id: pick for pick in self.picks}
 
+    @property
+    def pick_by_market_key(self) -> Dict[tuple[str, str], ScreenerPick]:
+        return {pick.market_key: pick for pick in self.picks}
+
 
 @dataclass(frozen=True)
 class ScreenerEvent:
@@ -185,3 +199,4 @@ class BotManagerEvent:
     market_id: str
     generated_at_ms: int
     detail: Mapping[str, object] = field(default_factory=dict)
+    venue: str = "kalshi"

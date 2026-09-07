@@ -151,6 +151,7 @@ def default_session_configuration() -> Dict[str, Any]:
     }
     return {
         "schemaVersion": SCHEMA_VERSION,
+        "venue": "kalshi",
         "execution": {"useDemo": False, "dryRun": False, "subaccount": 0},
         "launcher": {
             "fixedTicker": "",
@@ -207,7 +208,7 @@ def default_session_configuration() -> Dict[str, Any]:
 
 
 def migrate_session_configuration(value: Mapping[str, Any]) -> Dict[str, Any]:
-    """Return a schema-v4 copy while preserving every older-schema setting.
+    """Return a current-schema copy while preserving every older-schema setting.
 
     v1 -> v2 splices the ``fleetRuntime`` defaults; v2 -> v3 splices the
     ``botClasses`` defaults (classification disabled, no overrides); v3 -> v4
@@ -231,6 +232,7 @@ def migrate_session_configuration(value: Mapping[str, Any]) -> Dict[str, Any]:
         migrated.setdefault("botClasses", default_bot_classes_configuration())
     if version < 4:
         migrated.setdefault("screener", default_screener_configuration())
+    migrated.setdefault("venue", "kalshi")
     screener = migrated.get("screener")
     if isinstance(screener, Mapping):
         migrated["screener"] = {
@@ -274,6 +276,14 @@ def validate_session_configuration(value: Mapping[str, Any]) -> Dict[str, Any]:
     normalized = _merge_known(default_session_configuration(), migrate_session_configuration(value), "configuration")
     if normalized["schemaVersion"] != SCHEMA_VERSION:
         raise ValueError(f"schemaVersion must be {SCHEMA_VERSION}")
+
+    venue = normalized["venue"]
+    if not isinstance(venue, str) or not venue.strip():
+        raise ValueError("venue must be a non-empty string")
+    venue = venue.strip().lower()
+    if venue != "kalshi":
+        raise ValueError(f"unsupported venue: {venue}")
+    normalized["venue"] = venue
 
     execution = normalized["execution"]
     execution["useDemo"] = _require_bool(execution["useDemo"], "execution.useDemo")
@@ -610,5 +620,6 @@ def apply_configuration_to_arguments(arguments: Any, configuration: Mapping[str,
     }
     for name, item in mapping.items():
         setattr(arguments, name, item)
+    setattr(arguments, "venue", config.get("venue", "kalshi"))
     setattr(arguments, "fixed_ticker", launcher["fixedTicker"])
     return arguments

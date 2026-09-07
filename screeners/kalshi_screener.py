@@ -1162,3 +1162,13 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+
+def __getattr__(name: str):
+    """Lazy compatibility export for the object-oriented Kalshi adapter."""
+
+    if name == "KalshiScreener":
+        from screeners.screener import KalshiScreener
+
+        return KalshiScreener
+    raise AttributeError(name)

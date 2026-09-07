@@ -21,7 +21,8 @@ try:  # The venue client is built on requests; its transport errors are ours to 
 except Exception:  # pragma: no cover - requests is a hard dependency of the adaptor
     _requests = None  # type: ignore[assignment]
 
-from adaptors.kalshi import KalshiApiClient, KalshiClientConfig
+from clients.base_client import BaseClient
+from clients.factory import build_client, build_client_config
 from clients.models import (
     AmendTargetUnavailableError,
     ClientError,
@@ -1070,7 +1071,7 @@ class BrokerRpcClient:
 
     def __init__(
         self,
-        delegate: KalshiApiClient,
+        delegate: BaseClient,
         request_queue: Any,
         response_queue: Any,
         channel: str,
@@ -1093,6 +1094,7 @@ class BrokerRpcClient:
         self._dispatcher = threading.Thread(target=self._dispatch, name=f"broker-rpc-{channel}", daemon=True)
         self._dispatcher.start()
         self.venue_name = delegate.venue_name
+        self.venue = getattr(delegate, "venue", self.venue_name)
         self.environment_name = delegate.environment_name
         self.dry_run = delegate.dry_run
         self.rate_limit_backoff_seconds = delegate.rate_limit_backoff_seconds
@@ -1337,7 +1339,8 @@ class ExecutionBrokerProcess(mp.Process):
     def __init__(
         self,
         *,
-        client_config: KalshiClientConfig,
+        venue: str = "kalshi",
+        client_config: Any = None,
         request_queue: Any,
         response_queues: Mapping[str, Any],
         status_queue: Any,
@@ -1351,6 +1354,7 @@ class ExecutionBrokerProcess(mp.Process):
         heartbeat_seconds: Optional[float] = None,
     ) -> None:
         super().__init__(name="execution-broker", daemon=False)
+        self.venue = str(venue or "kalshi")
         self.client_config = client_config
         self.request_queue = request_queue
         self.response_queues = dict(response_queues)
@@ -1542,7 +1546,7 @@ class ExecutionBrokerProcess(mp.Process):
             )
         return admission.token, dataclasses.replace(request, **changes)
 
-    def _cancel_owned(self, client: KalshiApiClient, market_id: str = "") -> int:
+    def _cancel_owned(self, client: BaseClient, market_id: str = "") -> int:
         return cancel_and_verify_owned_orders(
             client,
             market_id,
@@ -1574,7 +1578,7 @@ class ExecutionBrokerProcess(mp.Process):
                 f"execution broker timed out executing {label} after {float(timeout):.0f}s"
             ) from exc
 
-    def _execute_bounded_traced(self, client: KalshiApiClient, request: BrokerRequest) -> tuple[Any, bool]:
+    def _execute_bounded_traced(self, client: BaseClient, request: BrokerRequest) -> tuple[Any, bool]:
         """Bounded execution; also reports whether the venue was really called."""
         abandoned = threading.Event()
         return self._call_bounded(
@@ -1584,7 +1588,7 @@ class ExecutionBrokerProcess(mp.Process):
             abandoned=abandoned,
         )
 
-    def _execute_bounded(self, client: KalshiApiClient, request: BrokerRequest) -> Any:
+    def _execute_bounded(self, client: BaseClient, request: BrokerRequest) -> Any:
         return self._execute_bounded_traced(client, request)[0]
 
     # Request-queue reader errors (a broken pipe handle) are not decode
@@ -1650,7 +1654,7 @@ class ExecutionBrokerProcess(mp.Process):
 
     def _settle_write(
         self,
-        client: KalshiApiClient,
+        client: BaseClient,
         key: tuple[str, str],
         result: Any,
         *,
@@ -1678,7 +1682,7 @@ class ExecutionBrokerProcess(mp.Process):
                 return
         registry.set(key, result, stamp=stamp)
 
-    def _cancel_prior(self, client: KalshiApiClient, key: tuple[str, str]) -> None:
+    def _cancel_prior(self, client: BaseClient, key: tuple[str, str]) -> None:
         """Cancel the tracked order and any orphans on ``key`` before a new create.
 
         Orphans are popped as a batch; if one cancel fails for a transport
@@ -1714,7 +1718,7 @@ class ExecutionBrokerProcess(mp.Process):
 
     def _execute(
         self,
-        client: KalshiApiClient,
+        client: BaseClient,
         request: BrokerRequest,
         *,
         abandoned: Optional[threading.Event] = None,
@@ -1723,7 +1727,7 @@ class ExecutionBrokerProcess(mp.Process):
 
     def _execute_traced(
         self,
-        client: KalshiApiClient,
+        client: BaseClient,
         request: BrokerRequest,
         *,
         abandoned: Optional[threading.Event] = None,
@@ -1953,13 +1957,12 @@ class ExecutionBrokerProcess(mp.Process):
         return request.operation in {"quote_intent", "create_order", "amend_order", "decrease_order_to"}
 
     def run(self) -> None:  # pragma: no cover - integration exercised with real multiprocessing
-        config = KalshiClientConfig(
-            **{
-                **self.client_config.__dict__,
-                "enable_shared_write_rate_limiter": False,
-            }
+        config = build_client_config(
+            self.venue,
+            self.client_config,
+            enable_shared_write_rate_limiter=False,
         )
-        client = KalshiApiClient(config)
+        client: BaseClient = build_client(self.venue, config)
         self.__dict__["_order_registry_state"] = OrderRegistry()
         self.__dict__["_shard_exposure_ledger"] = ShardExposureLedger()
         self.__dict__["_read_cache"] = {}
@@ -1971,7 +1974,7 @@ class ExecutionBrokerProcess(mp.Process):
             client.list_account_positions()
             self._cancel_owned(client)
         except Exception as exc:
-            self.status_queue.put({"type": "startup_error", "at_ms": int(time.time() * 1000), "error": str(exc)})
+            self.status_queue.put({"type": "startup_error", "venue": self.venue, "at_ms": int(time.time() * 1000), "error": str(exc)})
             import asyncio
             asyncio.run(client.close())
             return
