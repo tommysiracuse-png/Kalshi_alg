@@ -37,8 +37,8 @@ import requests
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
 
-from fleet_models import MAX_CONCURRENT_BOTS
-from runtime_control import ControlRequest, ControlServer, STATUS_SCHEMA_VERSION
+from core.fleet_models import MAX_CONCURRENT_BOTS
+from core.runtime_control import ControlRequest, ControlServer, STATUS_SCHEMA_VERSION
 
 try:
     import fcntl
@@ -776,7 +776,7 @@ def spawn_single_bot(
 
     settings_file: Optional[Path] = None
     if session_configuration is not None and bot_artifacts_root is not None:
-        from session_config import bot_settings_payload
+        from core.session_config import bot_settings_payload
         market_artifacts = bot_artifacts_root / safe_ticker_filename(pick.ticker)
         market_artifacts.mkdir(parents=True, exist_ok=True)
         settings_file = market_artifacts / "settings.json"
@@ -1562,8 +1562,8 @@ def main() -> int:
     session_store = None
     session_run = None
     if arguments.session_store:
-        from session_config import apply_configuration_to_arguments
-        from session_store import SessionStore
+        from core.session_config import apply_configuration_to_arguments
+        from core.session_store import SessionStore
         session_store = SessionStore(Path(arguments.session_store))
         session_run = session_store.claim_run(arguments.run_id or None)
         try:

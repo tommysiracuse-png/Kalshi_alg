@@ -33,7 +33,7 @@ from __future__ import annotations
 import heapq
 from typing import Dict, List, Optional, Tuple
 
-from markout_metrics import MARKOUT_HORIZONS_MS, add_observation, empty_markout_aggregate
+from core.markout_metrics import MARKOUT_HORIZONS_MS, add_observation, empty_markout_aggregate
 
 from replay.clock import ReplayClock
 

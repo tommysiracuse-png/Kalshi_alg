@@ -351,8 +351,8 @@ def evaluate_candidate(history_db_path: str, ticker: str, bot_overrides: dict,
     bot_logger = logging.getLogger("kalshi_top_of_book_bot")
     saved_log_level = bot_logger.level
     try:
-        import top_of_book_bot as bot_mod
-        import session_config
+        from bots import top_of_book_bot as bot_mod
+        from core import session_config
 
         source = resolve_data_source(data_source)
         tier = source["tier"]

@@ -15,7 +15,7 @@ from pathlib import Path
 from threading import RLock
 from typing import Any, Dict, Iterable, Iterator, Mapping, Optional
 
-from session_config import default_session_configuration, validate_session_configuration
+from core.session_config import default_session_configuration, validate_session_configuration
 
 
 ACTIVE_RUN_STATES = ("pending", "starting", "running")
@@ -314,7 +314,7 @@ class SessionStore:
             self._finalize_order_revisions(Path(row["artifact_path"]), finished_at)
             pnl_path = Path(row["artifact_path"]) / "pnl_tracker.jsonl"
             if pnl_path.exists():
-                from pnl_core import load_fills, summarize_pnl
+                from portfolio.pnl_core import load_fills, summarize_pnl
                 fills, warnings = load_fills(pnl_path)
                 pnl = summarize_pnl(fills)
                 totals = pnl["totals"]

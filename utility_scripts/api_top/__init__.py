@@ -1,1 +1,0 @@
-"""Terminal API activity dashboard."""

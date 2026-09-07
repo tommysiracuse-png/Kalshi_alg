@@ -62,7 +62,7 @@ from clients.models import (
     StreamReset,
     TickerUpdate,
 )
-from kalshi_urls import canonical_market_url
+from core.kalshi_urls import canonical_market_url
 
 
 # ---------------------------------------------------------------------------

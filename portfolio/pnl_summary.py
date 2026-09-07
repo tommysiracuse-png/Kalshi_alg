@@ -6,9 +6,9 @@ import pathlib
 import sys
 from collections import defaultdict
 
-from pnl_core import compute_pnl as compute_pnl_core, load_fills as load_fills_core
+from portfolio.pnl_core import compute_pnl as compute_pnl_core, load_fills as load_fills_core
 
-PNL_FILE = pathlib.Path(__file__).resolve().parent / "logs" / "pnl_tracker.jsonl"
+PNL_FILE = pathlib.Path(__file__).resolve().parent.parent / "logs" / "pnl_tracker.jsonl"
 
 
 def load_fills(path: pathlib.Path):

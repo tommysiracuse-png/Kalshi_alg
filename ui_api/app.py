@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from ui_api.config import Settings
 from ui_api.store import OperationsStore, now_ms
-from session_store import SessionConflictError
+from core.session_store import SessionConflictError
 
 
 settings = Settings.from_environment()

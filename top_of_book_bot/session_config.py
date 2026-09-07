@@ -6,7 +6,7 @@ import copy
 from dataclasses import asdict, fields
 from typing import Any, Dict, Mapping
 
-from fleet_models import MAX_CONCURRENT_BOTS
+from core.fleet_models import MAX_CONCURRENT_BOTS
 
 
 SCHEMA_VERSION = 1
@@ -32,7 +32,7 @@ def _json_value(value: Any) -> Any:
 
 def default_session_configuration() -> Dict[str, Any]:
     # Lazy import avoids a cycle when the bot entrypoint consumes settings files.
-    from top_of_book_bot import BotSettings
+    from bots.top_of_book_bot import BotSettings
 
     bot = BotSettings()
     bot_values = {
@@ -143,7 +143,7 @@ def validate_session_configuration(value: Mapping[str, Any]) -> Dict[str, Any]:
     if not 0 <= watchdog["confidenceFlattenThreshold"] <= watchdog["confidenceReductionThreshold"] <= 1:
         raise ValueError("watchdog confidence thresholds must satisfy 0 <= flatten <= reduction <= 1")
 
-    from top_of_book_bot import BotSettings
+    from bots.top_of_book_bot import BotSettings
 
     bot_defaults = BotSettings()
     bot_values: Dict[str, Any] = {}

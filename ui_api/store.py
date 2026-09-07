@@ -16,12 +16,12 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
-from pnl_core import COUNT_SCALE, find_telemetry_databases, load_fills, load_telemetry_fills, summarize_pnl
-from portfolio_analytics import PortfolioAnalyticsStore
-from kalshi_urls import is_canonical_market_url
-from runtime_control import control_endpoint_available, read_json, send_control_command
+from portfolio.pnl_core import COUNT_SCALE, find_telemetry_databases, load_fills, load_telemetry_fills, summarize_pnl
+from portfolio.portfolio_analytics import PortfolioAnalyticsStore
+from core.kalshi_urls import is_canonical_market_url
+from core.runtime_control import control_endpoint_available, read_json, send_control_command
 from ui_api.config import Settings
-from session_store import SessionConflictError, SessionStore
+from core.session_store import SessionConflictError, SessionStore
 
 
 def now_ms() -> int:
@@ -715,7 +715,7 @@ class OptimizerService:
         value = value.strip()
         if not value:
             return None
-        from session_config import MARKET_CLASS_NAMES
+        from core.session_config import MARKET_CLASS_NAMES
 
         if value not in MARKET_CLASS_NAMES:
             raise ValueError("marketClass must be one of " + ", ".join(MARKET_CLASS_NAMES))
@@ -999,7 +999,7 @@ class OptimizerService:
 
     def options(self) -> Dict[str, Any]:
         """Everything the start form needs to populate itself."""
-        from session_config import MARKET_CLASS_NAMES
+        from core.session_config import MARKET_CLASS_NAMES
 
         sessions = []
         for session in self.sessions.list_sessions(include_archived=False):
@@ -1393,7 +1393,7 @@ class OperationsStore:
         if not api_key_id or not private_key:
             return {"available": False, "stale": True, "fetchedAt": None, "positionUnits": None, "source": "exchange", "error": "exchange credentials are not configured"}
         try:
-            from lip_launcher import KalshiPositionClient
+            from apps.lip_launcher import KalshiPositionClient
             status = self.status()["data"]
             use_demo = ((status.get("launcher") or {}).get("environment")) == "demo"
             client = KalshiPositionClient(api_key_id=api_key_id, private_key_path=private_key, use_demo=use_demo, subaccount=int(os.getenv("KALSHI_SUBACCOUNT", "0")))
@@ -2622,7 +2622,7 @@ class OperationsStore:
                 if ticker:
                     self.require_ticker(ticker)
                 if action in {"disable", "enable"} and not control_endpoint_available(self.control_socket):
-                    from lip_launcher import clear_disabled_ticker, disable_ticker
+                    from apps.lip_launcher import clear_disabled_ticker, disable_ticker
                     disable_path = self.settings.workspace / "watchdog_disable_list.json"
                     if action == "disable":
                         assert ticker is not None

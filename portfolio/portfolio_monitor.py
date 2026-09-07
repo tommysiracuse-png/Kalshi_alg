@@ -22,8 +22,8 @@ from clients.models import (
     Market,
     MarketQuery,
 )
-from kalshi_urls import canonical_market_url, is_canonical_market_url
-from portfolio_analytics import PortfolioAnalyticsStore
+from core.kalshi_urls import canonical_market_url, is_canonical_market_url
+from portfolio.portfolio_analytics import PortfolioAnalyticsStore
 
 
 PRICE_SCALE = 10_000

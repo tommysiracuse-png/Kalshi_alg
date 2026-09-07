@@ -30,7 +30,7 @@ from clients.models import (
     PostOnlyCrossError,
     RateLimitError,
 )
-from fleet_models import IntentUrgency, QuoteIntent
+from core.fleet_models import IntentUrgency, QuoteIntent
 from .broker import TokenBucket
 
 

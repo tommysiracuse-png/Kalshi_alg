@@ -17,9 +17,9 @@ from pathlib import Path
 from typing import Any, Iterator, Mapping, Optional
 
 from adaptors.kalshi import KalshiClientConfig
-from bot_manager import BotManagerConfig
+from core.bot_manager import BotManagerConfig
 from clients.base_client import BaseClient
-from fleet_models import (
+from core.fleet_models import (
     BotManagerEvent,
     FleetCapacity,
     ScreenerPick,
@@ -27,7 +27,7 @@ from fleet_models import (
     WorkerControlAck,
     WorkerHeartbeat,
 )
-from session_config import default_session_configuration, validate_session_configuration
+from core.session_config import default_session_configuration, validate_session_configuration
 from .assignment import assign_markets, derive_worker_count
 from .capacity import AllocationRequest, AllocationResult, CapitalAllocator, calculate_fleet_capacity
 from .execution import (

@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
-from fleet_models import IntentUrgency, QuoteIntent
+from core.fleet_models import IntentUrgency, QuoteIntent
 
 
 class TokenBucket:

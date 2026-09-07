@@ -127,7 +127,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
                              "in addition to the window start and the walk-forward split boundaries "
                              f"(default {data_mod.DEFAULT_SCREENER_EVAL_HOURS}; 0 = boundaries only). "
                              "A market is kept if it passes at any evaluation time.")
-    from session_config import MARKET_CLASS_NAMES
+    from core.session_config import MARKET_CLASS_NAMES
 
     parser.add_argument("--class", dest="market_class", default="", choices=("", *MARKET_CLASS_NAMES),
                         metavar="{" + ",".join(MARKET_CLASS_NAMES) + "}",
@@ -157,8 +157,8 @@ def classify_markets_for_class(
     log_fn=log,
 ) -> set[str]:
     """Tickers in ``history_path`` that the classifier assigns to ``market_class``."""
-    import session_config
-    from market_classes import ClassifierThresholds, classify_history_markets
+    from core import session_config
+    from core.market_classes import ClassifierThresholds, classify_history_markets
 
     thresholds = ClassifierThresholds.from_configuration(session_config.default_session_configuration())
     classes = classify_history_markets(history_path, thresholds, from_ms=from_ms, to_ms=to_ms)

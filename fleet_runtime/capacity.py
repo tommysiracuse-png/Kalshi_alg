@@ -6,7 +6,7 @@ import math
 from dataclasses import dataclass
 from typing import Iterable, Literal, Mapping, Optional
 
-from fleet_models import FleetCapacity, QuoteSide
+from core.fleet_models import FleetCapacity, QuoteSide
 
 # Hard ceiling for ``fleetRuntime.allocationOversubscription``.  Budgets are a
 # proxy for expected exposure; the venue balance (not the multiplier) is the

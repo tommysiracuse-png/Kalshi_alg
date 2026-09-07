@@ -123,15 +123,15 @@ def restrict_space(space: SearchSpace, names: List[str]) -> SearchSpace:
 
 
 def _base_configuration() -> Dict[str, Any]:
-    import session_config
+    from core import session_config
 
     return session_config.default_session_configuration()
 
 
 def is_valid_bot_overrides(overrides: Dict[str, Any]) -> bool:
     """Trial-construct BotSettings (through the session pipeline) and validate."""
-    import session_config
-    from top_of_book_bot import BotSettings
+    from core import session_config
+    from bots.top_of_book_bot import BotSettings
 
     cfg = session_config.default_session_configuration()
     managed: Dict[str, Any] = {}

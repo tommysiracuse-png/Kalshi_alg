@@ -7,7 +7,7 @@ import math
 from collections import defaultdict
 from typing import Iterable, Mapping, Optional
 
-from fleet_models import DEFAULT_SHARD_SIZE, MAX_WORKERS
+from core.fleet_models import DEFAULT_SHARD_SIZE, MAX_WORKERS
 
 
 def derive_worker_count(max_bots: int, shard_size: int = DEFAULT_SHARD_SIZE) -> int:

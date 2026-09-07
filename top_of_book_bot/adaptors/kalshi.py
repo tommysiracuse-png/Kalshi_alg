@@ -59,7 +59,7 @@ from clients.models import (
     TickerUpdate,
 )
 from clients.websocket_client import WebsocketClient
-from top_of_book_bot.clients.file_client import _SharedWriteRateLimiter
+from ..clients.file_client import _SharedWriteRateLimiter
 
 
 LOGGER = logging.getLogger("kalshi_top_of_book_bot")

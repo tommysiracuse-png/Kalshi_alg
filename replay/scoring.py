@@ -11,7 +11,7 @@ import bisect
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Dict, List, Optional, Sequence, Tuple
 
-from markout_metrics import COUNT_SCALE, PRICE_SCALE, monetary_markout_units
+from core.markout_metrics import COUNT_SCALE, PRICE_SCALE, monetary_markout_units
 
 # Maker fee discount factor applied on top of the venue's quadratic
 # 0.07 * p * (1-p) formula (mirrors FeeModel.baseline_fee_units in

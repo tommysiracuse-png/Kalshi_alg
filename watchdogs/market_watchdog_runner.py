@@ -21,7 +21,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Iterator, Optional, TextIO
 
-import markout_history
+from watchdogs import markout_history
 
 
 logging.basicConfig(
@@ -404,7 +404,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--workspace-dir",
-        default=str(Path(__file__).parent.resolve()),
+        default=str(Path(__file__).resolve().parent.parent),
         help="Directory containing telemetry_<ticker>.sqlite3 files.",
     )
     return parser.parse_args()

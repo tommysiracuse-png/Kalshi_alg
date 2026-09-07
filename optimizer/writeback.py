@@ -117,7 +117,7 @@ def find_session_configuration(name: str, store_root: Optional[str | Path] = Non
     ``session_data`` — the same lookup ``optimizer.main`` uses for
     ``--base-session``.
     """
-    from session_store import SessionStore
+    from core.session_store import SessionStore
 
     store = SessionStore(Path(store_root or os.environ.get("KALSHI_SESSION_STORE", "session_data")))
     for session in store.list_sessions(include_archived=True):
@@ -150,8 +150,8 @@ def write_back(
     size, refresh interval — keeps the operator's value, so the new session is
     usable as-is rather than needing a hand merge.
     """
-    import session_config
-    from session_store import SessionConflictError, SessionStore
+    from core import session_config
+    from core.session_store import SessionConflictError, SessionStore
 
     root = Path(store_root or os.environ.get("KALSHI_SESSION_STORE", "session_data"))
     store = SessionStore(root)

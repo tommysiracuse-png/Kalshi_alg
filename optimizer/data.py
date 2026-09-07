@@ -188,7 +188,7 @@ def normalize_screener_settings(settings: Optional[Mapping[str, Any]]) -> Dict[s
         folded = _norm_key(key)
         supplied[_norm_key(_SESSION_ALIASES.get(folded, folded))] = value
     try:
-        import kalshi_screener_config as config
+        from screeners import kalshi_screener_config as config
     except Exception:  # pragma: no cover - the constants module ships with the repo
         config = None
     base: Dict[str, Any] = {}
