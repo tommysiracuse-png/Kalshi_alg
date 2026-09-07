@@ -2,7 +2,7 @@
 
 from .base_screener import BaseScreener, ScreeningResult
 
-__all__ = ["BaseScreener", "ScreeningResult", "KalshiScreener", "Screener"]
+__all__ = ["BaseScreener", "ScreeningResult", "KalshiScreener", "PolymarketScreener", "Screener"]
 
 
 def __getattr__(name: str):
@@ -13,8 +13,12 @@ def __getattr__(name: str):
     a dependency of those lightweight processes.
     """
 
-    if name in {"KalshiScreener", "Screener"}:
-        from .screener import KalshiScreener, Screener
+    if name in {"KalshiScreener", "PolymarketScreener", "Screener"}:
+        from .screener import KalshiScreener, PolymarketScreener, Screener
 
-        return KalshiScreener if name == "KalshiScreener" else Screener
+        if name == "KalshiScreener":
+            return KalshiScreener
+        if name == "PolymarketScreener":
+            return PolymarketScreener
+        return Screener
     raise AttributeError(name)

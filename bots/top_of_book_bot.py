@@ -922,6 +922,19 @@ class MarketMetadata:
     price_grid: PriceGrid
     series_title: str = ""
     market_url: Optional[str] = None
+    venue: str = "kalshi"
+    native_market_id: Optional[str] = None
+    yes_token_id: Optional[str] = None
+    no_token_id: Optional[str] = None
+    yes_bid_units: Optional[int] = None
+    yes_ask_units: Optional[int] = None
+    no_bid_units: Optional[int] = None
+    no_ask_units: Optional[int] = None
+    yes_bid_size_units: Optional[int] = None
+    yes_ask_size_units: Optional[int] = None
+    no_bid_size_units: Optional[int] = None
+    no_ask_size_units: Optional[int] = None
+    market_rules: object = None
 
 
 @dataclass
@@ -2516,6 +2529,7 @@ class MarketActor:
         self.settings = settings
         self.api_client = api_client
         self.market = market
+        self.market_rules = getattr(market, "market_rules", None)
         self.owns_api_client = owns_api_client
         self.quote_freshness_seconds = max(1.0, float(quote_freshness_seconds))
         self.quoting_enabled = bool(quoting_enabled)
@@ -2527,6 +2541,8 @@ class MarketActor:
 
         self.book_yes: Dict[int, int] = {}
         self.book_no: Dict[int, int] = {}
+        self.book_yes_ask: Dict[int, int] = {}
+        self.book_no_ask: Dict[int, int] = {}
         self.ticker_state: Optional[TickerState] = None
         self.recent_trades: Deque[PublicTradeTick] = deque(maxlen=2_000)
         self.seen_fill_keys: set[str] = set()
@@ -2864,10 +2880,32 @@ class MarketActor:
         return None
 
     def implied_yes_ask(self, best_no_bid_units: int) -> int:
+        if self._uses_direct_asks() and self.book_yes_ask:
+            return min(self.book_yes_ask)
         return ONE_DOLLAR_PRICE_UNITS - int(best_no_bid_units)
 
     def implied_no_ask(self, best_yes_bid_units: int) -> int:
+        if self._uses_direct_asks() and self.book_no_ask:
+            return min(self.book_no_ask)
         return ONE_DOLLAR_PRICE_UNITS - int(best_yes_bid_units)
+
+    def ask_size_units(self, side: str, fallback: int = 0) -> int:
+        levels = self.book_yes_ask if side == "yes" else self.book_no_ask
+        if self._uses_direct_asks() and levels:
+            price = min(levels)
+            return int(levels.get(price, 0) or 0)
+        return int(fallback or 0)
+
+    def _uses_direct_asks(self) -> bool:
+        rules = getattr(self, "market_rules", None)
+        if rules is None:
+            # Compatibility for older tests/replay payloads that construct a
+            # MarketActor without going through ``load_market_metadata``.
+            rules = getattr(self.market, "market_rules", None)
+        uses_direct = getattr(rules, "uses_direct_asks", None)
+        if callable(uses_direct):
+            return bool(uses_direct())
+        return str(getattr(self.market, "venue", "kalshi")).lower() == "polymarket"
 
     def best_bid_size_units(self, side: str) -> int:
         best_price_units = self.best_bid(side)
@@ -3062,10 +3100,10 @@ class MarketActor:
         no_bid = self.best_bid("no")
         if side == "yes":
             bid = yes_bid
-            ask = PRICE_SCALE - no_bid if no_bid is not None else None
+            ask = self.implied_yes_ask(no_bid) if no_bid is not None else (min(self.book_yes_ask) if self.book_yes_ask else None)
         else:
             bid = no_bid
-            ask = PRICE_SCALE - yes_bid if yes_bid is not None else None
+            ask = self.implied_no_ask(yes_bid) if yes_bid is not None else (min(self.book_no_ask) if self.book_no_ask else None)
         midpoint = int(round((bid + ask) / 2)) if bid is not None and ask is not None else None
         return bid, ask, midpoint
 
@@ -3102,7 +3140,7 @@ class MarketActor:
         if self.ticker_state is not None:
             ticker_yes_ask_size_units = self.ticker_state.yes_ask_size_units
         if ticker_yes_ask_size_units is None:
-            ticker_yes_ask_size_units = best_no_bid_size_units
+            ticker_yes_ask_size_units = self.ask_size_units("yes", best_no_bid_size_units)
 
         denominator = best_yes_bid_size_units + max(0, int(ticker_yes_ask_size_units or 0))
         order_book_imbalance = 0.0
@@ -3312,7 +3350,11 @@ class MarketActor:
             if self.settings.minimum_top_level_depth_contracts > 0:
                 if self.best_bid_size_units(side) < contracts_to_count_units(self.settings.minimum_top_level_depth_contracts):
                     return False, "thin_top_level"
-            if self.settings.maximum_top_level_gap_cents > 0:
+            # Kalshi's complementary YES/NO books use the second bid level as
+            # a spread sanity check. Polymarket publishes direct token asks
+            # and does not guarantee a complementary second level, so this
+            # guard must not disable an otherwise valid direct-token quote.
+            if not self._uses_direct_asks() and self.settings.maximum_top_level_gap_cents > 0:
                 second = self.second_best_bid(side)
                 if second is None or (best_bid_units - second) > cents_to_price_units(self.settings.maximum_top_level_gap_cents):
                     return False, "wide_book_gap"
@@ -4325,6 +4367,7 @@ class MarketActor:
                             expiration_timestamp_seconds=expiration_ts,
                             post_only=self.settings.post_only_quotes,
                             cancel_order_on_pause=self.settings.cancel_quotes_if_exchange_pauses,
+                            venue=str(getattr(self.market, "venue", "kalshi") or "kalshi"),
                         ),
                     )
                     state.order_id = response.order_id
@@ -4385,6 +4428,18 @@ class MarketActor:
                         new_total_fillable_count_units=desired_current_order_total_fillable_units,
                         previous_client_order_id=state.client_order_id,
                         updated_client_order_id=updated_client_order_id,
+                        # Kalshi amend requests must keep the same bid/ask
+                        # direction as the resting order.  The normal
+                        # top-of-book quote is a buy of the selected outcome
+                        # (a NO buy is the complementary YES ask).  Whether a
+                        # side currently reduces inventory risk changes the
+                        # side we quote, not the action of an already-resting
+                        # order.  Recomputing this as ``sell`` after inventory
+                        # changes makes Kalshi reject the amend with
+                        # ``order_side_mismatch`` because amend cannot flip a
+                        # bid into an ask.
+                        action="buy",
+                        venue=str(getattr(self.market, "venue", "kalshi") or "kalshi"),
                     ),
                 )
                 returned_order_id = response.order_id or state.order_id
@@ -4527,6 +4582,8 @@ class MarketActor:
     def apply_orderbook_snapshot(self, snapshot: OrderBookSnapshot) -> None:
         self.book_yes = dict(snapshot.yes_levels)
         self.book_no = dict(snapshot.no_levels)
+        self.book_yes_ask = dict(getattr(snapshot, "yes_ask_levels", {}) or {})
+        self.book_no_ask = dict(getattr(snapshot, "no_ask_levels", {}) or {})
         self.book_ready = True
 
     def apply_orderbook_delta(self, delta: OrderBookDelta) -> None:
@@ -4535,7 +4592,10 @@ class MarketActor:
         delta_units = delta.delta_count_units
         self.observe_orderbook_toxicity_from_delta(delta)
 
-        levels = self.book_yes if side == "yes" else self.book_no
+        if self._uses_direct_asks() and delta.is_ask:
+            levels = self.book_yes_ask if side == "yes" else self.book_no_ask
+        else:
+            levels = self.book_yes if side == "yes" else self.book_no
         levels[price_units] = levels.get(price_units, 0) + delta_units
         if levels[price_units] <= 0:
             levels.pop(price_units, None)
@@ -5188,6 +5248,7 @@ class MarketActor:
                 reduce_only=True,
                 time_in_force="immediate_or_cancel",
                 cancel_order_on_pause=False,
+                venue=str(getattr(self.market, "venue", "kalshi") or "kalshi"),
             ),
             )
         except Exception as exc:
@@ -5549,4 +5610,17 @@ def load_market_metadata(api_client: BaseClient, market_id: str) -> MarketMetada
         price_grid=PriceGrid.from_market(market),
         series_title=market.series_title,
         market_url=market.market_url,
+        venue=market.venue,
+        native_market_id=market.native_market_id,
+        yes_token_id=market.yes_token_id,
+        no_token_id=market.no_token_id,
+        yes_bid_units=market.yes_bid_units,
+        yes_ask_units=market.yes_ask_units,
+        no_bid_units=market.no_bid_units,
+        no_ask_units=market.no_ask_units,
+        yes_bid_size_units=market.yes_bid_size_units,
+        yes_ask_size_units=market.yes_ask_size_units,
+        no_bid_size_units=market.no_bid_size_units,
+        no_ask_size_units=market.no_ask_size_units,
+        market_rules=api_client.rules_for_market(market),
     )

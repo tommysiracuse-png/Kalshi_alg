@@ -19,6 +19,7 @@ class FakeClient:
 
     def __init__(self):
         self.canceled = []
+        self.amended = []
         self.closed = False
         self.resting = [
             Order("owned", "MKT", "yes", "mm:owned", "resting"),
@@ -35,6 +36,18 @@ class FakeClient:
         self.canceled.append(order_id)
         self.resting = [order for order in self.resting if order.order_id != order_id]
         return Order(order_id)
+
+    def amend_order(self, request):
+        self.amended.append(request)
+        return Order(
+            request.order_id,
+            request.market_id,
+            request.side,
+            request.updated_client_order_id,
+            "resting",
+            price_units=request.new_price_units,
+            remaining_count_units=request.new_total_fillable_count_units,
+        )
 
     def get_market_quote(self, market_id):
         return MarketQuote(market_id, 4000, 5000)
@@ -160,3 +173,34 @@ def test_client_order_id_prevents_cross_side_state_corruption():
     assert bot.orders["yes"].order_id is None
     assert bot.orders["no"].order_id == "no-order"
     assert bot.known_strategy_order_sides["no-order"] == "no"
+
+
+def test_amend_preserves_buy_direction_when_side_reduces_inventory(monkeypatch):
+    """A Kalshi amend cannot turn an existing bid into an ask.
+
+    The side selected by the strategy can become inventory-reducing after a
+    fill, but the wire action of the already-resting quote must remain the
+    action used when it was created.  Otherwise Kalshi rejects the amend with
+    ``order_side_mismatch``.
+    """
+    async def run_without_thread_pool(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    # The assertion concerns the request translation.  Keep this unit test
+    # independent of Python's default asyncio executor shutdown behavior.
+    monkeypatch.setattr(asyncio, "to_thread", run_without_thread_pool)
+
+    bot, client = make_bot()
+    bot.net_position_units = 100  # a NO quote is now inventory reducing
+    state = bot.orders["no"]
+    state.order_id = "order-no"
+    state.client_order_id = "mm:no:old"
+    state.price_units = 4_000
+    state.remaining_count_units = 100
+    state.status = "resting"
+
+    asyncio.run(bot.ensure_side_quote("no", 5_000))
+
+    assert len(client.amended) == 1
+    assert client.amended[0].side == "no"
+    assert client.amended[0].action == "buy"

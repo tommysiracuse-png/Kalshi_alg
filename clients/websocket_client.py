@@ -5,9 +5,13 @@ from __future__ import annotations
 import asyncio
 from typing import Any, AsyncIterator, Iterable, Mapping, Optional, Union
 
-import websockets
+try:
+    import websockets
+except ImportError:  # Public REST-only tools may run without websocket extras.
+    websockets = None  # type: ignore[assignment]
 
 from .monitoring import ActivityMonitor
+from .http_client import _redact_proxy_text
 
 
 WebsocketPayload = Union[str, bytes]
@@ -20,11 +24,17 @@ class WebsocketClient:
         *,
         ping_interval_seconds: float = 20,
         ping_timeout_seconds: float = 20,
+        proxy_url: Optional[str] = None,
         connect_factory: Optional[Any] = None,
     ) -> None:
         self.url = url
         self.ping_interval_seconds = ping_interval_seconds
         self.ping_timeout_seconds = ping_timeout_seconds
+        self.proxy_url = str(proxy_url or "").strip() or None
+        if connect_factory is None and websockets is None:
+            async def unavailable(*_args: Any, **_kwargs: Any) -> Any:
+                raise RuntimeError("websockets dependency is required for streaming")
+            connect_factory = unavailable
         self._connect_factory = connect_factory or websockets.connect
         self._connection_context: Optional[Any] = None
         self._connection: Optional[Any] = None
@@ -42,14 +52,26 @@ class WebsocketClient:
         kwargs = {
             "ping_interval": self.ping_interval_seconds,
             "ping_timeout": self.ping_timeout_seconds,
+            "proxy": self.proxy_url,
         }
 
-        async def open_connection(header_keyword: str) -> tuple[Any, Any]:
-            context = self._connect_factory(
-                self.url,
-                **{header_keyword: dict(headers or {})},
-                **kwargs,
-            )
+        async def open_connection(header_keyword: str, *, omit_proxy: bool = False) -> tuple[Any, Any]:
+            connect_kwargs = dict(kwargs)
+            if omit_proxy:
+                connect_kwargs.pop("proxy", None)
+            try:
+                context = self._connect_factory(
+                    self.url,
+                    **{header_keyword: dict(headers or {})},
+                    **connect_kwargs,
+                )
+            except TypeError:
+                # Let the caller retry the legacy header keyword.  A real
+                # proxy configuration must never silently fall back to an
+                # ambient process proxy or direct connection.
+                if self.proxy_url:
+                    raise RuntimeError("installed websockets version does not support explicit proxy routing")
+                raise
             if hasattr(context, "__aenter__"):
                 return context, await context.__aenter__()
             return context, await context
@@ -58,9 +80,27 @@ class WebsocketClient:
             try:
                 context, connection = await open_connection("additional_headers")
             except TypeError:
-                context, connection = await open_connection("extra_headers")
-        except Exception:
+                try:
+                    context, connection = await open_connection("extra_headers")
+                except TypeError:
+                    # Older websockets releases also reject the explicit
+                    # ``proxy=None`` keyword. Their connector is direct by
+                    # default, so remove only that optional keyword after the
+                    # header compatibility retry.
+                    if self.proxy_url:
+                        raise RuntimeError("installed websockets version does not support explicit proxy routing")
+                    context, connection = await open_connection("extra_headers", omit_proxy=True)
+        except Exception as exc:
             self.activity.record_stream("connectionErrors")
+            # A connector error often includes the complete proxy URL. Keep
+            # the original exception type while removing proxy credentials
+            # before it reaches a caller's log or status payload.
+            safe = _redact_proxy_text(exc, self.proxy_url)
+            if safe != str(exc):
+                try:
+                    exc.args = (safe,)
+                except Exception:
+                    pass
             raise
         self._connection_context = context
         self._connection = connection

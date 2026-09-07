@@ -10,6 +10,7 @@ from clients.models import (
     AccountFillQuery,
     AccountOrderQuery,
     AmendOrderRequest,
+    AmendTargetUnavailableError,
     CreateOrderRequest,
     OrderBookDelta,
     OrderBookSnapshot,
@@ -162,6 +163,20 @@ def test_http_rate_limit_is_mapped_to_typed_error():
     client = make_client(http=http)
     with pytest.raises(RateLimitError):
         client.get_market("MKT")
+
+
+def test_amend_side_mismatch_is_recovered_as_unavailable_target():
+    http = FakeHTTP()
+    http.responses = [HTTPClientError(
+        method="POST",
+        path="/portfolio/events/orders/o1/amend",
+        status_code=400,
+        response_text='{"error":{"code":"order_side_mismatch","message":"order side mismatch"}}',
+    )]
+    client = make_client(http=http)
+
+    with pytest.raises(AmendTargetUnavailableError):
+        client.amend_order(AmendOrderRequest("o1", "MKT", "yes", 4_100, 100, "c1", "c2"))
 
 
 def test_all_market_stream_messages_are_normalized():

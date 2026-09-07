@@ -80,6 +80,90 @@ def add_retry_delay_seconds(attempts: int) -> float:
     return min(ADD_RETRY_MAX_SECONDS, ADD_RETRY_BASE_SECONDS * (2 ** max(0, int(attempts) - 1)))
 
 
+def restore_cached_polymarket_book(actor: MarketActor, client: Any) -> bool:
+    """Seed a Polymarket actor from its compact persistent book cache.
+
+    A quiet market may not emit another websocket event after an actor is
+    created.  Applying the latest valid cache snapshot here lets the normal
+    quote and risk loops start immediately while the websocket continues to
+    provide fresh deltas.
+    """
+    if str(getattr(getattr(actor, "market", None), "venue", "")).lower() != "polymarket":
+        return False
+    cache = getattr(client, "book_cache", None)
+    get_book = getattr(cache, "get", None)
+    if not callable(get_book):
+        return False
+    yes = get_book(str(getattr(actor.market, "yes_token_id", "") or ""))
+    no = get_book(str(getattr(actor.market, "no_token_id", "") or ""))
+    if yes is None or no is None or yes.bid_units is None or no.bid_units is None:
+        return False
+    snapshot = OrderBookSnapshot(
+        actor.settings.market_ticker,
+        None,
+        {int(yes.bid_units): int(yes.bid_size_units or 0)},
+        {int(no.bid_units): int(no.bid_size_units or 0)},
+        venue="polymarket",
+        yes_ask_levels=(
+            {int(yes.ask_units): int(yes.ask_size_units or 0)}
+            if yes.ask_units is not None else {}
+        ),
+        no_ask_levels=(
+            {int(no.ask_units): int(no.ask_size_units or 0)}
+            if no.ask_units is not None else {}
+        ),
+    )
+    actor.handle_event(snapshot)
+    return True
+
+
+def restore_market_top_book(actor: MarketActor, market: Any) -> bool:
+    """Apply a normalized REST top-of-book response to an actor."""
+    yes_bid = getattr(market, "yes_bid_units", None)
+    no_bid = getattr(market, "no_bid_units", None)
+    if yes_bid is None or no_bid is None:
+        return False
+    snapshot = OrderBookSnapshot(
+        actor.settings.market_ticker,
+        None,
+        {int(yes_bid): int(getattr(market, "yes_bid_size_units", 0) or 0)},
+        {int(no_bid): int(getattr(market, "no_bid_size_units", 0) or 0)},
+        venue="polymarket",
+        yes_ask_levels=(
+            {int(market.yes_ask_units): int(getattr(market, "yes_ask_size_units", 0) or 0)}
+            if getattr(market, "yes_ask_units", None) is not None else {}
+        ),
+        no_ask_levels=(
+            {int(market.no_ask_units): int(getattr(market, "no_ask_size_units", 0) or 0)}
+            if getattr(market, "no_ask_units", None) is not None else {}
+        ),
+    )
+    actor.handle_event(snapshot)
+    return True
+
+
+def seed_risk_from_book(
+    actor: MarketActor,
+    window: deque[RiskSample],
+    last_event_ms: dict[str, int],
+    *,
+    timestamp_ms: Optional[int] = None,
+) -> bool:
+    """Seed risk freshness from a restored snapshot."""
+    if not getattr(actor, "book_ready", False):
+        return False
+    yes = best_bid_units(getattr(actor, "book_yes", None))
+    no = best_bid_units(getattr(actor, "book_no", None))
+    if yes is None or no is None:
+        return False
+    stamp = int(timestamp_ms or time.time() * 1000)
+    ticker = str(actor.settings.market_ticker)
+    window.append(RiskSample(stamp, yes, no))
+    last_event_ms[ticker] = stamp
+    actor.set_fleet_risk("normal", reason="book_bootstrap", generated_at_ms=stamp)
+    return True
+
+
 @dataclass
 class PendingAdd:
     pick: ScreenerPick
@@ -327,7 +411,8 @@ class FleetWorkerProcess(mp.Process):
         logging.getLogger("kalshi_top_of_book_bot").setLevel(logging.INFO)
         log = logging.getLogger("kalshi_top_of_book_bot")
         markets_dir = self.artifact_root / "markets"
-        markets_dir.mkdir(parents=True, exist_ok=True)
+        venue_markets_dir = markets_dir / self.venue
+        venue_markets_dir.mkdir(parents=True, exist_ok=True)
         direct: BaseClient = build_client(self.venue, self.client_config)
         client = BrokerRpcClient(
             direct,
@@ -406,7 +491,7 @@ class FleetWorkerProcess(mp.Process):
                 pnl_tracker_path=str(shard_dir / "telemetry.sqlite3"),
             )
             settings = BotSettings(**payload)
-            market_dir = markets_dir / pick.market_id.replace("/", "_").replace("\\", "_")
+            market_dir = venue_markets_dir / pick.market_id.replace("/", "_").replace("\\", "_")
             market_dir.mkdir(parents=True, exist_ok=True)
             # settings.json stays a pure BotSettings payload (the legacy child
             # path rejects unknown keys); the class provenance sits alongside.
@@ -427,6 +512,12 @@ class FleetWorkerProcess(mp.Process):
                 + "\n",
                 encoding="utf-8",
             )
+            # The screener carries normalized Polymarket token identity in its
+            # ranking payload.  Prime the child client before its metadata
+            # lookup so a worker does not repeat a full catalog scan.
+            prime_market = getattr(direct, "prime_market", None)
+            if callable(prime_market) and pick.ranking:
+                prime_market(pick.ranking)
             metadata = await asyncio.to_thread(load_market_metadata, client, pick.market_id)
             telemetry = TelemetryStore(
                 str(shard_dir / "telemetry.sqlite3"),
@@ -450,6 +541,14 @@ class FleetWorkerProcess(mp.Process):
             actors[pick.market_id] = actor
             picks[pick.market_id] = pick
             risk_windows[pick.market_id] = deque(maxlen=RISK_WINDOW_MAX_SAMPLES)
+            cached_restored = restore_cached_polymarket_book(actor, direct)
+            restored = cached_restored
+            if not restored and str(getattr(metadata, "venue", "")).lower() == "polymarket":
+                restored = restore_market_top_book(actor, metadata)
+            if restored:
+                if seed_risk_from_book(actor, risk_windows[pick.market_id], last_event_ms):
+                    log.info("RISK_BOOTSTRAPPED | ticker=%s reason=book_bootstrap", pick.market_id)
+                log.info("BOOK_BOOTSTRAPPED | ticker=%s source=%s", pick.market_id, "cache" if cached_restored else "rest")
             # An actor started after the controller's allocation arrived (a
             # retried add) must inherit it; otherwise it would quote both sides.
             if allocations_known:

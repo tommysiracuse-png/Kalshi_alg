@@ -296,8 +296,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--venue",
         default="kalshi",
-        choices=("kalshi",),
-        help="Trading venue for this launcher (Phase 1 supports Kalshi).",
+        choices=("kalshi", "polymarket"),
+        help="Trading venue for this launcher.",
     )
     parser.add_argument(
         "--minimum-carryover-value-cents",
@@ -360,6 +360,49 @@ def parse_args() -> argparse.Namespace:
         "--private-key",
         default=None,
         help="Path to the Kalshi private key file. If omitted, KALSHI_PRIVATE_KEY_PATH or PRIVATE_KEY_PATH is used.",
+    )
+    parser.add_argument(
+        "--polymarket-private-key-path",
+        default="",
+        help="Path to the Polymarket signer key (or POLYMARKET_PRIVATE_KEY_PATH).",
+    )
+    parser.add_argument(
+        "--polymarket-proxy-url",
+        default="",
+        help="HTTP(S) or SOCKS proxy used only for Polymarket REST and WebSocket traffic (or POLYMARKET_PROXY_URL).",
+    )
+    parser.add_argument(
+        "--polymarket-funder-address",
+        default="",
+        help="Polymarket funder/proxy address for Data API positions (or POLYMARKET_FUNDER_ADDRESS).",
+    )
+    parser.add_argument(
+        "--polymarket-catalog-path",
+        default="",
+        help="SQLite path for the persistent Polymarket Gamma catalog.",
+    )
+    parser.add_argument(
+        "--polymarket-book-cache-path",
+        default="",
+        help="SQLite path for the persistent Polymarket top-of-book cache.",
+    )
+    parser.add_argument(
+        "--polymarket-scan-mode",
+        choices=("catalog_only", "catalog_plus_cached_books", "bootstrap_missing_books"),
+        default="",
+        help="Polymarket scan mode; defaults to POLYMARKET_SCAN_MODE or cached books.",
+    )
+    parser.add_argument(
+        "--polymarket-rate-limit-profile",
+        choices=("standard", "copper", "bronze", "silver", "gold", "platinum", "diamond", "elite"),
+        default="",
+        help="Local Polymarket pacing profile; defaults to POLYMARKET_RATE_LIMIT_PROFILE or standard.",
+    )
+    parser.add_argument(
+        "--polymarket-rest-timeout-seconds",
+        type=float,
+        default=0.0,
+        help="Polymarket REST timeout in seconds; defaults to POLYMARKET_REST_TIMEOUT_SECONDS or 15.",
     )
     parser.add_argument(
         "--use-demo",
@@ -662,6 +705,14 @@ class KalshiPositionClient:
 # ---------------------------------------------------------------------------
 
 def resolve_credentials(arguments: argparse.Namespace) -> tuple[Optional[str], Optional[str]]:
+    if str(getattr(arguments, "venue", "kalshi") or "kalshi").lower() == "polymarket":
+        api_key = arguments.api_key_id or os.getenv("POLYMARKET_API_KEY") or os.getenv("POLYMARKET_API_KEY_ID")
+        private_key_path = (
+            str(getattr(arguments, "polymarket_private_key_path", "") or "").strip()
+            or arguments.private_key
+            or os.getenv("POLYMARKET_PRIVATE_KEY_PATH")
+        )
+        return api_key, private_key_path
     api_key_id = arguments.api_key_id or os.getenv("KALSHI_API_KEY_ID") or os.getenv("API_KEY_ID")
     private_key_path = arguments.private_key or os.getenv("KALSHI_PRIVATE_KEY_PATH") or os.getenv("PRIVATE_KEY_PATH")
     return api_key_id, private_key_path
@@ -682,7 +733,7 @@ def redacted_command(command: List[str]) -> str:
         if skip_next:
             skip_next = False
             continue
-        if token in {"--api-key-id", "--private-key"}:
+        if token in {"--api-key-id", "--private-key", "--polymarket-proxy-url"}:
             redacted_parts.append(token)
             redacted_parts.append("<redacted>")
             skip_next = True
@@ -1768,7 +1819,7 @@ def main() -> int:
 
     api_key_id, private_key_path = resolve_credentials(arguments)
 
-    if not arguments.dry_run:
+    if not arguments.dry_run and str(getattr(arguments, "venue", "kalshi") or "kalshi").lower() == "kalshi":
         if not api_key_id:
             print("ERROR: no API key ID provided. Use --api-key-id or set KALSHI_API_KEY_ID.")
             return 2
@@ -1777,6 +1828,14 @@ def main() -> int:
             return 2
         if not Path(private_key_path).expanduser().exists():
             print(f"ERROR: private key file not found: {Path(private_key_path).expanduser()}")
+            return 2
+    elif not arguments.dry_run and str(getattr(arguments, "venue", "kalshi") or "kalshi").lower() == "polymarket":
+        private_key = os.getenv("POLYMARKET_PRIVATE_KEY", "").strip()
+        if not private_key and not private_key_path:
+            print("ERROR: no Polymarket private key provided. Use POLYMARKET_PRIVATE_KEY or POLYMARKET_PRIVATE_KEY_PATH.")
+            return 2
+        if private_key_path and not Path(private_key_path).expanduser().exists():
+            print(f"ERROR: Polymarket private key file not found: {Path(private_key_path).expanduser()}")
             return 2
 
     from apps.launcher import Launcher

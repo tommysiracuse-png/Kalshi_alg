@@ -4,18 +4,36 @@ from __future__ import annotations
 
 import time
 from typing import Any, Mapping, Optional
+from urllib.parse import urlsplit, urlunsplit
 
 import requests
 
 from .monitoring import ActivityMonitor
 
 
+def _redact_proxy_text(value: object, proxy_url: Optional[str]) -> str:
+    text = str(value)
+    if not proxy_url:
+        return text
+    try:
+        parsed = urlsplit(str(proxy_url))
+        host = parsed.hostname or ""
+        if parsed.port is not None:
+            host = f"{host}:{parsed.port}"
+        safe = urlunsplit((parsed.scheme, host, parsed.path, parsed.query, parsed.fragment))
+        text = text.replace(str(proxy_url), safe)
+    except Exception:
+        pass
+    return text
+
+
 class HTTPClientError(RuntimeError):
-    def __init__(self, *, method: str, path: str, status_code: int, response_text: str) -> None:
+    def __init__(self, *, method: str, path: str, status_code: int, response_text: str, headers: Optional[Mapping[str, Any]] = None) -> None:
         self.method = method.upper()
         self.path = path
         self.status_code = int(status_code)
         self.response_text = response_text
+        self.headers = dict(headers or {})
         super().__init__(f"{self.method} {path} failed {status_code}: {response_text[:500]}")
 
 
@@ -27,6 +45,8 @@ class HTTPClient:
         timeout_seconds: float = 15,
         session: Optional[Any] = None,
         connect_timeout_seconds: Optional[float] = None,
+        proxy_url: Optional[str] = None,
+        trust_env: Optional[bool] = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         # ``timeout_seconds`` bounds every socket read; ``connect_timeout_seconds``
@@ -38,7 +58,18 @@ class HTTPClient:
             None if connect_timeout_seconds is None else float(connect_timeout_seconds)
         )
         self.session = session or requests.Session()
+        self.proxy_url = str(proxy_url or "").strip() or None
+        if trust_env is not None:
+            self.session.trust_env = bool(trust_env)
+        if self.proxy_url:
+            self.session.trust_env = False
+            proxies = getattr(self.session, "proxies", None)
+            if proxies is None:
+                proxies = {}
+                self.session.proxies = proxies
+            proxies.update({"http": self.proxy_url, "https": self.proxy_url})
         self.activity = ActivityMonitor()
+        self.last_response_headers: dict[str, str] = {}
 
     @property
     def request_timeout(self) -> Any:
@@ -50,7 +81,7 @@ class HTTPClient:
         return f"{self.base_url}/{path.lstrip('/')}"
 
     @staticmethod
-    def _decode(response: Any, *, method: str, path: str) -> dict:
+    def _decode(response: Any, *, method: str, path: str) -> Any:
         text = str(getattr(response, "text", "") or "")
         status_code = int(getattr(response, "status_code", 0))
         if status_code >= 400:
@@ -59,6 +90,7 @@ class HTTPClient:
                 path=path,
                 status_code=status_code,
                 response_text=text,
+                headers=getattr(response, "headers", None),
             )
         return {} if not text.strip() else response.json()
 
@@ -77,10 +109,10 @@ class HTTPClient:
         path: str,
         *,
         headers: Optional[Mapping[str, str]] = None,
-        body: Optional[Mapping[str, Any]] = None,
+        body: Any = None,
         params: Optional[Mapping[str, Any]] = None,
         operation: str = "post",
-    ) -> dict:
+    ) -> Any:
         return self._request("POST", path, headers=headers, params=params, body=body, operation=operation)
 
     def delete(
@@ -101,8 +133,8 @@ class HTTPClient:
         headers: Optional[Mapping[str, str]],
         params: Optional[Mapping[str, Any]],
         operation: str,
-        body: Optional[Mapping[str, Any]] = None,
-    ) -> dict:
+        body: Any = None,
+    ) -> Any:
         started = time.perf_counter()
         response = None
         error = False
@@ -111,12 +143,24 @@ class HTTPClient:
             request = getattr(self.session, method.lower())
             kwargs = {"headers": dict(headers or {}), "params": params, "timeout": self.request_timeout}
             if method == "POST":
-                kwargs["json"] = dict(body or {})
+                kwargs["json"] = body if body is not None else {}
             response = request(self._url(path), **kwargs)
+            self.last_response_headers = {
+                str(key): str(value)
+                for key, value in (getattr(response, "headers", None) or {}).items()
+            }
             return self._decode(response, method=method, path=path)
         except Exception as exc:
             error = True
-            error_message = str(exc)
+            error_message = _redact_proxy_text(exc, self.proxy_url)
+            if error_message != str(exc):
+                # Preserve the original exception type for transport
+                # classification while preventing credentials from reaching
+                # logs or API status snapshots through ``str(exc)``.
+                try:
+                    exc.args = (error_message,)
+                except Exception:
+                    pass
             raise
         finally:
             status = int(getattr(response, "status_code", 0)) if response is not None else None
@@ -131,3 +175,8 @@ class HTTPClient:
 
     def activity_snapshot(self) -> dict:
         return self.activity.snapshot()
+
+    def close(self) -> None:
+        closer = getattr(self.session, "close", None)
+        if callable(closer):
+            closer()

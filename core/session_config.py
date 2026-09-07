@@ -281,7 +281,7 @@ def validate_session_configuration(value: Mapping[str, Any]) -> Dict[str, Any]:
     if not isinstance(venue, str) or not venue.strip():
         raise ValueError("venue must be a non-empty string")
     venue = venue.strip().lower()
-    if venue != "kalshi":
+    if venue not in {"kalshi", "polymarket"}:
         raise ValueError(f"unsupported venue: {venue}")
     normalized["venue"] = venue
 

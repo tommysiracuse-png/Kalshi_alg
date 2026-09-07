@@ -14,10 +14,12 @@ def test_factory_builds_kalshi_client_as_base_client():
     assert client.venue == "kalshi"
 
 
-def test_factory_rejects_unsupported_venue():
-    with pytest.raises(ValueError, match="unsupported venue: polymarket"):
-        build_client_config("polymarket", {})
-    assert supported_venues() == ("kalshi",)
+def test_factory_builds_polymarket_config_and_rejects_unknown_venue():
+    config = build_client_config("polymarket", {"public_only": True})
+    assert config.venue == "polymarket"
+    assert supported_venues() == ("kalshi", "polymarket")
+    with pytest.raises(ValueError, match="unsupported venue: other"):
+        build_client_config("other", {})
 
 
 def test_session_migration_adds_kalshi_venue():

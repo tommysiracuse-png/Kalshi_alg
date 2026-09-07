@@ -9,9 +9,9 @@ from typing import Any, Mapping, Optional
 from clients.base_client import BaseClient
 from clients.factory import build_client, build_client_config
 from portfolio.base_portfolio import BasePortfolio
-from portfolio.portfolio_monitor import KalshiPortfolio, PortfolioMonitorConfig
+from portfolio.portfolio_monitor import KalshiPortfolio, PolymarketPortfolio, PortfolioMonitorConfig
 from screeners.base_screener import BaseScreener
-from screeners.screener import KalshiScreener
+from screeners.screener import KalshiScreener, PolymarketScreener
 
 
 @dataclass(frozen=True)
@@ -33,12 +33,13 @@ def build_runtime(
     portfolio_config: Optional[PortfolioMonitorConfig] = None,
 ) -> VenueRuntime:
     normalized = str(venue or "kalshi").strip().lower()
-    if normalized != "kalshi":
+    if normalized not in {"kalshi", "polymarket"}:
         raise ValueError(f"unsupported venue: {normalized}")
     config = client_config or build_client_config(normalized, client_values or {})
     client = build_client(normalized, config)
     kwargs = dict(screener_kwargs or {})
-    screener = KalshiScreener(
+    screener_type = KalshiScreener if normalized == "kalshi" else PolymarketScreener
+    screener = screener_type(
         client=client,
         settings=dict(screener_settings or {}),
         output_path=Path(kwargs.pop("output_path", "screener.csv")),
@@ -48,6 +49,6 @@ def build_runtime(
         minimum_carryover_value_cents=float(kwargs.pop("minimum_carryover_value_cents", 20.0)),
         **kwargs,
     )
-    portfolio = KalshiPortfolio(client, portfolio_config or PortfolioMonitorConfig())
+    portfolio_type = KalshiPortfolio if normalized == "kalshi" else PolymarketPortfolio
+    portfolio = portfolio_type(client, portfolio_config or PortfolioMonitorConfig())
     return VenueRuntime(normalized, client, screener, portfolio, config)
-

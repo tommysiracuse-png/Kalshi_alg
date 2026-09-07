@@ -114,14 +114,66 @@ class Launcher:
         )
 
         self.venue = str(self.session_configuration.get("venue", "kalshi"))
-        client_config = build_client_config(self.venue,
-            api_key_id=api_key_id or "",
-            private_key_path=private_key_path or "",
-            public_only=not bool(api_key_id and private_key_path),
-            use_demo_environment=bool(arguments.use_demo),
-            dry_run=bool(arguments.dry_run),
-            subaccount_number=int(arguments.subaccount or 0),
-        )
+        if self.venue == "polymarket":
+            polymarket_private_key_path = (
+                os.getenv("POLYMARKET_PRIVATE_KEY_PATH", "").strip()
+                or private_key_path
+                or ""
+            )
+            polymarket_private_key = os.getenv("POLYMARKET_PRIVATE_KEY", "").strip()
+            polymarket_values = {
+                "private_key": polymarket_private_key,
+                "private_key_path": polymarket_private_key_path,
+                "gamma_base_url": os.getenv("POLYMARKET_GAMMA_URL", "https://gamma-api.polymarket.com").strip(),
+                "clob_base_url": os.getenv("POLYMARKET_CLOB_URL", "https://clob.polymarket.com").strip(),
+                "data_base_url": os.getenv("POLYMARKET_DATA_URL", "https://data-api.polymarket.com").strip(),
+                "websocket_url": os.getenv(
+                    "POLYMARKET_MARKET_WS_URL",
+                    "wss://ws-subscriptions-clob.polymarket.com/ws/market",
+                ).strip(),
+                "user_websocket_url": os.getenv(
+                    "POLYMARKET_USER_WS_URL",
+                    "wss://ws-subscriptions-clob.polymarket.com/ws/user",
+                ).strip(),
+                "signature_type": int(os.getenv("POLYMARKET_SIGNATURE_TYPE", "0") or 0),
+                "api_key": api_key_id or os.getenv("POLYMARKET_API_KEY", "").strip()
+                or os.getenv("POLYMARKET_API_KEY_ID", "").strip(),
+                "api_secret": os.getenv("POLYMARKET_API_SECRET", "").strip(),
+                "api_passphrase": os.getenv("POLYMARKET_API_PASSPHRASE", "").strip(),
+                "proxy_url": str(getattr(arguments, "polymarket_proxy_url", "") or "").strip()
+                or os.getenv("POLYMARKET_PROXY_URL", "").strip(),
+                "funder_address": str(getattr(arguments, "polymarket_funder_address", "") or "").strip()
+                or os.getenv("POLYMARKET_FUNDER_ADDRESS", "").strip(),
+                "catalog_path": str(getattr(arguments, "polymarket_catalog_path", "") or "").strip()
+                or os.getenv("POLYMARKET_CATALOG_PATH", "").strip()
+                or str(self.runtime_dir / "polymarket_catalog.sqlite3"),
+                "book_cache_path": str(getattr(arguments, "polymarket_book_cache_path", "") or "").strip()
+                or os.getenv("POLYMARKET_BOOK_CACHE_PATH", "").strip()
+                or str(self.runtime_dir / "polymarket_books.sqlite3"),
+                "scan_mode": str(getattr(arguments, "polymarket_scan_mode", "") or "").strip()
+                or os.getenv("POLYMARKET_SCAN_MODE", "catalog_plus_cached_books").strip(),
+                "rate_limit_profile": str(getattr(arguments, "polymarket_rate_limit_profile", "") or "").strip()
+                or os.getenv("POLYMARKET_RATE_LIMIT_PROFILE", "standard").strip(),
+                "rest_timeout_seconds": float(getattr(arguments, "polymarket_rest_timeout_seconds", 0.0) or 0.0)
+                or float(os.getenv("POLYMARKET_REST_TIMEOUT_SECONDS", "15") or 15),
+                "rest_connect_timeout_seconds": float(
+                    os.getenv("POLYMARKET_REST_CONNECT_TIMEOUT_SECONDS", "10") or 10
+                ),
+                "dry_run": bool(arguments.dry_run),
+                "public_only": not bool(polymarket_private_key or polymarket_private_key_path),
+            }
+            client_config = build_client_config(self.venue, polymarket_values)
+            cleanup_credentials = bool(polymarket_private_key or polymarket_private_key_path)
+        else:
+            client_config = build_client_config(self.venue,
+                api_key_id=api_key_id or "",
+                private_key_path=private_key_path or "",
+                public_only=not bool(api_key_id and private_key_path),
+                use_demo_environment=bool(arguments.use_demo),
+                dry_run=bool(arguments.dry_run),
+                subaccount_number=int(arguments.subaccount or 0),
+            )
+            cleanup_credentials = bool(api_key_id and private_key_path)
         screener_settings = screener_settings_for_session(self.session_configuration, int(arguments.max_bots))
         fleet_runtime = self.session_configuration.get("fleetRuntime") or {}
         self.client_config = client_config
@@ -182,7 +234,7 @@ class Launcher:
                 client_config=client_config,
                 bot_artifacts_root=self.run_artifact_path,
             ),
-            cleanup_client=self.client if api_key_id and private_key_path else None,
+            cleanup_client=self.client if cleanup_credentials else None,
         )
         self.control_requests: "queue.Queue[ControlRequest]" = queue.Queue()
         self.shutdown_requested = asyncio.Event()
@@ -367,7 +419,13 @@ class Launcher:
         market.  ``None`` when unavailable (no credentials, venue error): the
         start proceeds without carryover and the reason is surfaced.
         """
-        if not (self.api_key_id and self.private_key_path):
+        configured_auth = bool(self.api_key_id and self.private_key_path)
+        if getattr(self, "venue", "kalshi") == "polymarket":
+            configured_auth = bool(
+                getattr(self.client_config, "private_key", "")
+                or getattr(self.client_config, "private_key_path", "")
+            ) and not bool(getattr(self.client_config, "public_only", False))
+        if not configured_auth:
             return None
         try:
             positions = await asyncio.to_thread(

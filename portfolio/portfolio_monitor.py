@@ -65,6 +65,8 @@ def _percent_bps(numerator: Optional[int], denominator: Optional[int]) -> Option
 def _venue_market_url(market: Optional[Market]) -> Optional[str]:
     if market is None:
         return None
+    if str(market.venue).lower() == "polymarket":
+        return market.market_url
     if is_canonical_market_url(market.market_url):
         return market.market_url
     return canonical_market_url(
@@ -690,5 +692,11 @@ class PortfolioMonitor(BasePortfolio):
         return snapshot
 
 
-# New explicit name; the old import remains the compatibility alias.
+# New explicit names; the old import remains the compatibility alias.
 KalshiPortfolio = PortfolioMonitor
+
+
+class PolymarketPortfolio(PortfolioMonitor):
+    """Portfolio monitor using Polymarket's normalized account adaptor."""
+
+    venue = "polymarket"

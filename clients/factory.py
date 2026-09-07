@@ -1,8 +1,8 @@
 """Construction of venue clients from serializable configuration.
 
 Shared runtime code imports this module instead of importing a concrete
-adaptor.  Phase 1 registers Kalshi only; adding another venue later is a
-registry change rather than a launcher-wide import migration.
+adaptor.  Concrete adaptors are imported lazily so public UI/configuration
+imports do not require authenticated venue SDKs.
 """
 
 from __future__ import annotations
@@ -40,29 +40,41 @@ def build_client_config(venue: str, values: Any = None, **kwargs: Any) -> Any:
     """Build the serializable adaptor config for ``venue``."""
 
     normalized = _normalize_venue(venue)
-    if normalized != "kalshi":
+    if normalized == "kalshi":
+        from adaptors.kalshi import KalshiClientConfig
+        config_type = KalshiClientConfig
+    elif normalized == "polymarket":
+        from adaptors.polymarket import PolymarketClientConfig
+        config_type = PolymarketClientConfig
+    else:
         raise ValueError(f"unsupported venue: {normalized}")
-    from adaptors.kalshi import KalshiClientConfig
 
     supplied = _mapping_values(values)
     supplied.update(kwargs)
-    allowed = {field.name for field in getattr(KalshiClientConfig, "__dataclass_fields__", {}).values()}
-    return KalshiClientConfig(**{key: value for key, value in supplied.items() if key in allowed})
+    allowed = {field.name for field in getattr(config_type, "__dataclass_fields__", {}).values()}
+    return config_type(**{key: value for key, value in supplied.items() if key in allowed})
 
 
 def build_client(venue: str, config: Any = None, **kwargs: Any) -> BaseClient:
     """Construct a concrete client while exposing only ``BaseClient`` here."""
 
     normalized = _normalize_venue(venue)
-    if normalized != "kalshi":
+    if normalized == "kalshi":
+        from adaptors.kalshi import KalshiApiClient, KalshiClientConfig
+        client_type = KalshiApiClient
+        config_type = KalshiClientConfig
+    elif normalized == "polymarket":
+        from adaptors.polymarket import PolymarketClient, PolymarketClientConfig
+        client_type = PolymarketClient
+        config_type = PolymarketClientConfig
+    else:
         raise ValueError(f"unsupported venue: {normalized}")
-    from adaptors.kalshi import KalshiApiClient, KalshiClientConfig
 
     client_config = config
-    if client_config is None or not isinstance(client_config, KalshiClientConfig):
+    if client_config is None or not isinstance(client_config, config_type):
         client_config = build_client_config(normalized, config, **kwargs)
-    return KalshiApiClient(client_config)
+    return client_type(client_config)
 
 
 def supported_venues() -> tuple[str, ...]:
-    return ("kalshi",)
+    return ("kalshi", "polymarket")

@@ -29,6 +29,7 @@ from .models import (
     SeriesFeeChange,
 )
 from .websocket_client import WebsocketClient
+from market_rules import MarketRules, rules_for_market
 
 
 class BaseClient(ABC):
@@ -47,6 +48,11 @@ class BaseClient(ABC):
     @property
     def normalized_venue(self) -> str:
         return str(getattr(self, "venue", None) or getattr(self, "venue_name", "unknown"))
+
+    def rules_for_market(self, market: Market) -> MarketRules:
+        """Return normalized market semantics without exposing an adaptor."""
+
+        return rules_for_market(market)
 
     @abstractmethod
     def get_market(self, market_id: str) -> Market: ...
@@ -124,8 +130,27 @@ class BaseClient(ABC):
     async def update_market_subscriptions(self, *, add: Sequence[str], remove: Sequence[str]) -> None:
         raise NotImplementedError("this adaptor does not support dynamic market subscriptions")
 
+    async def stream_user_events(self) -> AsyncIterator[MarketEvent]:
+        """Yield authenticated account events when the venue supports them."""
+
+        raise NotImplementedError("this adaptor does not support user event streaming")
+        if False:  # pragma: no cover - keeps this method an async generator.
+            yield None  # type: ignore[misc]
+
+    def hydrate_market_books(self, markets: Sequence[Market], *, allow_rest: bool = True) -> Dict[str, Market]:
+        raise NotImplementedError("this adaptor does not support bulk book hydration")
+
+    async def bootstrap_market_books(self, markets: Sequence[Market], *, timeout_seconds: float = 45.0) -> Dict[str, object]:
+        raise NotImplementedError("this adaptor does not support book bootstrap")
+
+    def book_readiness(self) -> float:
+        return 0.0
+
     async def close(self) -> None:
         await self.websocket_client.close()
+        closer = getattr(self.http_client, "close", None)
+        if callable(closer):
+            closer()
 
     def activity_snapshot(self) -> Dict[str, object]:
         http = self.http_client.activity_snapshot() if hasattr(self.http_client, "activity_snapshot") else {"startedAtMs": 0, "rest": {}}

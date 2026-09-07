@@ -124,7 +124,9 @@ class Market:
     yes_token_id: Optional[str] = None
     no_token_id: Optional[str] = None
     min_order_size_units: Optional[int] = None
-    market_rules: Mapping[str, object] = field(default_factory=dict)
+    # A compact rule name or venue-specific capability mapping.  The concrete
+    # interpretation stays behind BaseClient.rules_for_market().
+    market_rules: object = field(default_factory=dict)
 
     @property
     def normalized_market_key(self) -> MarketKey:
@@ -155,7 +157,7 @@ class Position:
 @dataclass(frozen=True)
 class AccountBalance:
     available_cash_units: int
-    portfolio_value_units: int
+    portfolio_value_units: Optional[int]
     updated_at_ms: Optional[int] = None
     # Cash per exchange shard as (exchange_index, cash_units) pairs. Balances
     # are local to a shard, so capital allocation must be done per shard;
@@ -163,6 +165,7 @@ class AccountBalance:
     balance_by_exchange: Tuple[Tuple[int, int], ...] = ()
     venue: Venue = "kalshi"
     currency: str = "USD"
+    allowance_units: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -191,6 +194,11 @@ class AccountPosition:
     updated_at_ms: Optional[int] = None
     venue: Venue = "kalshi"
     native_market_id: Optional[str] = None
+    mark_price_units: Optional[int] = None
+    current_value_units: Optional[int] = None
+    title: str = ""
+    market_url: Optional[str] = None
+    outcome: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -226,6 +234,7 @@ class AccountOrder:
     expiration_time_ms: Optional[int] = None
     venue: Venue = "kalshi"
     native_market_id: Optional[str] = None
+    action: Optional[OrderAction] = None
 
 
 @dataclass(frozen=True)
@@ -288,6 +297,7 @@ class CreateOrderRequest:
     time_in_force: Optional[str] = None
     cancel_order_on_pause: Optional[bool] = None
     self_trade_prevention_type: Optional[str] = None
+    venue: Venue = "kalshi"
 
 
 @dataclass(frozen=True)
@@ -300,6 +310,7 @@ class AmendOrderRequest:
     previous_client_order_id: str
     updated_client_order_id: str
     action: OrderAction = "buy"
+    venue: Venue = "kalshi"
 
 
 @dataclass(frozen=True)
@@ -317,6 +328,8 @@ class OrderBookSnapshot:
     no_levels: Dict[int, int]
     venue: Venue = "kalshi"
     native_market_id: Optional[str] = None
+    yes_ask_levels: Dict[int, int] = field(default_factory=dict)
+    no_ask_levels: Dict[int, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -329,6 +342,7 @@ class OrderBookDelta:
     timestamp_ms: int
     venue: Venue = "kalshi"
     native_market_id: Optional[str] = None
+    is_ask: bool = False
 
 
 @dataclass(frozen=True)

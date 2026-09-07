@@ -102,7 +102,7 @@ cd ~/Kalshi_alg
 
 python3 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
-.venv/bin/python -m pip install -r requirements-ui.txt pandas websockets
+.venv/bin/python -m pip install -r requirements-runtime.txt
 
 python3 -m venv .venv-ui
 .venv-ui/bin/python -m pip install --upgrade pip
@@ -110,6 +110,29 @@ python3 -m venv .venv-ui
 ```
 
 `run_lip.sh` uses `.venv/bin/python` by default. Override that interpreter with `KALSHI_PYTHON_BIN` if needed. The operations API systemd unit explicitly uses `.venv-ui/bin/uvicorn`.
+
+For a Polymarket run, provide the signer and (when required by the network
+layout) the per-client proxy without exporting proxy variables globally:
+
+```bash
+export POLYMARKET_PRIVATE_KEY_PATH=$HOME/.config/polymarket/private.key
+export POLYMARKET_PROXY_URL=http://127.0.0.1:18080
+.venv/bin/python lip_launcher.py --venue polymarket \
+  --screen-file polymarket.csv --bot-script V1.py --max-bots 10
+```
+
+Polymarket REST and WebSocket transports use `POLYMARKET_PROXY_URL`; Kalshi
+transports keep their existing independent configuration. The catalog and
+compact book cache default to files under the launcher's runtime directory and
+can be overridden with `--polymarket-catalog-path` and
+`--polymarket-book-cache-path`.
+
+Validate the route with public endpoints before starting a signed fleet:
+
+```bash
+POLYMARKET_PROXY_URL=http://127.0.0.1:18080 \
+  .venv/bin/python tools/test_polymarket_proxy.py
+```
 
 ### 2. Install and build the web application
 

@@ -570,7 +570,13 @@ class KalshiApiClient(BaseClient):
             return InsufficientBalanceError(str(exc))
         missing = exc.status_code == 404 or "not_found" in text or "order_not_found" in text or "not found" in text
         non_resting = "not_resting" in text or "not resting" in text
-        if action == "amend_order" and (missing or non_resting):
+        # Kalshi rejects an amend that would change the resting order's bid /
+        # ask direction with ``order_side_mismatch``.  The order is no longer
+        # safely addressable by this amend request; let the bot clear its
+        # local state, cancel the still-resting order during reconciliation,
+        # and place a fresh quote instead of retrying the same invalid amend.
+        side_mismatch = "order_side_mismatch" in text or "order side mismatch" in text
+        if action == "amend_order" and (missing or non_resting or side_mismatch):
             return AmendTargetUnavailableError(str(exc))
         if missing:
             return OrderNotFoundError(str(exc))

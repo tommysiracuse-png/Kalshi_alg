@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 from collections import Counter, deque
 from threading import Lock
-from typing import Deque, Dict, Optional, TypedDict
+from typing import Any, Deque, Dict, Iterable, Mapping, Optional, TypedDict
 
 
 class RestErrorSnapshot(TypedDict):
@@ -215,3 +215,103 @@ class ActivityMonitor:
                     "byEventType": dict(self._stream_events),
                 },
             }
+
+
+def merge_activity_snapshots(snapshots: Iterable[Mapping[str, Any]]) -> dict[str, Any]:
+    """Combine activity from several HTTP/WebSocket transports.
+
+    Polymarket has separate Gamma, Data API, CLOB, and authenticated SDK
+    transports.  The launcher needs one client-level snapshot, while the API
+    dashboard can still inspect the individual component snapshots.  This
+    helper deliberately treats missing fields as zero so it can also merge
+    snapshots produced by older workers.
+    """
+
+    values = [item for item in snapshots if isinstance(item, Mapping)]
+    rest: dict[str, Any] = {
+        "total": 0, "successes": 0, "errors": 0,
+        "requestsLast60s": 0, "errorsLast60s": 0,
+        "rateLimitErrors": 0, "rateLimitErrorsLast60s": 0,
+        "averageLatencyMs": 0.0, "totalLatencyMs": 0.0,
+        "lastActivityAtMs": None, "lastError": None,
+        "lastRateLimitError": None, "byMethod": {}, "byOperation": {},
+        "byStatus": {}, "operations": {},
+    }
+    stream: dict[str, Any] = {
+        "messagesLast60s": 0, "lastActivityAtMs": None, "byEventType": {},
+    }
+
+    def add_counter(target: dict[str, int], source: Any) -> None:
+        if not isinstance(source, Mapping):
+            return
+        for key, value in source.items():
+            try:
+                target[str(key)] = target.get(str(key), 0) + int(value or 0)
+            except (TypeError, ValueError):
+                continue
+
+    def newer(current: Any, candidate: Any) -> Any:
+        if not isinstance(candidate, Mapping):
+            return current
+        if not isinstance(current, Mapping) or int(candidate.get("atMs") or 0) >= int(current.get("atMs") or 0):
+            return dict(candidate)
+        return current
+
+    for snapshot in values:
+        snapshot_rest = snapshot.get("rest")
+        if isinstance(snapshot_rest, Mapping):
+            for key in (
+                "total", "successes", "errors", "requestsLast60s", "errorsLast60s",
+                "rateLimitErrors", "rateLimitErrorsLast60s", "totalLatencyMs",
+            ):
+                value = snapshot_rest.get(key)
+                if value is not None:
+                    rest[key] = rest.get(key, 0) + (float(value) if key == "totalLatencyMs" else int(value or 0))
+            last_at = snapshot_rest.get("lastActivityAtMs")
+            if last_at is not None and (rest["lastActivityAtMs"] is None or int(last_at) > int(rest["lastActivityAtMs"])):
+                rest["lastActivityAtMs"] = int(last_at)
+            rest["lastError"] = newer(rest["lastError"], snapshot_rest.get("lastError"))
+            rest["lastRateLimitError"] = newer(rest["lastRateLimitError"], snapshot_rest.get("lastRateLimitError"))
+            add_counter(rest["byMethod"], snapshot_rest.get("byMethod"))
+            add_counter(rest["byOperation"], snapshot_rest.get("byOperation"))
+            add_counter(rest["byStatus"], snapshot_rest.get("byStatus"))
+            for operation, metrics in (snapshot_rest.get("operations") or {}).items():
+                if not isinstance(metrics, Mapping):
+                    continue
+                current = rest["operations"].setdefault(str(operation), {
+                    "total": 0, "successes": 0, "errors": 0,
+                    "requestsLast60s": 0, "errorsLast60s": 0,
+                    "totalLatencyMs": 0.0, "lastActivityAtMs": None,
+                    "lastError": None,
+                })
+                for key in ("total", "successes", "errors", "requestsLast60s", "errorsLast60s"):
+                    current[key] += int(metrics.get(key) or 0)
+                current["totalLatencyMs"] += float(metrics.get("totalLatencyMs") or 0.0)
+                metric_at = metrics.get("lastActivityAtMs")
+                if metric_at is not None and (current["lastActivityAtMs"] is None or int(metric_at) > int(current["lastActivityAtMs"])):
+                    current["lastActivityAtMs"] = int(metric_at)
+                current["lastError"] = newer(current["lastError"], metrics.get("lastError"))
+        snapshot_stream = snapshot.get("stream")
+        if isinstance(snapshot_stream, Mapping):
+            stream["messagesLast60s"] += int(snapshot_stream.get("messagesLast60s") or 0)
+            stream["lastActivityAtMs"] = max(
+                [value for value in (stream["lastActivityAtMs"], snapshot_stream.get("lastActivityAtMs")) if value is not None],
+                default=None,
+            )
+            add_counter(stream["byEventType"], snapshot_stream.get("byEventType"))
+            for key, value in snapshot_stream.items():
+                if key not in {"messagesLast60s", "lastActivityAtMs", "byEventType"}:
+                    try:
+                        stream[key] = stream.get(key, 0) + int(value or 0)
+                    except (TypeError, ValueError):
+                        pass
+
+    rest["averageLatencyMs"] = round(rest["totalLatencyMs"] / rest["total"] if rest["total"] else 0.0, 3)
+    for metrics in rest["operations"].values():
+        metrics["averageLatencyMs"] = round(metrics["totalLatencyMs"] / metrics["total"] if metrics["total"] else 0.0, 3)
+    starts = [int(item.get("startedAtMs")) for item in values if item.get("startedAtMs")]
+    return {
+        "startedAtMs": min(starts) if starts else 0,
+        "rest": rest,
+        "stream": stream,
+    }

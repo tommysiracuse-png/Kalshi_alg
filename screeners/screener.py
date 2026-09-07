@@ -113,6 +113,9 @@ def market_to_screen_payload(market: Market) -> Dict[str, object]:
         "venue": market.venue,
         "ticker": market.market_id,
         "native_market_id": market.native_market_id or market.market_id,
+        "yes_token_id": market.yes_token_id,
+        "no_token_id": market.no_token_id,
+        "market_rules": market.market_rules,
         "exchange_index": market.exchange_index,
         "title": market.title,
         "status": market.status,
@@ -147,8 +150,12 @@ def market_to_screen_payload(market: Market) -> Dict[str, object]:
 class _BaseClientMarketSource:
     """Compatibility facade for the existing pure screening algorithm."""
 
-    def __init__(self, client: BaseClient) -> None:
+    def __init__(self, client: BaseClient, settings: Optional[Mapping[str, object]] = None) -> None:
         self.client = client
+        # Kept as an optional compatibility argument for callers that used to
+        # pass shared filter settings to this facade.  The actual settings are
+        # applied by the screener lifecycle after market normalization.
+        self.settings = settings or {}
 
     def list_markets(self, *, status: str, limit: int, max_total: int, mve_filter: Optional[str]):
         query = MarketQuery(
@@ -157,6 +164,29 @@ class _BaseClientMarketSource:
             max_results=bounded_market_scan_limit(max_total),
             venue_filters={"mve_filter": mve_filter} if mve_filter else {},
         )
+        if str(getattr(self.client, "normalized_venue", getattr(self.client, "venue_name", ""))).lower() == "polymarket":
+            markets = list(self.client.list_markets(query))
+            config = getattr(self.client, "config", None)
+            scan_mode = str(getattr(config, "scan_mode", "catalog_plus_cached_books"))
+            hydrate = getattr(self.client, "hydrate_market_books", None)
+            if callable(hydrate) and markets and scan_mode != "catalog_only":
+                should_bootstrap = getattr(self.client, "should_bootstrap_books", None)
+                allow_rest = scan_mode == "bootstrap_missing_books"
+                if callable(should_bootstrap):
+                    allow_rest = bool(should_bootstrap())
+                try:
+                    hydrated = hydrate(markets, allow_rest=allow_rest)
+                except TypeError:
+                    hydrated = hydrate(markets)
+                markets = [hydrated[item.market_id] for item in markets if item.market_id in hydrated]
+            elif markets and scan_mode != "catalog_only":
+                # Compatibility for lightweight/fake clients and older
+                # adaptors: a single normalized lookup is still preferable to
+                # screening a Polymarket market without a book at all.
+                lookup = getattr(self.client, "get_market", None)
+                if callable(lookup):
+                    markets = [item for item in (lookup(market.market_id) for market in markets) if item is not None]
+            return (market_to_screen_payload(market) for market in markets)
         # Yield payloads so the normalized Market list and a second full list
         # of dictionaries are not resident at the same time.
         return (market_to_screen_payload(market) for market in self.client.list_markets(query))
@@ -414,6 +444,14 @@ class Screener(BaseScreener):
         """
         screen_frame = screen_markets(_BaseClientMarketSource(self.client), self.settings)
         self._last_scan_metadata = dict(screen_frame.attrs.get("market_scan") or {})
+        try:
+            client_activity = self.client.activity_snapshot()
+            self._last_scan_metadata.update(dict(client_activity.get("catalog") or {}))
+            self._last_scan_metadata.update(dict(client_activity.get("book") or {}))
+            if "bookReadiness" in client_activity:
+                self._last_scan_metadata["bookReadiness"] = client_activity["bookReadiness"]
+        except Exception:
+            pass
         warnings = [str(item) for item in screen_frame.attrs.get("warnings", ())]
         export_frame = build_export_dataframe(screen_frame, self.settings)
         disabled = set(self.disabled_market_ids())
@@ -997,3 +1035,15 @@ class Screener(BaseScreener):
 # Explicit adapter name for new callers; ``Screener`` remains the historical
 # compatibility import used by CLI scripts and tests.
 KalshiScreener = Screener
+
+
+class PolymarketScreener(Screener):
+    """Polymarket screener using Gamma metadata and cached CLOB books."""
+
+    venue = "polymarket"
+
+    def _refresh_funded_shards(self) -> Optional[frozenset[int]]:
+        # Exchange-shard funding is a Kalshi-only concept. Polymarket's
+        # collateral is account-wide and its rate-limited balance endpoint
+        # must not be called as part of every screening pass.
+        return None
