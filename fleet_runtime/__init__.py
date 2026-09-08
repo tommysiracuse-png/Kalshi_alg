@@ -3,6 +3,7 @@
 from .assignment import assign_markets, derive_worker_count
 from .broker import IntentQueue, TokenBucket
 from .capacity import AllocationRequest, AllocationResult, CapitalAllocator, calculate_fleet_capacity
+from .multi_manager import MultiVenueBotManager
 
 __all__ = [
     "AllocationRequest",
@@ -13,4 +14,5 @@ __all__ = [
     "assign_markets",
     "calculate_fleet_capacity",
     "derive_worker_count",
+    "MultiVenueBotManager",
 ]

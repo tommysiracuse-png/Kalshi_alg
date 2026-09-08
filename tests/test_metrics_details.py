@@ -379,6 +379,38 @@ def test_current_run_lists_admitted_market_before_first_order(tmp_path: Path):
     assert response["items"][0]["fillCount"] == 0
 
 
+def test_current_run_reads_per_venue_shard_artifacts(tmp_path: Path):
+    store = SessionStore(tmp_path / "sessions")
+    run = store.prepare_run()
+    artifact = Path(run["artifactPath"])
+    venue_root = artifact / "kalshi"
+    shard_path = venue_root / "shards" / "worker-00" / "telemetry.sqlite3"
+    telemetry = TelemetryStore(str(shard_path), enabled=True, shard_mode=True)
+    telemetry.record_market_metadata(
+        ticker="VENUE-1", title="Per venue market", series_ticker="TEST",
+        event_ticker="TEST-EVENT",
+    )
+    telemetry.start_order_revision(
+        revision_key="venue-order", action="create", side="yes",
+        client_order_id="venue-client", order_id="venue-order",
+        placed_at_ms=now_ms(), size_units=100, price_units=4_000,
+        book_bid_units=3_900, book_ask_units=4_100, book_mid_units=4_000,
+    )
+    telemetry.flush()
+    venue_root.mkdir(parents=True, exist_ok=True)
+    (venue_root / "fleet_manifest.json").write_text(json.dumps({
+        "tickerToShard": {"VENUE-1": "worker-00"},
+    }))
+    store.record_metrics(run["id"], {
+        "markets": {"VENUE-1": {"orders": 1, "orderPlacementsAttempted": 1, "fills": 0}},
+    }, sample=False)
+
+    response = store.run_markets(run["id"])
+    assert response["source"]["available"] is True
+    assert response["items"][0]["ticker"] == "VENUE-1"
+    assert response["items"][0]["orderCount"] == 1
+
+
 def test_removed_market_resolves_from_immutable_settings_after_manifest_refresh(tmp_path: Path):
     store = SessionStore(tmp_path / "sessions")
     run = store.prepare_run()

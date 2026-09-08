@@ -200,6 +200,15 @@ class Screener(BaseScreener):
     """
 
     venue = "kalshi"
+    # A position whose market cannot be described is retained by the Kalshi
+    # compatibility screener as a fail-safe: a temporary venue lookup failure
+    # should not orphan inventory.  Polymarket positions are different: the
+    # account feed can retain resolved/removed condition IDs, and launching a
+    # bot for one produces an endless ``market not found`` startup loop.  The
+    # Polymarket subclass disables this fallback below.
+    carry_unknown_exchange_positions = True
+    carry_unknown_inventory = True
+
     def __init__(
         self,
         *,
@@ -617,6 +626,12 @@ class Screener(BaseScreener):
                     else "inventory"
                 )
             except Exception:
+                if not self.carry_unknown_inventory:
+                    # The venue cannot describe this ticker, so it cannot be
+                    # quoted or safely managed by an actor.  Leave it out of
+                    # the desired fleet and let the account/portfolio view
+                    # continue to report the exchange position.
+                    continue
                 is_unknown = True
                 reason = "inventory_unknown"
             carry_pick = ScreenerPick(
@@ -696,12 +711,12 @@ class Screener(BaseScreener):
 
         Skipped: positions whose market is already picked, closed/settled
         (``CLOSED_MARKET_STATUSES``), disabled, or on an exchange shard
-        holding no cash (the venue rejects every order there).  A market the
-        venue cannot describe is carried anyway (fail safe, like unknown
-        inventory) with a warning.  ``max_bots`` is honoured: carryovers
-        displace the lowest-ranked seeded picks (screened, CSV or fixed
-        ticker alike), and if carryovers alone exceed the cap the
-        lowest-value ones are omitted with a warning.
+        holding no cash (the venue rejects every order there).  Kalshi keeps
+        an unresolved market as a fail-safe carryover; venue subclasses may
+        disable that behavior when stale account IDs cannot be quoted.
+        ``max_bots`` is honoured: carryovers displace the lowest-ranked seeded
+        picks (screened, CSV or fixed ticker alike), and if carryovers alone
+        exceed the cap the lowest-value ones are omitted with a warning.
 
         Returns ``(picks, carried_ids, warnings)``.
         """
@@ -715,6 +730,7 @@ class Screener(BaseScreener):
         skipped_disabled: list[str] = []
         left_alone: list[tuple[str, str]] = []
         unknown_market: list[str] = []
+        skipped_unknown_market: list[str] = []
         candidates: list[tuple[float, ScreenerPick]] = []
         seen: Set[str] = set()
         for position in positions or ():
@@ -741,6 +757,9 @@ class Screener(BaseScreener):
                 status = str(getattr(market, "status", "") or "").strip().lower()
             except Exception as exc:
                 unknown_market.append(f"{market_id}: {exc}")
+                if not self.carry_unknown_exchange_positions:
+                    skipped_unknown_market.append(market_id)
+                    continue
             if status in CLOSED_MARKET_STATUSES:
                 skipped_closed.append(market_id)
                 continue
@@ -835,10 +854,16 @@ class Screener(BaseScreener):
                 f"{', '.join(skipped_disabled[:10])}."
             )
         if unknown_market:
-            warnings.append(
-                f"Carried {len(unknown_market)} exchange position(s) whose market the venue could not describe "
-                f"(shard assumed 0): {'; '.join(unknown_market[:3])}."
-            )
+            if self.carry_unknown_exchange_positions:
+                warnings.append(
+                    f"Carried {len(unknown_market)} exchange position(s) whose market the venue could not describe "
+                    f"(shard assumed 0): {'; '.join(unknown_market[:3])}."
+                )
+            elif skipped_unknown_market:
+                warnings.append(
+                    f"Skipped {len(skipped_unknown_market)} exchange position(s) whose market the venue could not "
+                    f"describe (stale or resolved ticker): {', '.join(skipped_unknown_market[:10])}."
+                )
         self._last_exchange_carryover = {
             "carried": list(carried),
             "displaced": int(displaced),
@@ -1041,6 +1066,12 @@ class PolymarketScreener(Screener):
     """Polymarket screener using Gamma metadata and cached CLOB books."""
 
     venue = "polymarket"
+    # Gamma no longer describes resolved/removed condition IDs that can still
+    # appear in the Data API position feed.  Carrying those IDs creates bots
+    # that can never initialize (``Polymarket market not found``), so only
+    # positions with a currently resolvable market are eligible for carryover.
+    carry_unknown_exchange_positions = False
+    carry_unknown_inventory = False
 
     def _refresh_funded_shards(self) -> Optional[frozenset[int]]:
         # Exchange-shard funding is a Kalshi-only concept. Polymarket's

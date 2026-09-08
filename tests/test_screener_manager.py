@@ -823,6 +823,35 @@ def test_exchange_position_carryover_funded_shard_and_disabled_and_unknown_marke
     assert any("could not describe (shard assumed 0): MYSTERY: market lookup failed" in w for w in warnings)
 
 
+def test_polymarket_does_not_carry_positions_with_unresolvable_market_ids(tmp_path, monkeypatch):
+    from clients.models import AccountPosition
+    from screeners.screener import PolymarketScreener
+
+    pd = pytest.importorskip("pandas")
+    import screener as screener_module
+
+    frame = pd.DataFrame([{"Rank": 1, "Ticker": "SCREENED", "SearchText": "Screened"}])
+    monkeypatch.setattr(screener_module, "screen_markets", lambda source, settings: frame)
+    monkeypatch.setattr(screener_module, "build_export_dataframe", lambda value, settings: value)
+    screener = PolymarketScreener(
+        client=PositionsClient(), settings={}, output_path=tmp_path / "polymarket.csv",
+        default_yes_budget_cents=100, default_no_budget_cents=150,
+        max_bots=10, minimum_carryover_value_cents=20,
+    )
+
+    update = asyncio.run(screener.refresh(
+        {}, reason="startup", exchange_positions=[
+            AccountPosition(ORPHAN, 100, market_exposure_units=500),
+            AccountPosition("MYSTERY", 100, market_exposure_units=700),
+        ],
+    ))
+
+    assert set(update.pick_by_market_id) == {"SCREENED", ORPHAN}
+    assert update.inventory_carried == (ORPHAN,)
+    warning = next(item for item in screener.status_snapshot()["warnings"] if "stale or resolved ticker" in item)
+    assert "MYSTERY" in warning and "ORPHAN" not in warning
+
+
 def test_exchange_position_carryover_honours_max_bots(tmp_path, monkeypatch):
     from clients.models import AccountPosition
 

@@ -300,6 +300,11 @@ def parse_args() -> argparse.Namespace:
         help="Trading venue for this launcher.",
     )
     parser.add_argument(
+        "--venues",
+        default="",
+        help="Comma-separated enabled venues (kalshi,polymarket). Overrides --venue for direct runs.",
+    )
+    parser.add_argument(
         "--minimum-carryover-value-cents",
         type=float,
         default=100.0,
@@ -1819,7 +1824,8 @@ def main() -> int:
 
     api_key_id, private_key_path = resolve_credentials(arguments)
 
-    if not arguments.dry_run and str(getattr(arguments, "venue", "kalshi") or "kalshi").lower() == "kalshi":
+    requested_venues = [item.strip().lower() for item in str(getattr(arguments, "venues", "") or "").split(",") if item.strip()] or [str(getattr(arguments, "venue", "kalshi") or "kalshi").lower()]
+    if not arguments.dry_run and "kalshi" in requested_venues:
         if not api_key_id:
             print("ERROR: no API key ID provided. Use --api-key-id or set KALSHI_API_KEY_ID.")
             return 2
@@ -1829,7 +1835,7 @@ def main() -> int:
         if not Path(private_key_path).expanduser().exists():
             print(f"ERROR: private key file not found: {Path(private_key_path).expanduser()}")
             return 2
-    elif not arguments.dry_run and str(getattr(arguments, "venue", "kalshi") or "kalshi").lower() == "polymarket":
+    if not arguments.dry_run and "polymarket" in requested_venues:
         private_key = os.getenv("POLYMARKET_PRIVATE_KEY", "").strip()
         if not private_key and not private_key_path:
             print("ERROR: no Polymarket private key provided. Use POLYMARKET_PRIVATE_KEY or POLYMARKET_PRIVATE_KEY_PATH.")

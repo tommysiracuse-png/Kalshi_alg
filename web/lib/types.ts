@@ -9,13 +9,15 @@ export type BotClassesConfiguration = {
   enabled: boolean;
   classifier: Record<string, number>;
 } & Record<BotClassName, BotClassOverrides>;
-// Schema v4 market-screener filters (defaults mirror kalshi_screener_config.py).
+// Market-screener filters (defaults mirror kalshi_screener_config.py). Schema
+// v5 stores the shared defaults under `general` and optional per-venue
+// overrides under `venues`; the flat fields remain for older sessions.
 // The fleet reads them at Start; a running fleet keeps the snapshot it launched with.
 export type ScreenerStatus = "open" | "unopened" | "paused" | "closed" | "settled";
 export type ScreenerMveFilter = "exclude" | "only" | "all" | "";
 // Markout horizons the fill telemetry records; markoutFilterHorizonSeconds must be one of them.
 export const SCREENER_MARKOUT_HORIZONS = [1, 5, 30, 120] as const;
-export type ScreenerConfiguration = {
+export type ScreenerFilters = {
   status: ScreenerStatus;
   mveFilter: ScreenerMveFilter;
   maxMarketsToScan: number;
@@ -39,6 +41,12 @@ export type ScreenerConfiguration = {
   markoutFilterLookbackDays: number;
   markoutFilterTotalNetThresholdCents: number;
 };
+export type VenueName = "kalshi" | "polymarket";
+export type VenueConfiguration = { enabled: boolean; priority: number; maxBots: number; client: Record<string, unknown> };
+export type ScreenerConfiguration = ScreenerFilters & {
+  general?: ScreenerFilters;
+  venues?: Partial<Record<VenueName, Partial<ScreenerFilters>>>;
+};
 export type SessionConfiguration = {
   schemaVersion: number;
   execution: Record<string, boolean | number | string>;
@@ -48,6 +56,8 @@ export type SessionConfiguration = {
   bot: Record<string, BotSettingValue>;
   botClasses?: BotClassesConfiguration;
   screener?: ScreenerConfiguration;
+  venues?: Record<VenueName, VenueConfiguration>;
+  venue?: VenueName;
 };
 export type SavedSession = {
   id: string; name: string; description: string; configuration: SessionConfiguration; version: number;
@@ -216,10 +226,12 @@ export type PortfolioSummaryAnalytics = {
   generatedAt: number; snapshotAtMs?: number | null; source: AnalyticsSource; coverage: AnalyticsCoverage; warnings: string[];
   summary: {
     availableCashUnits?: number | null; midpointPositionValueUnits?: number | null; totalPortfolioValueUnits?: number | null;
+    balanceComplete?: boolean; portfolioValueComplete?: boolean; liquidationValueComplete?: boolean;
     positionsLiquidationValueUnits?: number | null; apiTier?: string | null; positionCount?: number;
     readRateLimit?: { refillRate: number; bucketCapacity: number } | null;
     writeRateLimit?: { refillRate: number; bucketCapacity: number } | null;
   };
+  perVenue?: Record<string, AccountPortfolio["summary"]>; includedVenues?: string[]; missingVenues?: string[]; displayCurrency?: string;
   history: { availableCash?: PortfolioHistoryMetric; totalPortfolioValue?: PortfolioHistoryMetric; positionsLiquidationValue?: PortfolioHistoryMetric };
 };
 export type PortfolioPositionsAnalytics = {

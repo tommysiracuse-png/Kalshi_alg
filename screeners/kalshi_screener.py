@@ -913,7 +913,7 @@ def minimum_expected_edge_cents_for_target(target_edge_cents: Any) -> float:
     return float(cfg("MIN_EXPECTED_EDGE_CENTS_TO_QUOTE", max(2, target // 2)))
 
 
-def build_settings_from_configuration(configuration: Dict[str, Any]) -> Dict[str, Any]:
+def build_settings_from_configuration(configuration: Dict[str, Any], venue: str = "kalshi") -> Dict[str, Any]:
     """Screener settings for a saved session: CLI/config defaults overlaid with the session's ``screener`` section.
 
     Every ``session_config._SCREENER_FIELDS`` key lands on the snake_case key
@@ -925,7 +925,7 @@ def build_settings_from_configuration(configuration: Dict[str, Any]) -> Dict[str
     from core.session_config import screener_settings_from_configuration
 
     settings = build_settings_from_args(build_parser().parse_args([]))
-    settings.update(screener_settings_from_configuration(configuration))
+    settings.update(screener_settings_from_configuration(configuration, venue))
     settings["minimum_expected_edge_cents_to_quote"] = minimum_expected_edge_cents_for_target(
         settings["target_edge_cents"]
     )

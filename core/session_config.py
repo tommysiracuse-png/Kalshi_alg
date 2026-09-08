@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 import copy
+from urllib.parse import urlparse
 from dataclasses import asdict, fields
 from typing import Any, Dict, Iterable, List, Mapping, Tuple
 
 from core.fleet_models import DEFAULT_MAX_BOTS, DEFAULT_SHARD_SIZE, MAX_CONCURRENT_BOTS, MAX_WORKERS
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
-# Schema v4 ``screener`` section: the market screener's filters, previously
+# Shared screener section: the market screener's filters, previously
 # module constants in ``kalshi_screener_config.py`` only. Every default is read
 # from that module so a session that never touched the section screens exactly
 # like the constants do.
@@ -117,7 +118,7 @@ def default_bot_classes_configuration() -> Dict[str, Any]:
 
 
 def default_screener_configuration() -> Dict[str, Any]:
-    """Schema-v4 ``screener`` section seeded from ``kalshi_screener_config``.
+    """Return the shared/general screener defaults.
 
     The module only defines constants, so importing it here is cheap and keeps
     the session defaults equal to the file by construction: a stored v1/v2/v3
@@ -139,6 +140,25 @@ def default_screener_configuration() -> Dict[str, Any]:
     return section
 
 
+def default_screener_sections() -> Dict[str, Any]:
+    """Canonical schema-v5 screener shape.
+
+    Venue sections intentionally start empty.  This makes inheritance explicit
+    and prevents a later change to the Kalshi defaults from silently becoming a
+    persisted Polymarket override.
+    """
+    return {"general": default_screener_configuration(), "venues": {"kalshi": {}, "polymarket": {}}}
+
+
+def default_venue_configuration() -> Dict[str, Any]:
+    return {
+        "enabled": False,
+        "priority": 100,
+        "maxBots": DEFAULT_MAX_BOTS,
+        "client": {},
+    }
+
+
 def default_session_configuration() -> Dict[str, Any]:
     # Lazy import avoids a cycle when the bot entrypoint consumes settings files.
     from bots.top_of_book_bot import BotSettings
@@ -151,6 +171,8 @@ def default_session_configuration() -> Dict[str, Any]:
     }
     return {
         "schemaVersion": SCHEMA_VERSION,
+        # Kept as a compatibility alias for old callers.  The enabled venue
+        # map below is authoritative for schema-v5 sessions.
         "venue": "kalshi",
         "execution": {"useDemo": False, "dryRun": False, "subaccount": 0},
         "launcher": {
@@ -203,7 +225,11 @@ def default_session_configuration() -> Dict[str, Any]:
         },
         "bot": bot_values,
         "botClasses": default_bot_classes_configuration(),
-        "screener": default_screener_configuration(),
+        "screener": default_screener_sections(),
+        "venues": {
+            "kalshi": {"enabled": True, "priority": 100, "maxBots": DEFAULT_MAX_BOTS, "client": {}},
+            "polymarket": {"enabled": False, "priority": 100, "maxBots": DEFAULT_MAX_BOTS, "client": {}},
+        },
     }
 
 
@@ -212,8 +238,9 @@ def migrate_session_configuration(value: Mapping[str, Any]) -> Dict[str, Any]:
 
     v1 -> v2 splices the ``fleetRuntime`` defaults; v2 -> v3 splices the
     ``botClasses`` defaults (classification disabled, no overrides); v3 -> v4
-    splices the ``screener`` defaults (the ``kalshi_screener_config``
-    constants), so every stored v1/v2/v3 row keeps its exact runtime
+    splices the shared screener defaults and v4 -> v5 adds the venue map,
+    migrating the old flat section into ``screener.general``.
+    Every stored v1/v2/v3/v4 row keeps its exact runtime
     behaviour after migration. Fields added to an existing section within a
     schema version (the ``fleetRuntime.risk*`` evaluator tunables) are
     filled with their defaults by ``validate_session_configuration``; fields
@@ -224,8 +251,8 @@ def migrate_session_configuration(value: Mapping[str, Any]) -> Dict[str, Any]:
         raise ValueError("configuration must be an object")
     migrated = copy.deepcopy(dict(value))
     version = migrated.get("schemaVersion", 1)
-    if version not in (1, 2, 3, SCHEMA_VERSION):
-        raise ValueError(f"schemaVersion must be 1, 2, 3 or {SCHEMA_VERSION}")
+    if version not in (1, 2, 3, 4, SCHEMA_VERSION):
+        raise ValueError(f"schemaVersion must be 1, 2, 3, 4 or {SCHEMA_VERSION}")
     if version == 1:
         migrated["fleetRuntime"] = copy.deepcopy(default_session_configuration()["fleetRuntime"])
     if version < 3:
@@ -235,9 +262,58 @@ def migrate_session_configuration(value: Mapping[str, Any]) -> Dict[str, Any]:
     migrated.setdefault("venue", "kalshi")
     screener = migrated.get("screener")
     if isinstance(screener, Mapping):
-        migrated["screener"] = {
-            key: item for key, item in screener.items() if key not in _SCREENER_REMOVED_FIELDS
-        }
+        # v1-v4 stored a flat Kalshi section.  Migrate it into the shared
+        # section while preserving only fields understood by this schema.
+        if "general" not in screener and "venues" not in screener:
+            migrated["screener"] = {
+                "general": {key: item for key, item in screener.items() if key not in _SCREENER_REMOVED_FIELDS},
+                "venues": {"kalshi": {}, "polymarket": {}},
+            }
+        else:
+            # A legacy flat section may have received a venue override from a
+            # client before the API normalized it. Treat its known flat keys
+            # as the shared/general section instead of silently dropping them.
+            if "general" not in screener and isinstance(screener.get("venues"), Mapping):
+                general = {key: item for key, item in screener.items() if key != "venues"}
+            else:
+                general = screener.get("general") if isinstance(screener.get("general"), Mapping) else {}
+            venues = screener.get("venues") if isinstance(screener.get("venues"), Mapping) else {}
+            migrated["screener"] = {
+                "general": {key: item for key, item in general.items() if key not in _SCREENER_REMOVED_FIELDS},
+                "venues": {
+                    str(name).lower(): {
+                        key: item for key, item in section.items() if key not in _SCREENER_REMOVED_FIELDS
+                    }
+                    for name, section in venues.items() if isinstance(section, Mapping)
+                },
+            }
+    else:
+        migrated["screener"] = default_screener_sections()
+    # Build the venue map from the legacy single-venue fields.  Existing
+    # schema-v5 maps win, which makes migration idempotent.
+    supplied_venues = migrated.get("venues")
+    if not isinstance(supplied_venues, Mapping):
+        supplied_venues = {}
+    venue_name = str(migrated.get("venue") or "kalshi").strip().lower()
+    venues = {
+        "kalshi": {"enabled": venue_name == "kalshi", "priority": 100, "maxBots": DEFAULT_MAX_BOTS, "client": {}},
+        "polymarket": {"enabled": venue_name == "polymarket", "priority": 100, "maxBots": DEFAULT_MAX_BOTS, "client": {}},
+    }
+    for name in ("kalshi", "polymarket"):
+        item = supplied_venues.get(name)
+        if isinstance(item, Mapping):
+            venues[name].update(copy.deepcopy(dict(item)))
+    # Legacy maxBots is the venue ceiling in a single-venue session.
+    try:
+        legacy_max = migrated.get("launcher", {}).get("maxBots")
+        if legacy_max is not None and not isinstance(supplied_venues.get(venue_name), Mapping):
+            venues[venue_name]["maxBots"] = legacy_max
+        if legacy_max is not None and not supplied_venues:
+            for name in ("kalshi", "polymarket"):
+                venues[name]["maxBots"] = legacy_max
+    except AttributeError:
+        pass
+    migrated["venues"] = venues
     migrated["schemaVersion"] = SCHEMA_VERSION
     return migrated
 
@@ -273,7 +349,31 @@ def _require_number(value: Any, name: str, *, integer: bool = False) -> float | 
 def validate_session_configuration(value: Mapping[str, Any]) -> Dict[str, Any]:
     if not isinstance(value, Mapping):
         raise ValueError("configuration must be an object")
-    normalized = _merge_known(default_session_configuration(), migrate_session_configuration(value), "configuration")
+    supplied = migrate_session_configuration(value)
+    defaults = default_session_configuration()
+    original_venues = value.get("venues") if isinstance(value, Mapping) else {}
+    if not isinstance(original_venues, Mapping):
+        original_venues = {}
+    supplied_launcher = supplied.get("launcher") if isinstance(supplied.get("launcher"), Mapping) else {}
+    if "maxBots" in supplied_launcher:
+        for name in ("kalshi", "polymarket"):
+            raw = original_venues.get(name, {})
+            if not isinstance(raw, Mapping) or "maxBots" not in raw:
+                try:
+                    defaults["venues"][name]["maxBots"] = int(supplied_launcher["maxBots"])
+                except (TypeError, ValueError):
+                    pass
+    # Client operational settings and venue screener overrides are deliberately
+    # extensible per adaptor.  Seed their keys before the strict merge; the
+    # adaptor-specific validators remain responsible for interpreting values.
+    for name in ("kalshi", "polymarket"):
+        raw_venue = (supplied.get("venues") or {}).get(name, {})
+        if isinstance(raw_venue, Mapping) and isinstance(raw_venue.get("client"), Mapping):
+            defaults["venues"][name]["client"].update(copy.deepcopy(dict(raw_venue["client"])))
+        raw_override = ((supplied.get("screener") or {}).get("venues") or {}).get(name, {})
+        if isinstance(raw_override, Mapping):
+            defaults["screener"]["venues"][name].update(copy.deepcopy(dict(raw_override)))
+    normalized = _merge_known(defaults, supplied, "configuration")
     if normalized["schemaVersion"] != SCHEMA_VERSION:
         raise ValueError(f"schemaVersion must be {SCHEMA_VERSION}")
 
@@ -369,8 +469,117 @@ def validate_session_configuration(value: Mapping[str, Any]) -> Dict[str, Any]:
     normalized["botClasses"] = _validate_bot_classes(
         normalized["botClasses"], bot_values, launcher, watchdog, bot_defaults, tuple_fields,
     )
-    normalized["screener"] = _validate_screener(normalized["screener"])
+    normalized["screener"] = _validate_screener_sections(normalized["screener"])
+    normalized["venues"] = _validate_venues(normalized["venues"], launcher["maxBots"])
+    enabled = [name for name, item in normalized["venues"].items() if item["enabled"]]
+    if not enabled:
+        raise ValueError("at least one venue must be enabled")
+    # Keep the old field coherent for code and serialized artifacts that still
+    # read it directly.  For multi-venue sessions it is only a compatibility
+    # hint and the map remains authoritative.
+    normalized["venue"] = enabled[0] if len(enabled) == 1 else venue
     return normalized
+
+
+def _validate_venues(section: Mapping[str, Any], global_max: int) -> Dict[str, Any]:
+    if not isinstance(section, Mapping):
+        raise ValueError("configuration.venues must be an object")
+    allowed = {"kalshi", "polymarket"}
+    unknown = sorted(set(section) - allowed)
+    if unknown:
+        raise ValueError(f"unsupported venue: {unknown[0]}")
+    result: Dict[str, Any] = {}
+    for name in ("kalshi", "polymarket"):
+        raw = section.get(name, {})
+        if not isinstance(raw, Mapping):
+            raise ValueError(f"venues.{name} must be an object")
+        enabled = _require_bool(raw.get("enabled", False), f"venues.{name}.enabled")
+        priority = _require_number(raw.get("priority", 100), f"venues.{name}.priority", integer=True)
+        max_bots = _require_number(raw.get("maxBots", global_max), f"venues.{name}.maxBots", integer=True)
+        if isinstance(raw.get("priority", 100), float) and not float(raw.get("priority", 100)).is_integer():
+            raise ValueError(f"venues.{name}.priority must be an integer")
+        if isinstance(raw.get("maxBots", global_max), float) and not float(raw.get("maxBots", global_max)).is_integer():
+            raise ValueError(f"venues.{name}.maxBots must be an integer")
+        if priority < 0:
+            raise ValueError(f"venues.{name}.priority must be >= 0")
+        if max_bots < 0 or max_bots > global_max:
+            raise ValueError(f"venues.{name}.maxBots must be between 0 and launcher.maxBots")
+        if enabled and max_bots < 1:
+            raise ValueError(f"venues.{name}.maxBots must be > 0 when enabled")
+        client = raw.get("client", {})
+        if not isinstance(client, Mapping):
+            raise ValueError(f"venues.{name}.client must be an object")
+        # Credentials are deliberately rejected from the session contract.
+        forbidden = {
+            "private_key", "privateKey", "private_key_path", "privateKeyPath",
+            "api_key", "apiKey", "api_secret", "apiSecret", "api_passphrase", "apiPassphrase",
+            "secret", "credentials", "funder_private_key",
+        }
+        leaked = sorted(forbidden.intersection(client))
+        if leaked:
+            raise ValueError(f"venues.{name}.client cannot contain credentials: {leaked[0]}")
+        client_value = copy.deepcopy(dict(client))
+        if name == "polymarket":
+            proxy = client_value.get("proxy_url", client_value.get("proxyUrl"))
+            if proxy is not None:
+                if not isinstance(proxy, str):
+                    raise ValueError("venues.polymarket.client.proxy_url must be a string")
+                if urlparse(proxy).username or urlparse(proxy).password:
+                    raise ValueError("venues.polymarket.client.proxy_url cannot contain credentials")
+            scan_mode = client_value.get("scan_mode", client_value.get("scanMode"))
+            if scan_mode is not None and scan_mode not in {"catalog_only", "catalog_plus_cached_books", "bootstrap_missing_books"}:
+                raise ValueError("venues.polymarket.client.scan_mode is invalid")
+            for key in ("rest_timeout_seconds", "bootstrap_timeout_seconds", "readiness_threshold"):
+                if key in client_value:
+                    number = _require_number(client_value[key], f"venues.polymarket.client.{key}")
+                    if number <= 0 or (key == "readiness_threshold" and number > 1):
+                        raise ValueError(f"venues.polymarket.client.{key} is out of range")
+            for key in ("catalog_parallelism", "rest_concurrency", "book_batch_size"):
+                if key in client_value:
+                    number = _require_number(client_value[key], f"venues.polymarket.client.{key}", integer=True)
+                    if number < 1:
+                        raise ValueError(f"venues.polymarket.client.{key} must be >= 1")
+        result[name] = {"enabled": enabled, "priority": int(priority), "maxBots": int(max_bots), "client": client_value}
+    return result
+
+
+def _validate_screener_sections(section: Mapping[str, Any]) -> Dict[str, Any]:
+    if not isinstance(section, Mapping):
+        raise ValueError("screener must be an object")
+    unknown = sorted(set(section) - {"general", "venues"})
+    if unknown:
+        raise ValueError(f"unknown configuration field(s) at screener: {', '.join(unknown)}")
+    general = section.get("general", {})
+    if not isinstance(general, Mapping):
+        raise ValueError("screener.general must be an object")
+    merged_general = _merge_known(default_screener_configuration(), general, "screener.general")
+    normalized_general = _validate_screener(merged_general)
+    venues = section.get("venues", {})
+    if not isinstance(venues, Mapping):
+        raise ValueError("screener.venues must be an object")
+    unknown_venues = sorted(set(venues) - {"kalshi", "polymarket"})
+    if unknown_venues:
+        raise ValueError(f"unsupported venue screener: {unknown_venues[0]}")
+    normalized_venues: Dict[str, Any] = {}
+    for name in ("kalshi", "polymarket"):
+        overrides = venues.get(name, {})
+        if not isinstance(overrides, Mapping):
+            raise ValueError(f"screener.venues.{name} must be an object")
+        unknown_fields = sorted(set(overrides) - {field for field, _, _ in _SCREENER_FIELDS})
+        if unknown_fields and name == "kalshi":
+            raise ValueError(f"unknown configuration field(s) at screener.venues.{name}: {', '.join(unknown_fields)}")
+        effective = dict(normalized_general)
+        effective.update(dict(overrides))
+        validated = _validate_screener(effective)
+        normalized_venues[name] = {key: validated[key] for key in overrides if key in validated}
+        if name == "polymarket":
+            for key in unknown_fields:
+                raw_value = overrides[key]
+                if isinstance(raw_value, (str, int, float, bool, list, tuple)):
+                    normalized_venues[name][key] = copy.deepcopy(raw_value)
+                else:
+                    raise ValueError(f"screener.venues.{name}.{key} must be JSON-compatible")
+    return {"general": normalized_general, "venues": normalized_venues}
 
 
 def _validate_screener(section: Mapping[str, Any]) -> Dict[str, Any]:
@@ -423,14 +632,37 @@ def _validate_screener(section: Mapping[str, Any]) -> Dict[str, Any]:
     return result
 
 
-def screener_settings_from_configuration(configuration: Mapping[str, Any]) -> Dict[str, Any]:
+def enabled_venues(configuration: Mapping[str, Any]) -> Tuple[str, ...]:
+    config = validate_session_configuration(configuration)
+    return tuple(name for name in ("kalshi", "polymarket") if config["venues"][name]["enabled"])
+
+
+def venue_configuration(configuration: Mapping[str, Any], venue: str) -> Dict[str, Any]:
+    config = validate_session_configuration(configuration)
+    name = str(venue).strip().lower()
+    if name not in config["venues"]:
+        raise ValueError(f"unsupported venue: {venue}")
+    return copy.deepcopy(config["venues"][name])
+
+
+def effective_screener_configuration(configuration: Mapping[str, Any], venue: str) -> Dict[str, Any]:
+    config = validate_session_configuration(configuration)
+    name = str(venue).strip().lower()
+    if name not in config["venues"]:
+        raise ValueError(f"unsupported venue: {venue}")
+    result = dict(config["screener"]["general"])
+    result.update(config["screener"]["venues"].get(name, {}))
+    return result
+
+
+def screener_settings_from_configuration(configuration: Mapping[str, Any], venue: str = "kalshi") -> Dict[str, Any]:
     """Session ``screener`` section as the snake_case keys ``kalshi_screener`` filters read.
 
     Returns only the session-controlled keys; callers overlay them on the
     CLI/config defaults from ``kalshi_screener.build_settings_from_args`` so
     file-only settings (tick size, EV tuning, markout fee factor) stay intact.
     """
-    section = validate_session_configuration(configuration)["screener"]
+    section = effective_screener_configuration(configuration, venue)
     settings: Dict[str, Any] = {}
     for field_name, _, settings_key in _SCREENER_FIELDS:
         value = section[field_name]
@@ -620,6 +852,8 @@ def apply_configuration_to_arguments(arguments: Any, configuration: Mapping[str,
     }
     for name, item in mapping.items():
         setattr(arguments, name, item)
-    setattr(arguments, "venue", config.get("venue", "kalshi"))
+    enabled = enabled_venues(config)
+    setattr(arguments, "venues", ",".join(enabled))
+    setattr(arguments, "venue", enabled[0] if len(enabled) == 1 else config.get("venue", enabled[0]))
     setattr(arguments, "fixed_ticker", launcher["fixedTicker"])
     return arguments

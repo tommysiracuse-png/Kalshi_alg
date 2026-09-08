@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import type { BotClassName, BotClassOverride, BotClassesConfiguration, BotSettingValue, SavedSession, ScreenerConfiguration, ScreenerMveFilter, ScreenerStatus, SessionConfiguration } from "@/lib/types";
+import type { BotClassName, BotClassOverride, BotClassesConfiguration, BotSettingValue, SavedSession, ScreenerConfiguration, ScreenerFilters, ScreenerMveFilter, ScreenerStatus, SessionConfiguration, VenueName } from "@/lib/types";
 // Value imports stay relative: vitest resolves no "@/" alias (type imports are erased).
 import { SCREENER_MARKOUT_HORIZONS } from "../lib/types";
 import { createRequestId } from "../lib/request-id";
@@ -104,10 +104,10 @@ const SCREENER_MVE_OPTIONS: Array<{ value: ScreenerMveFilter; label: string }> =
   { value: "", label: "No MVE filter sent" },
 ];
 const SCREENER_HORIZON_LABEL = "Markout horizon (seconds)";
-type ScreenerNumberField = Exclude<keyof ScreenerConfiguration, "status" | "mveFilter" | "excludedTickerKeywords" | "markoutFilterEnabled" | "markoutFilterHorizonSeconds">;
+type ScreenerNumberField = Exclude<keyof ScreenerFilters, "status" | "mveFilter" | "excludedTickerKeywords" | "markoutFilterEnabled" | "markoutFilterHorizonSeconds">;
 const SCREENER_GROUPS: Array<{ title: string; fields: Array<{ key: ScreenerNumberField; label: string; step?: number; min?: number }> }> = [
   { title: "Market scan", fields: [
-    { key: "maxMarketsToScan", label: "Max markets to scan", step: 1, min: 1 },
+    { key: "maxMarketsToScan", label: "Default max markets to scan", step: 1, min: 1 },
     { key: "topN", label: "Top N exported (floored at Max Bots)", step: 1, min: 1 },
   ] },
   { title: "Liquidity and time filters", fields: [
@@ -132,7 +132,8 @@ const SCREENER_GROUPS: Array<{ title: string; fields: Array<{ key: ScreenerNumbe
     { key: "markoutFilterLookbackDays", label: "Lookback (days)", min: 0 },
   ] },
 ];
-const SCREENER_SEARCH_TERMS = ["screener", "status", "mve filter", "excluded ticker keywords", "markout filter enabled", SCREENER_HORIZON_LABEL,
+const SCREENER_VENUES: VenueName[] = ["kalshi", "polymarket"];
+const SCREENER_SEARCH_TERMS = ["screener", "status", "mve filter", "excluded ticker keywords", "markout filter enabled", "maximum markets per venue", "kalshi max markets to scan", "polymarket max markets to scan", SCREENER_HORIZON_LABEL,
   ...SCREENER_GROUPS.flatMap(group => [group.title, ...group.fields.map(field => field.label)])].map(term => term.toLowerCase());
 
 type ScreenerProps = { screener: ScreenerConfiguration; onChange: (next: ScreenerConfiguration) => void; onValidity: ValidityHandler };
@@ -140,8 +141,13 @@ type ScreenerProps = { screener: ScreenerConfiguration; onChange: (next: Screene
 function ScreenerEditor({ screener, onChange, onValidity }: ScreenerProps) {
   const [keyword, setKeyword] = useState("");
   const horizonLabelId = useId();
-  const keywords = screener.excludedTickerKeywords ?? [];
-  const horizon = screener.markoutFilterHorizonSeconds;
+  const values = (screener.general ?? screener) as ScreenerFilters;
+  const venueLimit = (venue: VenueName) => {
+    const override = screener.venues?.[venue]?.maxMarketsToScan;
+    return typeof override === "number" && Number.isFinite(override) ? override : values.maxMarketsToScan;
+  };
+  const keywords = values.excludedTickerKeywords ?? [];
+  const horizon = values.markoutFilterHorizonSeconds;
   const horizonRecorded = (SCREENER_MARKOUT_HORIZONS as readonly number[]).includes(horizon);
   const validity = useRef(onValidity);
   useEffect(() => { validity.current = onValidity; });
@@ -149,7 +155,24 @@ function ScreenerEditor({ screener, onChange, onValidity }: ScreenerProps) {
   // is shown as-is but blocks saving until a recorded horizon is chosen.
   useEffect(() => { validity.current("screener.markoutFilterHorizonSeconds", horizonRecorded); }, [horizonRecorded]);
   useEffect(() => () => validity.current("screener.markoutFilterHorizonSeconds", true), []);
-  function set<K extends keyof ScreenerConfiguration>(key: K, value: ScreenerConfiguration[K]) { onChange({ ...screener, [key]: value }); }
+  function set<K extends keyof ScreenerConfiguration>(key: K, value: ScreenerConfiguration[K]) {
+    if (screener.general) onChange({ ...screener, general: { ...(screener.general as ScreenerFilters), [key]: value } });
+    else onChange({ ...screener, [key]: value });
+  }
+  function setVenueLimit(venue: VenueName, value: number) {
+    // A legacy flat screener can still reach the editor before the API has
+    // normalized it. Promote its fields into `general` before adding an
+    // override, otherwise migration would mistake the new `venues` key for a
+    // complete schema-v5 section and discard the flat values.
+    const base = screener.general ? screener : { general: screener as ScreenerFilters };
+    onChange({
+      ...base,
+      venues: {
+        ...(screener.venues ?? {}),
+        [venue]: { ...(screener.venues?.[venue] ?? {}), maxMarketsToScan: value },
+      },
+    } as ScreenerConfiguration);
+  }
   function addKeyword() {
     const next = keyword.trim().toUpperCase();
     setKeyword("");
@@ -157,14 +180,19 @@ function ScreenerEditor({ screener, onChange, onValidity }: ScreenerProps) {
     set("excludedTickerKeywords", [...keywords, next]);
   }
   return <section className="panel" aria-labelledby="screener-heading">
-    <div className="panel-heading"><div><span className="eyebrow">CONFIGURATION</span><h2 id="screener-heading">Screener</h2></div><label className="status"><input type="checkbox" checked={Boolean(screener.markoutFilterEnabled)} onChange={event => set("markoutFilterEnabled", event.target.checked)} />Markout filter enabled</label></div>
+    <div className="panel-heading"><div><span className="eyebrow">CONFIGURATION</span><h2 id="screener-heading">Screener</h2></div><label className="status"><input type="checkbox" checked={Boolean(values.markoutFilterEnabled)} onChange={event => set("markoutFilterEnabled", event.target.checked)} />Markout filter enabled</label></div>
     <p className="screener-note"><strong>Applies at the next fleet Start.</strong> A running fleet keeps the screener settings it launched with; defaults match kalshi_screener_config.py.</p>
     <div className="settings-grid">
-      <label><span>Status</span><select value={screener.status} onChange={event => set("status", event.target.value as ScreenerStatus)}>{SCREENER_STATUS_OPTIONS.map(value => <option key={value} value={value}>{value}</option>)}</select></label>
-      <label><span>MVE filter</span><select value={screener.mveFilter ?? ""} onChange={event => set("mveFilter", event.target.value as ScreenerMveFilter)}>{SCREENER_MVE_OPTIONS.map(option => <option key={option.value || "none"} value={option.value}>{option.label}</option>)}</select></label>
+      <label><span>Status</span><select value={values.status} onChange={event => set("status", event.target.value as ScreenerStatus)}>{SCREENER_STATUS_OPTIONS.map(value => <option key={value} value={value}>{value}</option>)}</select></label>
+      <label><span>MVE filter</span><select value={values.mveFilter ?? ""} onChange={event => set("mveFilter", event.target.value as ScreenerMveFilter)}>{SCREENER_MVE_OPTIONS.map(option => <option key={option.value || "none"} value={option.value}>{option.label}</option>)}</select></label>
+      <div className="settings-grid screener-group-wrap" style={{ gridColumn: "1 / -1" }}>
+        <label className="screener-group"><span>Maximum markets per venue</span></label>
+        <p className="screener-note" style={{ gridColumn: "1 / -1", margin: "-2px 0 4px" }}>Each venue limit overrides the default above. Leave a venue at the default to use the shared value.</p>
+        {SCREENER_VENUES.map(venue => <NumberField key={venue} path={`screener.venues.${venue}.maxMarketsToScan`} label={`${humanize(venue)} max markets to scan`} value={venueLimit(venue)} step={1} min={1} onCommit={next => setVenueLimit(venue, next)} onValidity={onValidity} />)}
+      </div>
       {SCREENER_GROUPS.map(group => <div key={group.title} className="settings-grid screener-group-wrap" style={{ gridColumn: "1 / -1" }}>
         <label className="screener-group"><span>{group.title}</span></label>
-        {group.fields.map(field => <NumberField key={field.key} path={`screener.${field.key}`} label={field.label} step={field.step} min={field.min} value={screener[field.key]} onCommit={next => set(field.key, next)} onValidity={onValidity} />)}
+        {group.fields.map(field => <NumberField key={field.key} path={`screener.${field.key}`} label={field.label} step={field.step} min={field.min} value={values[field.key] as number} onCommit={next => set(field.key, next)} onValidity={onValidity} />)}
         {group.title === "Markout toxic-series filter" && <label>
           <span id={horizonLabelId}>{SCREENER_HORIZON_LABEL}</span>
           <select aria-labelledby={horizonLabelId} aria-invalid={!horizonRecorded || undefined} value={String(horizon)} onChange={event => set("markoutFilterHorizonSeconds", Number(event.target.value))}>
@@ -196,6 +224,8 @@ export function SessionEditor({ initial, activeRun }: Props) {
   const [invalid, setInvalid] = useState<Record<string, true>>({});
   const dirty = Boolean(current && draft && JSON.stringify(current) !== JSON.stringify(draft));
   const invalidCount = Object.keys(invalid).length;
+  const venueValues = draft?.configuration.venues ?? (draft ? { kalshi: { enabled: true, priority: 100, maxBots: Number(draft.configuration.launcher.maxBots ?? 40), client: {} } } : undefined);
+  const venueValid = Boolean(venueValues && Object.values(venueValues).some(item => item.enabled) && Object.values(venueValues).every(item => item.maxBots > 0 && item.maxBots <= Number(draft?.configuration.launcher.maxBots ?? 0) && item.priority >= 0));
   const onValidity = useCallback<ValidityHandler>((path, valid) => {
     setInvalid(previous => {
       if (valid) {
@@ -236,7 +266,7 @@ export function SessionEditor({ initial, activeRun }: Props) {
     finally { setPending(false); }
   }
   async function save() {
-    if (!draft || invalidCount) return;
+    if (!draft || invalidCount || !venueValid) return;
     const item = await mutate(`sessions/${draft.id}`, "PUT", { name: draft.name, description: draft.description, configuration: draft.configuration, version: draft.version });
     if (item) { replace(item); setMessage("Session saved. Changes apply to the next run."); }
   }
@@ -277,6 +307,21 @@ export function SessionEditor({ initial, activeRun }: Props) {
   }
   function updateScreener(next: ScreenerConfiguration) {
     setDraft(item => item ? { ...item, configuration: { ...item.configuration, screener: next } } : item);
+  }
+  function updateVenue(name: "kalshi" | "polymarket", patch: Partial<import("@/lib/types").VenueConfiguration>) {
+    setDraft(item => item ? {
+      ...item,
+      configuration: {
+        ...item.configuration,
+        venues: {
+          ...(item.configuration.venues ?? {
+            kalshi: { enabled: true, priority: 100, maxBots: Number(item.configuration.launcher.maxBots ?? 40), client: {} },
+            polymarket: { enabled: false, priority: 100, maxBots: Number(item.configuration.launcher.maxBots ?? 40), client: {} },
+          }),
+          [name]: { ...(item.configuration.venues?.[name] ?? { enabled: false, priority: 100, maxBots: Number(item.configuration.launcher.maxBots ?? 40), client: {} }), ...patch },
+        },
+      },
+    } : item);
   }
   const visibleSections = useMemo(() => {
     if (!draft) return [];
@@ -332,10 +377,11 @@ export function SessionEditor({ initial, activeRun }: Props) {
       )}
     </section>
     <section className="panel session-identity"><label>Name<input value={draft.name} onChange={event => updateIdentity("name", event.target.value)} maxLength={80} /></label><label>Description<textarea value={draft.description} onChange={event => updateIdentity("description", event.target.value)} maxLength={500} /></label><small>Configuration version {draft.version} · {draft.runCount} historical runs · {draft.selected ? "selected for next start" : "not selected"}</small></section>
+    <section className="panel" aria-labelledby="venues-heading"><div className="panel-heading"><div><span className="eyebrow">RUNTIME</span><h2 id="venues-heading">Venues</h2></div><strong>Select at least one</strong></div><div className="settings-grid">{(["kalshi", "polymarket"] as const).map(name => { const venue = draft.configuration.venues?.[name] ?? { enabled: name === "kalshi", priority: 100, maxBots: Number(draft.configuration.launcher.maxBots ?? 40), client: {} }; const client = venue.client ?? {}; return <div key={name} className="panel"><label className="status"><input type="checkbox" checked={venue.enabled} onChange={event => updateVenue(name, { enabled: event.target.checked })} />Enable {name}</label><NumberField path={`venues.${name}.priority`} label="Priority" value={venue.priority} min={0} step={1} onCommit={next => updateVenue(name, { priority: next })} onValidity={onValidity} /><NumberField path={`venues.${name}.maxBots`} label="Max bots" value={venue.maxBots} min={1} step={1} onCommit={next => updateVenue(name, { maxBots: next })} onValidity={onValidity} />{name === "polymarket" && <><label><span>HTTP proxy URL</span><input value={String(client.proxy_url ?? "")} placeholder="http://127.0.0.1:18080" onChange={event => updateVenue(name, { client: { ...client, proxy_url: event.target.value } })} /></label><label><span>Scan mode</span><select value={String(client.scan_mode ?? "catalog_plus_cached_books")} onChange={event => updateVenue(name, { client: { ...client, scan_mode: event.target.value } })}><option value="catalog_only">Catalog only</option><option value="catalog_plus_cached_books">Catalog + cached books</option><option value="bootstrap_missing_books">Bootstrap missing books</option></select></label><small>Credentials are read from environment/service configuration and are never stored here.</small></>}</div>; })}</div></section>
     <section className="filters"><label>Find a setting<input value={search} onChange={event => setSearch(event.target.value)} placeholder="risk, watchdog, budget…" /></label></section>
     <div className="settings-groups" key={draft.id}>{visibleSections.map(({ section, entries }) => <section className="panel" key={section}><div className="panel-heading"><div><span className="eyebrow">CONFIGURATION</span><h2>{humanize(section)}</h2></div><strong>{entries.length} settings</strong></div><div className="settings-grid">{entries.map(([key, value]) => typeof value === "number"
       ? <NumberField key={key} path={`${section}.${key}`} label={humanize(key)} value={value} onCommit={next => updateField(section, key, next)} onValidity={onValidity} />
       : <label key={key}><span>{humanize(key)}</span>{typeof value === "boolean" ? <input type="checkbox" checked={value} onChange={event => updateField(section, key, event.target.checked)} /> : Array.isArray(value) ? <input value={value.join(", ")} onChange={event => { const parts = event.target.value.split(",").map(item => item.trim()).filter(Boolean); updateField(section, key, value.length && typeof value[0] === "number" ? parts.map(Number) : parts); }} /> : <input value={String(value)} onChange={event => updateField(section, key, event.target.value)} />}</label>)}</div></section>)}{screener && screenerVisible && <ScreenerEditor screener={screener} onChange={updateScreener} onValidity={onValidity} />}{botClasses && classesVisible && <BotClassesEditor classes={botClasses} bot={draft.configuration.bot} onChange={updateBotClasses} onValidity={onValidity} />}</div>
-    <section className="sticky-save"><span>{invalidCount ? `${invalidCount} invalid field${invalidCount === 1 ? "" : "s"}` : dirty ? "Unsaved changes" : "Saved"}</span><button className="button primary" onClick={save} disabled={pending || !dirty || invalidCount > 0}>{pending ? "Working…" : "Save session"}</button>{invalidCount > 0 && <span role="status">Enter a number in every highlighted field before saving.</span>}{message && <span role="status">{message}</span>}</section>
+    <section className="sticky-save"><span>{invalidCount ? `${invalidCount} invalid field${invalidCount === 1 ? "" : "s"}` : !venueValid ? "Enable at least one valid venue" : dirty ? "Unsaved changes" : "Saved"}</span><button className="button primary" onClick={save} disabled={pending || !dirty || invalidCount > 0 || !venueValid}>{pending ? "Working…" : "Save session"}</button>{invalidCount > 0 && <span role="status">Enter a number in every highlighted field before saving.</span>}{message && <span role="status">{message}</span>}</section>
   </>;
 }

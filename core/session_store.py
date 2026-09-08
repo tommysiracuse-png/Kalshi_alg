@@ -494,14 +494,17 @@ class SessionStore:
                 screener_dir = artifact / "screener"
                 try:
                     paths = sorted(
-                        (path for path in screener_dir.glob("*.json") if path.name != "latest.json"),
+                        (path for path in screener_dir.rglob("*.json") if path.name != "latest.json"),
                         key=lambda path: path.name,
                     )
                 except OSError:
                     continue
                 try:
                     configuration = json.loads(run["configuration_json"] or "{}")
-                    configured = ((configuration.get("screener") or {}).get("maxMarketsToScan"))
+                    screener = configuration.get("screener") or {}
+                    if isinstance(screener, dict) and isinstance(screener.get("general"), dict):
+                        screener = screener["general"]
+                    configured = screener.get("maxMarketsToScan") if isinstance(screener, dict) else None
                 except (TypeError, ValueError, AttributeError):
                     configured = None
                 for path in paths:
@@ -1006,60 +1009,123 @@ class SessionStore:
         }
 
     @staticmethod
-    def _read_screener_titles(artifact: Path) -> Dict[str, str]:
-        path = artifact / "screener" / "latest.json"
+    def _artifact_roots(artifact: Path) -> list[Path]:
+        """Return the legacy root and any per-venue artifact roots.
+
+        Older runs wrote ``markets`` and ``shards`` directly below the run
+        artifact.  Multi-venue runs put those directories below a venue
+        directory (for example ``kalshi/shards``).  Keeping this discovery
+        local to the run artifact preserves the existing path-safety checks
+        while allowing both formats to be read.
+        """
+        root = Path(artifact).resolve()
+        roots = [root]
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError, TypeError):
-            return {}
-        return {
-            str(item.get("marketId")): str(item.get("title") or item.get("marketId"))
-            for item in payload.get("picks") or []
-            if isinstance(item, dict) and item.get("marketId")
-        }
+            children = sorted(root.iterdir(), key=lambda path: path.name)
+        except OSError:
+            children = []
+        for child in children:
+            if child.is_dir() and ((child / "markets").is_dir() or (child / "shards").is_dir()):
+                roots.append(child.resolve())
+        return roots
+
+    @staticmethod
+    def _read_screener_titles(artifact: Path) -> Dict[str, str]:
+        titles: Dict[str, str] = {}
+        screener_root = artifact / "screener"
+        try:
+            paths = sorted(screener_root.rglob("latest.json"))
+        except OSError:
+            paths = []
+        for path in paths:
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError, TypeError):
+                continue
+            if not isinstance(payload, Mapping):
+                continue
+            for item in payload.get("picks") or []:
+                if isinstance(item, dict) and item.get("marketId"):
+                    market_id = str(item["marketId"])
+                    titles[market_id] = str(item.get("title") or market_id)
+        return titles
 
     @staticmethod
     def _market_database(artifact: Path, ticker: str) -> Path:
         if not ticker or ticker in {".", ".."} or "/" in ticker or "\\" in ticker:
             raise KeyError(ticker)
-        root = (artifact / "markets").resolve()
-        candidate = (root / ticker / "telemetry.sqlite3").resolve()
-        try:
-            candidate.relative_to(root)
-        except ValueError as exc:
-            raise KeyError(ticker) from exc
-        if candidate.exists():
-            return candidate
-        try:
-            manifest = json.loads((artifact / "fleet_manifest.json").read_text(encoding="utf-8"))
-            worker_id = str((manifest.get("tickerToShard") or {}).get(ticker) or "")
-        except (OSError, ValueError, TypeError):
+        for root in SessionStore._artifact_roots(artifact):
+            markets_root = (root / "markets").resolve()
+
+            # A single-venue run stores markets/<ticker>.  Check this direct
+            # path before scanning the market directory, which keeps legacy
+            # runs with many markets inexpensive.
+            candidate = (markets_root / ticker / "telemetry.sqlite3").resolve()
+            try:
+                candidate.relative_to(markets_root)
+            except ValueError as exc:
+                raise KeyError(ticker) from exc
+            if candidate.exists():
+                return candidate
+
             worker_id = ""
-        shard_root = (artifact / "shards").resolve()
-        if not worker_id or "/" in worker_id or "\\" in worker_id:
+            try:
+                manifest = json.loads((root / "fleet_manifest.json").read_text(encoding="utf-8"))
+                for mapping_name in ("activeTickerToShard", "tickerToShard"):
+                    worker_id = str((manifest.get(mapping_name) or {}).get(ticker) or "")
+                    if worker_id:
+                        break
+            except (OSError, ValueError, TypeError):
+                pass
+            shard_root = (root / "shards").resolve()
+            if worker_id and "/" not in worker_id and "\\" not in worker_id:
+                shard = (shard_root / worker_id / "telemetry.sqlite3").resolve()
+                try:
+                    shard.relative_to(shard_root)
+                except ValueError:
+                    shard = None
+                if shard is not None and shard.exists():
+                    return shard
+
+            # A multi-venue run can also store per-market databases at
+            # markets/<venue>/<ticker>.  This fallback is intentionally after
+            # the manifest lookup so a large legacy markets directory is not
+            # scanned once per ticker when shard telemetry is available.
+            market_directories: list[Path] = []
+            try:
+                market_directories = [
+                    child for child in markets_root.iterdir() if child.is_dir()
+                ]
+            except OSError:
+                pass
+            for market_group in market_directories:
+                nested = (market_group / ticker / "telemetry.sqlite3").resolve()
+                try:
+                    nested.relative_to(markets_root)
+                except ValueError:
+                    continue
+                if nested.exists():
+                    return nested
+
             # Older manifests were overwritten on each screener refresh and
             # therefore forgot removed markets.  Each immutable market settings
             # snapshot retains the exact shard database path, so use it as the
-            # compatibility index for those runs.
-            try:
-                settings = json.loads(
-                    (artifact / "markets" / ticker / "settings.json").read_text(encoding="utf-8")
-                )
-                persisted = Path(str(settings.get("telemetry_sqlite_path") or "")).resolve()
-                persisted.relative_to(shard_root)
-                if persisted.exists():
-                    return persisted
-            except (OSError, ValueError, TypeError):
-                pass
-            raise KeyError(ticker)
-        shard = (shard_root / worker_id / "telemetry.sqlite3").resolve()
-        try:
-            shard.relative_to(shard_root)
-        except ValueError as exc:
-            raise KeyError(ticker) from exc
-        if not shard.exists():
-            raise KeyError(ticker)
-        return shard
+            # compatibility index for those runs.  Search both direct and
+            # venue-nested settings directories.
+            settings_candidates = [markets_root / ticker / "settings.json"]
+            settings_candidates.extend(
+                child / ticker / "settings.json" for child in market_directories
+            )
+            for settings_path in settings_candidates:
+                try:
+                    settings = json.loads(settings_path.read_text(encoding="utf-8"))
+                    persisted = Path(str(settings.get("telemetry_sqlite_path") or "")).resolve()
+                    persisted.relative_to(shard_root)
+                    if persisted.exists():
+                        return persisted
+                except (OSError, ValueError, TypeError):
+                    continue
+        raise KeyError(ticker)
 
     def _artifact_for_run(self, run: Mapping[str, Any]) -> Path:
         artifact = Path(str(run["artifactPath"])).resolve()
@@ -1389,13 +1455,19 @@ class SessionStore:
             # then refresh incrementally when activity starts.
             candidates = set(signatures)
             if not signatures:
-                legacy_paths = sorted((artifact / "markets").glob("*/telemetry.sqlite3"))
-                candidates.update(path.parent.name for path in legacy_paths)
-                try:
-                    manifest = json.loads((artifact / "fleet_manifest.json").read_text(encoding="utf-8"))
-                    candidates.update(str(item) for item in (manifest.get("tickerToShard") or {}))
-                except (OSError, ValueError, TypeError):
-                    pass
+                for root in self._artifact_roots(artifact):
+                    legacy_paths = sorted((root / "markets").glob("**/telemetry.sqlite3"))
+                    for path in legacy_paths:
+                        # markets/<ticker>/telemetry.sqlite3 and
+                        # markets/<venue>/<ticker>/telemetry.sqlite3 are both
+                        # valid; the ticker is always the parent directory.
+                        candidates.add(path.parent.name)
+                    try:
+                        manifest = json.loads((root / "fleet_manifest.json").read_text(encoding="utf-8"))
+                        for mapping_name in ("activeTickerToShard", "tickerToShard"):
+                            candidates.update(str(item) for item in (manifest.get(mapping_name) or {}))
+                    except (OSError, ValueError, TypeError):
+                        continue
             if not signatures and candidates:
                 warnings.append(
                     "Per-market activity counters are unavailable for this legacy run; telemetry was scanned once and coverage may be incomplete."

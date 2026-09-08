@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { SessionEditor } from "./session-editor";
-import type { SavedSession, ScreenerConfiguration } from "@/lib/types";
+import type { SavedSession, ScreenerConfiguration, ScreenerFilters } from "@/lib/types";
 
 // vitest runs without `globals`, so testing-library's automatic afterEach
 // cleanup is not registered; without this each render stacks up in the DOM.
@@ -74,6 +74,26 @@ describe("SessionEditor", () => {
     expect(screen.getByLabelText("Status")).toHaveValue("closed");
     fireEvent.change(screen.getByLabelText("Min spread (cents)"), { target: { value: "6" } });
     expect(screen.getByLabelText("Min spread (cents)")).toHaveValue(6);
+  });
+
+  it("shows independent Kalshi and Polymarket market scan limits", () => {
+    const venueLimited: SavedSession = {
+      ...v4Session,
+      configuration: {
+        ...v4Session.configuration,
+        schemaVersion: 5,
+        screener: {
+          general: screener as ScreenerFilters,
+          venues: { kalshi: { maxMarketsToScan: 12000 }, polymarket: { maxMarketsToScan: 2500 } },
+        } as ScreenerConfiguration,
+      },
+    };
+    render(<SessionEditor initial={[venueLimited]} />);
+    expect(screen.getByLabelText("Kalshi max markets to scan")).toHaveValue(12000);
+    expect(screen.getByLabelText("Polymarket max markets to scan")).toHaveValue(2500);
+    fireEvent.change(screen.getByLabelText("Polymarket max markets to scan"), { target: { value: "1500" } });
+    expect(screen.getByLabelText("Polymarket max markets to scan")).toHaveValue(1500);
+    expect(screen.getByLabelText("Kalshi max markets to scan")).toHaveValue(12000);
   });
 
   it("restricts the markout horizon to the recorded horizons through a select", () => {

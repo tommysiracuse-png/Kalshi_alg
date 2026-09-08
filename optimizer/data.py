@@ -225,6 +225,8 @@ def screener_settings_from_configuration(configuration: Optional[Mapping[str, An
     if not isinstance(configuration, Mapping):
         return None
     section = configuration.get("screener")
+    if isinstance(section, Mapping) and isinstance(section.get("general"), Mapping):
+        section = section.get("general")
     if not isinstance(section, Mapping) or not section:
         return None
     return normalize_screener_settings(section)

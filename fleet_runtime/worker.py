@@ -8,6 +8,7 @@ import logging
 import multiprocessing as mp
 import os
 import queue
+import threading
 try:
     import resource
 except ImportError:  # Windows has no POSIX resource module.
@@ -421,6 +422,7 @@ class FleetWorkerProcess(mp.Process):
             self.worker_id,
         )
         actors: dict[str, MarketActor] = {}
+        actors_lock = threading.Lock()
         picks: dict[str, ScreenerPick] = {}
         desired_picks: dict[str, ScreenerPick] = {}
         pending_adds: dict[str, PendingAdd] = {}
@@ -440,6 +442,9 @@ class FleetWorkerProcess(mp.Process):
         stop_requested = asyncio.Event()
         subscriptions_ready = asyncio.Event()
         add_wakeup = asyncio.Event()
+        heartbeat_thread_stop = threading.Event()
+        heartbeat_signal = {"last_async_ms": 0}
+        heartbeat_signal_lock = threading.Lock()
         reconcile_lock = asyncio.Lock()
         stream_generation = 0
         # True between the first event of a (re)connected shard stream and
@@ -538,9 +543,10 @@ class FleetWorkerProcess(mp.Process):
                 ticker=pick.market_id, source="worker", event_type="actor_started",
                 payload={"worker_id": self.worker_id},
             )
-            actors[pick.market_id] = actor
-            picks[pick.market_id] = pick
-            risk_windows[pick.market_id] = deque(maxlen=RISK_WINDOW_MAX_SAMPLES)
+            with actors_lock:
+                actors[pick.market_id] = actor
+                picks[pick.market_id] = pick
+                risk_windows[pick.market_id] = deque(maxlen=RISK_WINDOW_MAX_SAMPLES)
             cached_restored = restore_cached_polymarket_book(actor, direct)
             restored = cached_restored
             if not restored and str(getattr(metadata, "venue", "")).lower() == "polymarket":
@@ -556,11 +562,12 @@ class FleetWorkerProcess(mp.Process):
             actor.set_quoting_enabled(quoting_enabled)
 
         async def remove_actor(ticker: str) -> None:
-            actor = actors.pop(ticker, None)
-            picks.pop(ticker, None)
-            risk_windows.pop(ticker, None)
-            last_event_ms.pop(ticker, None)
-            flatten_latch.pop(ticker, None)
+            with actors_lock:
+                actor = actors.pop(ticker, None)
+                picks.pop(ticker, None)
+                risk_windows.pop(ticker, None)
+                last_event_ms.pop(ticker, None)
+                flatten_latch.pop(ticker, None)
             if actor is not None:
                 await actor.stop(verify_orders=True)
 
@@ -776,6 +783,16 @@ class FleetWorkerProcess(mp.Process):
                         stream_connected = True
                         actor = actors.get(event.market_id)
                         if actor is None:
+                            # A busy venue stream can have another event ready
+                            # immediately.  Yield even for an event that no
+                            # longer has an actor so the heartbeat and command
+                            # tasks cannot be starved by a full socket buffer.
+                            # A zero-length sleep can keep re-queueing this
+                            # callback ahead of timer callbacks when the
+                            # websocket is continuously readable.  Use a
+                            # small real delay so heartbeat/risk timers always
+                            # get a scheduling turn under a busy stream.
+                            await asyncio.sleep(0.001)
                             continue
                         actor.handle_event(event)
                         # Only venue market-data events refresh the market's
@@ -805,6 +822,13 @@ class FleetWorkerProcess(mp.Process):
                         if stream_generation != observed_generation:
                             stream_connected = False
                             break
+                        # ``async for`` does not necessarily suspend when the
+                        # websocket already has buffered data.  Without an
+                        # explicit yield a busy Kalshi stream can monopolize
+                        # this worker's event loop, preventing heartbeats and
+                        # control acknowledgements; the manager then marks a
+                        # healthy quoting worker stale and restarts it.
+                        await asyncio.sleep(0.001)
                 except Exception:
                     stream_connected = False
                     await asyncio.sleep(1.0)
@@ -850,58 +874,170 @@ class FleetWorkerProcess(mp.Process):
                         await asyncio.sleep(60.0 / max(1, len(ordered)))
                 await asyncio.sleep(max(0.1, 60.0 / max(1, len(ordered))))
 
+        def lightweight_heartbeat(now: int) -> WorkerHeartbeat:
+            """Build a watchdog-only heartbeat without touching SQLite.
+
+            The async heartbeat also includes P&L/markout and telemetry flushes.
+            Those are useful observability fields but can become expensive while
+            a busy shard is quoting.  A small thread-side heartbeat keeps the
+            manager's liveness and risk state current until the rich heartbeat
+            gets another scheduling turn.
+            """
+            with actors_lock:
+                actor_items = list(actors.items())
+            health = {
+                ticker: MarketHealth(
+                    book_available=actor.book_ready,
+                    book_age_ms=(now - actor.last_orderbook_event_timestamp_ms)
+                    if actor.last_orderbook_event_timestamp_ms else None,
+                    decision_age_ms=(now - actor.last_quote_decision_at_ms)
+                    if actor.last_quote_decision_at_ms else None,
+                    risk_mode=actor.fleet_risk_mode or "startup",
+                    risk_age_ms=(now - actor.fleet_risk_generated_at_ms)
+                    if actor.fleet_risk_generated_at_ms else None,
+                    resting_order_count=sum(
+                        1 for item in actor.orders.values() if item.has_active_resting_order
+                    ),
+                    position_units=actor.net_position_units,
+                    started_at_ms=actor.started_at_ms,
+                    fill_count=actor.session_fill_count,
+                    risk_reason=str(getattr(actor, "fleet_risk_reason", "") or ""),
+                )
+                for ticker, actor in actor_items
+            }
+            return WorkerHeartbeat(
+                self.worker_id,
+                tuple(sorted(health)),
+                health,
+                _rss_bytes(),
+                len(pending_adds),
+                max((item.book_age_ms or 0 for item in health.values()), default=0),
+                now,
+                self.venue,
+            )
+
+        def heartbeat_fallback_thread() -> None:
+            # Let the async task publish its initial heartbeat first.  If the
+            # event loop later becomes busy, this thread publishes before the
+            # manager's stale threshold; a third-of-budget wake interval gives
+            # it a fallback sample before it can recycle a healthy worker.
+            stale_budget_seconds = float(fleet.get("workerStaleSeconds", 5.0))
+            interval = max(0.25, min(heartbeat_seconds, stale_budget_seconds / 3.0))
+            while not heartbeat_thread_stop.wait(interval):
+                now = int(time.time() * 1000)
+                with heartbeat_signal_lock:
+                    last_async_ms = int(heartbeat_signal["last_async_ms"])
+                if last_async_ms and now - last_async_ms <= int(stale_budget_seconds * 500):
+                    continue
+                try:
+                    heartbeat = lightweight_heartbeat(now)
+                    self.heartbeat_queue.put(heartbeat)
+                    log.info("WORKER_HEARTBEAT_FALLBACK_SENT | actors=%d", len(heartbeat.market_health))
+                except Exception:
+                    log.exception("WORKER_HEARTBEAT_FALLBACK_ERROR")
+
         async def heartbeat_loop() -> None:
             nonlocal last_retention_ms
+            heartbeat_count = 0
+            last_heartbeat_log_ms = 0
             while not stop_requested.is_set():
                 now = int(time.time() * 1000)
-                health = {
-                    ticker: MarketHealth(
-                        book_available=actor.book_ready,
-                        book_age_ms=(now - actor.last_orderbook_event_timestamp_ms) if actor.last_orderbook_event_timestamp_ms else None,
-                        decision_age_ms=(now - actor.last_quote_decision_at_ms) if actor.last_quote_decision_at_ms else None,
-                        risk_mode=actor.fleet_risk_mode,
-                        risk_age_ms=(now - actor.fleet_risk_generated_at_ms) if actor.fleet_risk_generated_at_ms else None,
-                        resting_order_count=sum(1 for item in actor.orders.values() if item.has_active_resting_order),
-                        position_units=actor.net_position_units,
-                        started_at_ms=actor.started_at_ms,
-                        fill_count=actor.session_fill_count,
-                        order_activity={
-                            action: {name: int(value) for name, value in counters.items()}
-                            for action, counters in actor.order_activity.items()
-                        },
-                        pnl=actor.session_pnl_snapshot(),
-                        markouts=actor.session_markout_snapshot(current_ms=now),
-                        risk_reason=str(getattr(actor, "fleet_risk_reason", "") or ""),
-                    )
-                    for ticker, actor in actors.items()
-                }
-                # Markets still waiting for their actor stay visible as
-                # ``startup`` with the retry state as the reason.
-                for ticker, item in list(pending_adds.items()):
-                    if ticker in health:
-                        continue
-                    if item.attempts:
-                        reason = (
-                            f"actor start retry {item.attempts} in "
-                            f"{max(0, item.retry_at_ms - now) // 1000}s: {item.error}"
+                try:
+                    health = {
+                        ticker: MarketHealth(
+                            book_available=actor.book_ready,
+                            book_age_ms=(now - actor.last_orderbook_event_timestamp_ms) if actor.last_orderbook_event_timestamp_ms else None,
+                            decision_age_ms=(now - actor.last_quote_decision_at_ms) if actor.last_quote_decision_at_ms else None,
+                            risk_mode=actor.fleet_risk_mode,
+                            risk_age_ms=(now - actor.fleet_risk_generated_at_ms) if actor.fleet_risk_generated_at_ms else None,
+                            resting_order_count=sum(1 for item in actor.orders.values() if item.has_active_resting_order),
+                            position_units=actor.net_position_units,
+                            started_at_ms=actor.started_at_ms,
+                            fill_count=actor.session_fill_count,
+                            order_activity={
+                                action: {name: int(value) for name, value in counters.items()}
+                                for action, counters in actor.order_activity.items()
+                            },
+                            pnl=actor.session_pnl_snapshot(),
+                            markouts=actor.session_markout_snapshot(current_ms=now),
+                            risk_reason=str(getattr(actor, "fleet_risk_reason", "") or ""),
                         )
-                    else:
-                        reason = "actor start pending"
-                    health[ticker] = MarketHealth(
-                        book_available=False, book_age_ms=None, decision_age_ms=None,
-                        risk_mode="startup", risk_age_ms=None, error=reason,
-                    )
-                self.heartbeat_queue.put(WorkerHeartbeat(
-                    self.worker_id, tuple(sorted(actors)), health, _rss_bytes(),
-                    len(pending_adds), max((item.book_age_ms or 0 for item in health.values()), default=0), now,
-                    self.venue,
-                ))
-                if actors:
-                    telemetry = next(iter(actors.values())).telemetry_store
-                    telemetry.flush()
-                    if now - last_retention_ms >= 86_400_000:
-                        telemetry.apply_retention(now_timestamp_ms=now, raw_days=7)
-                        last_retention_ms = now
+                        for ticker, actor in actors.items()
+                    }
+                    # Markets still waiting for their actor stay visible as
+                    # ``startup`` with the retry state as the reason.
+                    for ticker, item in list(pending_adds.items()):
+                        if ticker in health:
+                            continue
+                        if item.attempts:
+                            reason = (
+                                f"actor start retry {item.attempts} in "
+                                f"{max(0, item.retry_at_ms - now) // 1000}s: {item.error}"
+                            )
+                        else:
+                            reason = "actor start pending"
+                        health[ticker] = MarketHealth(
+                            book_available=False, book_age_ms=None, decision_age_ms=None,
+                            risk_mode="startup", risk_age_ms=None, error=reason,
+                        )
+                    self.heartbeat_queue.put(WorkerHeartbeat(
+                        self.worker_id, tuple(sorted(actors)), health, _rss_bytes(),
+                        len(pending_adds), max((item.book_age_ms or 0 for item in health.values()), default=0), now,
+                        self.venue,
+                    ))
+                    with heartbeat_signal_lock:
+                        heartbeat_signal["last_async_ms"] = now
+                    heartbeat_count += 1
+                    if heartbeat_count == 1 or now - last_heartbeat_log_ms >= 30_000:
+                        log.info(
+                            "WORKER_HEARTBEAT_SENT | count=%d actors=%d pending=%d",
+                            heartbeat_count, len(actors), len(pending_adds),
+                        )
+                        last_heartbeat_log_ms = now
+                    if actors:
+                        telemetry = next(iter(actors.values())).telemetry_store
+                        telemetry.flush()
+                        if now - last_retention_ms >= 86_400_000:
+                            telemetry.apply_retention(now_timestamp_ms=now, raw_days=7)
+                            last_retention_ms = now
+                except Exception as exc:
+                    # A telemetry/metrics failure must not silently terminate
+                    # the heartbeat task.  Keep the manager informed with a
+                    # minimal health payload so a quoting worker is not
+                    # repeatedly recycled as stale.
+                    log.exception("WORKER_HEARTBEAT_ERROR | error=%s", exc)
+                    fallback_health = {
+                        ticker: MarketHealth(
+                            book_available=actor.book_ready,
+                            book_age_ms=(now - actor.last_orderbook_event_timestamp_ms)
+                            if actor.last_orderbook_event_timestamp_ms else None,
+                            decision_age_ms=(now - actor.last_quote_decision_at_ms)
+                            if actor.last_quote_decision_at_ms else None,
+                            risk_mode=actor.fleet_risk_mode,
+                            risk_age_ms=(now - actor.fleet_risk_generated_at_ms)
+                            if actor.fleet_risk_generated_at_ms else None,
+                            position_units=actor.net_position_units,
+                            started_at_ms=actor.started_at_ms,
+                            risk_reason=str(getattr(actor, "fleet_risk_reason", "") or ""),
+                        )
+                        for ticker, actor in actors.items()
+                    }
+                    try:
+                        self.heartbeat_queue.put(WorkerHeartbeat(
+                            self.worker_id, tuple(sorted(actors)), fallback_health, _rss_bytes(),
+                            len(pending_adds), 0, now, self.venue,
+                        ))
+                        with heartbeat_signal_lock:
+                            heartbeat_signal["last_async_ms"] = now
+                        heartbeat_count += 1
+                        if heartbeat_count == 1 or now - last_heartbeat_log_ms >= 30_000:
+                            log.info(
+                                "WORKER_HEARTBEAT_SENT | count=%d actors=%d pending=%d fallback=true",
+                                heartbeat_count, len(actors), len(pending_adds),
+                            )
+                            last_heartbeat_log_ms = now
+                    except Exception:
+                        log.exception("WORKER_HEARTBEAT_FALLBACK_ERROR")
                 await asyncio.sleep(heartbeat_seconds)
 
         tasks = [
@@ -911,9 +1047,16 @@ class FleetWorkerProcess(mp.Process):
             asyncio.create_task(risk_loop()),
             asyncio.create_task(heartbeat_loop()),
         ]
+        heartbeat_thread = threading.Thread(
+            target=heartbeat_fallback_thread,
+            name=f"{self.worker_id}-heartbeat",
+            daemon=True,
+        )
+        heartbeat_thread.start()
         try:
             await stop_requested.wait()
         finally:
+            heartbeat_thread_stop.set()
             for actor in actors.values():
                 actor.set_quoting_enabled(False)
             # A dead or wedged broker must not hold the shutdown: bound every

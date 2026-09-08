@@ -118,6 +118,14 @@ class FleetCapacity:
     reduction_only: bool = True
     error: str = ""
     venue: str = "kalshi"
+    capacity_market_limit: int = 0
+    capacity_limited: bool = False
+    omitted_markets: int = 0
+    omitted_reason: str = ""
+    global_max_bots: Optional[int] = None
+    venue_max_bots: Optional[int] = None
+    priority: Optional[int] = None
+    global_slots_remaining: Optional[int] = None
 
 
 @dataclass(frozen=True)
@@ -182,6 +190,10 @@ class ScreenerUpdate:
     @property
     def pick_by_market_key(self) -> Dict[tuple[str, str], ScreenerPick]:
         return {pick.market_key: pick for pick in self.picks}
+
+    @property
+    def venue(self) -> str:
+        return str(self.picks[0].venue if self.picks else "kalshi").lower()
 
 
 @dataclass(frozen=True)

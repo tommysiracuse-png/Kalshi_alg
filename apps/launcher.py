@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import argparse
 import logging
 import os
 import queue
@@ -17,6 +18,7 @@ from core.bot_manager import BotManagerConfig
 from clients.factory import build_client_config
 from clients.models import AccountPositionQuery
 from fleet_runtime.manager import ShardedBotManager
+from fleet_runtime.multi_manager import MultiVenueBotManager
 from core.fleet_models import ScreenerPick, ScreenerUpdate
 from screeners.kalshi_screener import build_settings_from_configuration as build_screener_settings
 from core.market_classes import HistorySeriesStatsSource, build_market_class_resolver
@@ -29,14 +31,15 @@ from apps.lip_launcher import (
 )
 from core.runtime_control import ControlRequest, ControlServer, STATUS_SCHEMA_VERSION
 from portfolio.portfolio_monitor import PortfolioMonitorConfig
+from portfolio.multi_portfolio import aggregate_portfolio_status
 from venue_runtime import build_runtime
-from core.session_config import default_session_configuration, validate_session_configuration
+from core.session_config import default_session_configuration, validate_session_configuration, enabled_venues, effective_screener_configuration
 
 
 LOGGER = logging.getLogger(__name__)
 
 
-def screener_settings_for_session(session_configuration: Dict[str, object], max_bots: int) -> Dict[str, object]:
+def screener_settings_for_session(session_configuration: Dict[str, object], max_bots: int, venue: str = "kalshi") -> Dict[str, object]:
     """Screener settings the fleet runs with: the session's ``screener`` section plus the ``maxBots`` floor.
 
     The direct-CLI path passes ``default_session_configuration()`` (its
@@ -44,7 +47,7 @@ def screener_settings_for_session(session_configuration: Dict[str, object], max_
     screens exactly as before sessions carried the section. ``top_n`` keeps
     its historical semantics: the export must hold at least ``maxBots`` rows.
     """
-    settings = build_screener_settings(session_configuration)
+    settings = build_screener_settings(session_configuration, venue)
     if int(max_bots) > 0:
         settings["top_n"] = max(int(settings["top_n"]), int(max_bots))
     return settings
@@ -63,7 +66,15 @@ class Launcher:
                 useDemo=bool(arguments.use_demo), dryRun=bool(arguments.dry_run),
                 subaccount=int(arguments.subaccount or 0),
             )
-            direct_configuration["venue"] = str(getattr(arguments, "venue", "kalshi") or "kalshi").lower()
+            requested = [item.strip().lower() for item in str(getattr(arguments, "venues", "") or "").split(",") if item.strip()]
+            if not requested:
+                requested = [str(getattr(arguments, "venue", "kalshi") or "kalshi").lower()]
+            if any(item not in {"kalshi", "polymarket"} for item in requested):
+                raise ValueError("unsupported venue in --venues")
+            direct_configuration["venue"] = requested[0]
+            for name in ("kalshi", "polymarket"):
+                direct_configuration["venues"][name]["enabled"] = name in requested
+                direct_configuration["venues"][name]["maxBots"] = int(arguments.max_bots)
             direct_configuration["launcher"].update(
                 fixedTicker=str(getattr(arguments, "fixed_ticker", "") or ""),
                 maxBots=int(arguments.max_bots),
@@ -113,105 +124,64 @@ class Launcher:
             else self.bot_script_path.parent / "market_risk_profiler.py"
         )
 
-        self.venue = str(self.session_configuration.get("venue", "kalshi"))
-        if self.venue == "polymarket":
-            polymarket_private_key_path = (
-                os.getenv("POLYMARKET_PRIVATE_KEY_PATH", "").strip()
-                or private_key_path
-                or ""
-            )
-            polymarket_private_key = os.getenv("POLYMARKET_PRIVATE_KEY", "").strip()
-            polymarket_values = {
-                "private_key": polymarket_private_key,
-                "private_key_path": polymarket_private_key_path,
-                "gamma_base_url": os.getenv("POLYMARKET_GAMMA_URL", "https://gamma-api.polymarket.com").strip(),
-                "clob_base_url": os.getenv("POLYMARKET_CLOB_URL", "https://clob.polymarket.com").strip(),
-                "data_base_url": os.getenv("POLYMARKET_DATA_URL", "https://data-api.polymarket.com").strip(),
-                "websocket_url": os.getenv(
-                    "POLYMARKET_MARKET_WS_URL",
-                    "wss://ws-subscriptions-clob.polymarket.com/ws/market",
-                ).strip(),
-                "user_websocket_url": os.getenv(
-                    "POLYMARKET_USER_WS_URL",
-                    "wss://ws-subscriptions-clob.polymarket.com/ws/user",
-                ).strip(),
-                "signature_type": int(os.getenv("POLYMARKET_SIGNATURE_TYPE", "0") or 0),
-                "api_key": api_key_id or os.getenv("POLYMARKET_API_KEY", "").strip()
-                or os.getenv("POLYMARKET_API_KEY_ID", "").strip(),
-                "api_secret": os.getenv("POLYMARKET_API_SECRET", "").strip(),
-                "api_passphrase": os.getenv("POLYMARKET_API_PASSPHRASE", "").strip(),
-                "proxy_url": str(getattr(arguments, "polymarket_proxy_url", "") or "").strip()
-                or os.getenv("POLYMARKET_PROXY_URL", "").strip(),
-                "funder_address": str(getattr(arguments, "polymarket_funder_address", "") or "").strip()
-                or os.getenv("POLYMARKET_FUNDER_ADDRESS", "").strip(),
-                "catalog_path": str(getattr(arguments, "polymarket_catalog_path", "") or "").strip()
-                or os.getenv("POLYMARKET_CATALOG_PATH", "").strip()
-                or str(self.runtime_dir / "polymarket_catalog.sqlite3"),
-                "book_cache_path": str(getattr(arguments, "polymarket_book_cache_path", "") or "").strip()
-                or os.getenv("POLYMARKET_BOOK_CACHE_PATH", "").strip()
-                or str(self.runtime_dir / "polymarket_books.sqlite3"),
-                "scan_mode": str(getattr(arguments, "polymarket_scan_mode", "") or "").strip()
-                or os.getenv("POLYMARKET_SCAN_MODE", "catalog_plus_cached_books").strip(),
-                "rate_limit_profile": str(getattr(arguments, "polymarket_rate_limit_profile", "") or "").strip()
-                or os.getenv("POLYMARKET_RATE_LIMIT_PROFILE", "standard").strip(),
-                "rest_timeout_seconds": float(getattr(arguments, "polymarket_rest_timeout_seconds", 0.0) or 0.0)
-                or float(os.getenv("POLYMARKET_REST_TIMEOUT_SECONDS", "15") or 15),
-                "rest_connect_timeout_seconds": float(
-                    os.getenv("POLYMARKET_REST_CONNECT_TIMEOUT_SECONDS", "10") or 10
-                ),
-                "dry_run": bool(arguments.dry_run),
-                "public_only": not bool(polymarket_private_key or polymarket_private_key_path),
-            }
-            client_config = build_client_config(self.venue, polymarket_values)
-            cleanup_credentials = bool(polymarket_private_key or polymarket_private_key_path)
-        else:
-            client_config = build_client_config(self.venue,
-                api_key_id=api_key_id or "",
-                private_key_path=private_key_path or "",
-                public_only=not bool(api_key_id and private_key_path),
-                use_demo_environment=bool(arguments.use_demo),
-                dry_run=bool(arguments.dry_run),
-                subaccount_number=int(arguments.subaccount or 0),
-            )
-            cleanup_credentials = bool(api_key_id and private_key_path)
-        screener_settings = screener_settings_for_session(self.session_configuration, int(arguments.max_bots))
+        self.enabled_venues = enabled_venues(self.session_configuration)
+        self.venue = self.enabled_venues[0]
         fleet_runtime = self.session_configuration.get("fleetRuntime") or {}
-        self.client_config = client_config
-        runtime = build_runtime(
-            self.venue,
-            client_config=client_config,
-            screener_settings=screener_settings,
-            screener_kwargs={
-                "output_path": self.screen_path,
-                "default_yes_budget_cents": arguments.yes_budget_cents,
-                "default_no_budget_cents": arguments.no_budget_cents,
-                "max_bots": int(arguments.max_bots),
-                "minimum_carryover_value_cents": arguments.minimum_carryover_value_cents,
-                "cash_reserve_fraction": float(fleet_runtime.get("cashReserveFraction", 0.0)),
-                "allocation_oversubscription": float(fleet_runtime.get("allocationOversubscription", 1.0)),
-                "yes_budget_column": arguments.yes_budget_column,
-                "no_budget_column": arguments.no_budget_column,
+        runtimes = {}
+        manager_configs = {}
+        portfolio_map = {}
+        client_configs = {}
+        cleanup_by_venue = {}
+        for venue in self.enabled_venues:
+            if venue == "polymarket":
+                private_path = os.getenv("POLYMARKET_PRIVATE_KEY_PATH", "").strip() or private_key_path or ""
+                private_value = os.getenv("POLYMARKET_PRIVATE_KEY", "").strip()
+                values = {
+                    "private_key": private_value, "private_key_path": private_path,
+                    "gamma_base_url": os.getenv("POLYMARKET_GAMMA_URL", "https://gamma-api.polymarket.com").strip(),
+                    "clob_base_url": os.getenv("POLYMARKET_CLOB_URL", "https://clob.polymarket.com").strip(),
+                    "data_base_url": os.getenv("POLYMARKET_DATA_URL", "https://data-api.polymarket.com").strip(),
+                    "websocket_url": os.getenv("POLYMARKET_MARKET_WS_URL", "wss://ws-subscriptions-clob.polymarket.com/ws/market").strip(),
+                    "user_websocket_url": os.getenv("POLYMARKET_USER_WS_URL", "wss://ws-subscriptions-clob.polymarket.com/ws/user").strip(),
+                    "signature_type": int(os.getenv("POLYMARKET_SIGNATURE_TYPE", "0") or 0),
+                    "api_key": api_key_id or os.getenv("POLYMARKET_API_KEY", "").strip() or os.getenv("POLYMARKET_API_KEY_ID", "").strip(),
+                    "api_secret": os.getenv("POLYMARKET_API_SECRET", "").strip(),
+                    "api_passphrase": os.getenv("POLYMARKET_API_PASSPHRASE", "").strip(),
+                    "proxy_url": str(getattr(arguments, "polymarket_proxy_url", "") or "").strip() or os.getenv("POLYMARKET_PROXY_URL", "").strip(),
+                    "funder_address": str(getattr(arguments, "polymarket_funder_address", "") or "").strip() or os.getenv("POLYMARKET_FUNDER_ADDRESS", "").strip(),
+                    "catalog_path": str(self.runtime_dir / "polymarket_catalog.sqlite3"),
+                    "book_cache_path": str(self.runtime_dir / "polymarket_books.sqlite3"),
+                    "scan_mode": os.getenv("POLYMARKET_SCAN_MODE", "catalog_plus_cached_books").strip(),
+                    "rate_limit_profile": os.getenv("POLYMARKET_RATE_LIMIT_PROFILE", "standard").strip(),
+                    "rest_timeout_seconds": float(os.getenv("POLYMARKET_REST_TIMEOUT_SECONDS", "15") or 15),
+                    "rest_connect_timeout_seconds": float(os.getenv("POLYMARKET_REST_CONNECT_TIMEOUT_SECONDS", "10") or 10),
+                    "dry_run": bool(arguments.dry_run), "public_only": not bool(private_value or private_path),
+                }
+                values.update({key: value for key, value in (self.session_configuration["venues"][venue].get("client") or {}).items() if key not in {"private_key", "private_key_path", "api_secret", "api_passphrase"}})
+                cleanup_by_venue[venue] = bool(private_value or private_path)
+                client_config = build_client_config(venue, values)
+            else:
+                client_config = build_client_config(venue, api_key_id=api_key_id or "", private_key_path=private_key_path or "", public_only=not bool(api_key_id and private_key_path), use_demo_environment=bool(arguments.use_demo), dry_run=bool(arguments.dry_run), subaccount_number=int(arguments.subaccount or 0))
+                cleanup_by_venue[venue] = bool(api_key_id and private_key_path)
+            client_configs[venue] = client_config
+            max_bots = int(self.session_configuration["venues"][venue]["maxBots"])
+            screener_settings = screener_settings_for_session(self.session_configuration, max_bots, venue)
+            output = self.screen_path.parent / "screener" / venue / self.screen_path.name
+            runtime = build_runtime(venue, client_config=client_config, screener_settings=screener_settings, screener_kwargs={
+                "output_path": output, "default_yes_budget_cents": arguments.yes_budget_cents, "default_no_budget_cents": arguments.no_budget_cents,
+                "max_bots": max_bots, "minimum_carryover_value_cents": arguments.minimum_carryover_value_cents,
+                "cash_reserve_fraction": float(fleet_runtime.get("cashReserveFraction", 0.0)), "allocation_oversubscription": float(fleet_runtime.get("allocationOversubscription", 1.0)),
+                "yes_budget_column": arguments.yes_budget_column, "no_budget_column": arguments.no_budget_column,
                 "disabled_market_ids": lambda: set(load_disable_list(self.watchdog_disable_file)),
-                "market_class_resolver": build_market_class_resolver(
-                    self.session_configuration,
-                    series_stats=HistorySeriesStatsSource(Path(__file__).resolve().parent.parent / "history_data" / "history.sqlite3"),
-                ),
-            },
-            portfolio_config=PortfolioMonitorConfig(
-                subaccount_number=int(arguments.subaccount or 0),
-                analytics_path=self.runtime_dir / "portfolio_analytics.sqlite3",
-            ),
-        )
-        self.client = runtime.client
-        self.portfolio_client = runtime.client
-        self.screener = runtime.screener
-        self.portfolio = runtime.portfolio
-        self.manager = ShardedBotManager(
-            BotManagerConfig(
+                "market_class_resolver": build_market_class_resolver(self.session_configuration, series_stats=HistorySeriesStatsSource(Path(__file__).resolve().parent.parent / "history_data" / "history.sqlite3")),
+            }, portfolio_config=PortfolioMonitorConfig(subaccount_number=int(arguments.subaccount or 0), analytics_path=self.runtime_dir / f"portfolio_{venue}.sqlite3"))
+            runtimes[venue] = runtime
+            portfolio_map[venue] = runtime.portfolio
+            manager_configs[venue] = BotManagerConfig(
                 bot_script_path=self.bot_script_path,
-                logs_directory=self.logs_directory,
-                runtime_dir=self.runtime_dir,
-                watchdog_state_dir=self.watchdog_state_dir,
+                logs_directory=self.logs_directory / venue,
+                runtime_dir=self.runtime_dir / venue,
+                watchdog_state_dir=self.watchdog_state_dir / venue,
                 watchdog_disable_file=self.watchdog_disable_file,
                 watchdog_runner_script_path=watchdog_runner,
                 watchdog_profiler_script_path=watchdog_profiler,
@@ -230,12 +200,31 @@ class Launcher:
                 watchdog_confidence_reduction_threshold=arguments.watchdog_confidence_reduction_threshold,
                 watchdog_confidence_flatten_threshold=arguments.watchdog_confidence_flatten_threshold,
                 session_configuration=self.session_configuration,
-                venue=self.venue,
+                venue=venue,
                 client_config=client_config,
-                bot_artifacts_root=self.run_artifact_path,
-            ),
-            cleanup_client=self.client if cleanup_credentials else None,
+                bot_artifacts_root=(self.run_artifact_path / venue) if self.run_artifact_path else None,
+                venue_max_bots=int(self.session_configuration["venues"][venue]["maxBots"]),
+            )
+        self.runtimes = runtimes
+        self.client_configs = client_configs
+        self.clients = {name: runtime.client for name, runtime in runtimes.items()}
+        self.screeners = {name: runtime.screener for name, runtime in runtimes.items()}
+        self.portfolios = portfolio_map
+        self.managers = {
+            name: ShardedBotManager(manager_configs[name], cleanup_client=self.clients[name] if cleanup_by_venue.get(name) else None)
+            for name in manager_configs
+        }
+        self.manager = MultiVenueBotManager(
+            self.managers,
+            global_max_bots=int(self.session_configuration["launcher"]["maxBots"]),
+            venue_configs=self.session_configuration["venues"],
         )
+        # Compatibility aliases for single-venue integrations.
+        self.client_config = self.client_configs[self.venue]
+        self.client = self.clients[self.venue]
+        self.portfolio_client = self.client
+        self.screener = self.screeners[self.venue]
+        self.portfolio = self.portfolios[self.venue]
         self.control_requests: "queue.Queue[ControlRequest]" = queue.Queue()
         self.shutdown_requested = asyncio.Event()
         self.started_at_ms = int((session_run or {}).get("startedAt") or time.time() * 1000)
@@ -247,7 +236,8 @@ class Launcher:
         self.status_path = self.runtime_dir / "launcher_status.json"
         self.socket_path = self.runtime_dir / "launcher.sock"
         self._portfolio_task: Optional["asyncio.Task[bool]"] = None
-        self._active_screener_record_id: Optional[str] = None
+        self._pending_updates: Dict[str, ScreenerUpdate] = {}
+        self._active_screener_record_ids: Dict[str, str] = {}
         self._run_error: Optional[str] = None
         self._last_metric_sample_ms = 0
         self._observability_warning: Optional[str] = None
@@ -271,7 +261,7 @@ class Launcher:
     # other event is logged at INFO.
     MANAGER_EVENT_WARNINGS = frozenset({
         "broker_restarted", "worker_recovery_failed", "runtime_capacity_fail_closed",
-        "capacity_fail_closed", "shutdown_cleanup_failed", "update_skipped_shutdown",
+        "capacity_fail_closed", "capacity_partial", "shutdown_cleanup_failed", "update_skipped_shutdown",
     })
     MANAGER_EVENT_RUN_LOG = MANAGER_EVENT_WARNINGS | frozenset({
         "admission_recovered", "worker_restarted", "fleet_shutdown_cleanup_verified",
@@ -303,15 +293,17 @@ class Launcher:
 
     def _drain_manager_events(self) -> None:
         """Log every queued manager event instead of discarding it."""
-        events = getattr(self.manager, "events", None)
-        if events is None:
-            return
-        while not events.empty():
-            try:
-                event = events.get_nowait()
-            except asyncio.QueueEmpty:
-                break
-            self._log_manager_event(event)
+        queues = [getattr(self.manager, "events", None)]
+        queues.extend(getattr(manager, "events", None) for manager in getattr(self, "managers", {}).values())
+        for events in queues:
+            if events is None:
+                continue
+            while not events.empty():
+                try:
+                    event = events.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                self._log_manager_event(event)
 
     def _save_screener_snapshot(self) -> None:
         if self.run_artifact_path is None:
@@ -322,9 +314,17 @@ class Launcher:
         generated = int(snapshot.get("generatedAtMs") or time.time() * 1000)
         atomic_write_json(target / "latest.json", snapshot)
         atomic_write_json(target / f"{generated}.json", snapshot)
+        for venue, screener in self.screeners.items():
+            venue_target = target / venue
+            venue_target.mkdir(parents=True, exist_ok=True)
+            venue_snapshot = screener.status_snapshot()
+            venue_generated = int(venue_snapshot.get("generatedAtMs") or time.time() * 1000)
+            atomic_write_json(venue_target / "latest.json", venue_snapshot)
+            atomic_write_json(venue_target / f"{venue_generated}.json", venue_snapshot)
 
     def status_snapshot(self, lifecycle: str = "running") -> Dict[str, object]:
         manager_status = self.manager.status_snapshot()
+        portfolio_statuses = {venue: portfolio.status_snapshot() for venue, portfolio in self.portfolios.items()}
         now_ms = int(time.time() * 1000)
         disabled = load_disable_list(self.watchdog_disable_file)
         counts = dict(manager_status["counts"])
@@ -360,8 +360,18 @@ class Launcher:
             "allocation": manager_status.get("allocation"),
             "manager": manager_monitoring,
             "clients": manager_status.get("clients", []),
-            "screener": self.screener.status_snapshot(),
-            "portfolio": self.portfolio.status_snapshot(),
+            "screener": self.screeners[self.enabled_venues[0]].status_snapshot(),
+            "portfolio": self.portfolios[self.enabled_venues[0]].status_snapshot(),
+            "portfolioAggregate": aggregate_portfolio_status(portfolio_statuses, list(self.enabled_venues)),
+            "venues": {
+                venue: {
+                    "screener": screener.status_snapshot(),
+                    "portfolio": portfolio_statuses[venue],
+                    "manager": manager_status.get("venues", {}).get(venue, {}),
+                    "capacity": manager_status.get("capacity", {}).get(venue),
+                }
+                for venue, screener in self.screeners.items()
+            },
             "disabledSummary": {"count": len(disabled)},
         }
         if self.session_run:
@@ -410,7 +420,7 @@ class Launcher:
         with self.status_lock:
             return dict(self.latest_status)
 
-    async def _startup_exchange_positions(self) -> Optional[list]:
+    async def _startup_exchange_positions(self, venue: Optional[str] = None) -> Optional[list]:
         """The account's open exchange positions for the restart carryover.
 
         Read once at fleet start through the launcher's own client (the same
@@ -419,17 +429,22 @@ class Launcher:
         market.  ``None`` when unavailable (no credentials, venue error): the
         start proceeds without carryover and the reason is surfaced.
         """
+        selected_venue = str(venue or getattr(self, "venue", "kalshi")).lower()
+        clients = getattr(self, "clients", {})
+        client_configs = getattr(self, "client_configs", {})
+        client = clients.get(selected_venue, getattr(self, "client", None))
+        client_config = client_configs.get(selected_venue, getattr(self, "client_config", None))
         configured_auth = bool(self.api_key_id and self.private_key_path)
-        if getattr(self, "venue", "kalshi") == "polymarket":
+        if selected_venue == "polymarket":
             configured_auth = bool(
-                getattr(self.client_config, "private_key", "")
-                or getattr(self.client_config, "private_key_path", "")
-            ) and not bool(getattr(self.client_config, "public_only", False))
+                getattr(client_config, "private_key", "")
+                or getattr(client_config, "private_key_path", "")
+            ) and not bool(getattr(client_config, "public_only", False))
         if not configured_auth:
             return None
         try:
             positions = await asyncio.to_thread(
-                self.client.list_account_positions, AccountPositionQuery(nonzero_only=True),
+                client.list_account_positions, AccountPositionQuery(nonzero_only=True),
             )
         except Exception as exc:
             message = f"exchange positions unavailable at start; restart carryover skipped: {exc}"
@@ -547,7 +562,15 @@ class Launcher:
         await self.manager.apply_update(update)
         self._save_screener_snapshot()
 
-    async def _seed_fixed_ticker(self, ticker: str) -> None:
+    async def _seed_fixed_ticker(self, ticker: str, venue: str | None = None) -> None:
+        if venue:
+            old = (self.venue, self.client, self.client_config, self.screener, self.portfolio, self.manager)
+            self.venue, self.client, self.client_config = venue, self.clients[venue], self.client_configs[venue]
+            self.screener, self.portfolio, self.manager = self.screeners[venue], self.portfolios[venue], self.managers[venue]
+            try:
+                return await self._seed_fixed_ticker(ticker)
+            finally:
+                self.venue, self.client, self.client_config, self.screener, self.portfolio, self.manager = old
         pick = ScreenerPick(
             market_id=ticker,
             title=ticker,
@@ -569,15 +592,24 @@ class Launcher:
         await self.manager.apply_update(update)
         self._save_screener_snapshot()
 
-    async def refresh(self, reason: str) -> bool:
+    async def _refresh_one(self, reason: str, venue: str | None = None, apply_update: bool = True) -> bool:
+        selected_venue = str(venue or self.venue).lower()
+        if selected_venue not in self.screeners:
+            raise ValueError(f"unknown venue: {selected_venue}")
+        # Do not switch the launcher's compatibility aliases here.  A refresh
+        # can run for every enabled venue at once, and those aliases are shared
+        # mutable state.  Keeping all objects local makes a slow Polymarket
+        # request independent from Kalshi's screener and portfolio state.
+        screener = self.screeners[selected_venue]
+        manager = self.managers[selected_venue]
         # Fleet start: every open exchange position becomes a (reduce-only)
         # carryover pick even when the screener does not re-pick its market.
-        exchange_positions = await self._startup_exchange_positions() if reason == "startup" else None
+        exchange_positions = await self._startup_exchange_positions(selected_venue) if reason == "startup" else None
         traded_tickers = await self._fleet_traded_tickers() if exchange_positions else None
         record_id: Optional[str] = None
         if self.session_store is not None and self.run_id:
             try:
-                configured_limit = self.screener.settings.get("max_markets_to_scan")
+                configured_limit = screener.settings.get("max_markets_to_scan")
                 record_id = self.session_store.start_screener_run(
                     self.run_id,
                     reason=reason,
@@ -585,12 +617,12 @@ class Launcher:
                     configured_limit=int(configured_limit) if configured_limit is not None else None,
                     artifact_path=str(self.run_artifact_path) if self.run_artifact_path else None,
                 )
-                self._active_screener_record_id = record_id
+                self._active_screener_record_ids[selected_venue] = record_id
             except Exception as exc:
                 self._record_observability_failure("start screener history", exc)
         refresh_task = asyncio.create_task(
-            self.screener.refresh(
-                self.manager.current_picks, reason=reason, exchange_positions=exchange_positions,
+            screener.refresh(
+                manager.current_picks, reason=reason, exchange_positions=exchange_positions,
                 traded_tickers=traded_tickers,
             )
         )
@@ -602,8 +634,8 @@ class Launcher:
                 except asyncio.TimeoutError:
                     pass
             update = await refresh_task
-            event = await self.screener.events.get()
-            run_metrics = self.screener.last_run_metrics()
+            event = await screener.events.get()
+            run_metrics = screener.last_run_metrics()
             if record_id and self.session_store is not None:
                 try:
                     self.session_store.finish_screener_run(
@@ -613,7 +645,7 @@ class Launcher:
                 except Exception as exc:
                     self._record_observability_failure("finish screener history", exc)
                 record_id = None
-                self._active_screener_record_id = None
+                self._active_screener_record_ids.pop(selected_venue, None)
             self._save_screener_snapshot()
             if self.shutdown_requested.is_set():
                 return False
@@ -625,7 +657,10 @@ class Launcher:
                     else None
                 )
                 return False
-            await self.manager.apply_update(update)
+            if apply_update:
+                await self.manager.apply_updates({selected_venue: update})
+            else:
+                self._pending_updates[selected_venue] = update
             self.last_error = None
             self.next_refresh_at = (
                 time.time() + self.arguments.refresh_interval_seconds
@@ -634,16 +669,98 @@ class Launcher:
             )
             return True
         except asyncio.CancelledError:
+            if not refresh_task.done():
+                refresh_task.cancel()
+                try:
+                    await refresh_task
+                except (asyncio.CancelledError, Exception):
+                    pass
             if record_id and self.session_store is not None:
                 try:
                     self.session_store.finish_screener_run(
                         record_id, status="interrupted",
-                        metrics=self.screener.last_run_metrics(),
+                        metrics=screener.last_run_metrics(),
                     )
                 except Exception as exc:
                     self._record_observability_failure("interrupt screener history", exc)
-                self._active_screener_record_id = None
+                self._active_screener_record_ids.pop(selected_venue, None)
             raise
+        except Exception as exc:
+            # A status/coordination failure must not leave a durable screener
+            # record marked ``running`` forever.  The other venue can still
+            # complete and launch its own bots.
+            if not refresh_task.done():
+                refresh_task.cancel()
+                try:
+                    await refresh_task
+                except (asyncio.CancelledError, Exception):
+                    pass
+            if record_id and self.session_store is not None:
+                try:
+                    metrics = dict(screener.last_run_metrics() or {})
+                    metrics.setdefault("startedAtMs", int(time.time() * 1000))
+                    metrics.setdefault("durationMs", 0)
+                    metrics["error"] = str(exc)
+                    self.session_store.finish_screener_run(
+                        record_id, status="failed", metrics=metrics,
+                    )
+                except Exception as finish_exc:
+                    self._record_observability_failure("finish screener history", finish_exc)
+                self._active_screener_record_ids.pop(selected_venue, None)
+            LOGGER.exception("venue screener coordination failed venue=%s", selected_venue)
+            self.last_error = str(exc)
+            return False
+
+    async def refresh(self, reason: str) -> bool:
+        if len(self.enabled_venues) <= 1:
+            return await self._refresh_one(reason)
+        self._pending_updates = {}
+
+        async def run_venue(item: str) -> tuple[str, object]:
+            try:
+                return item, await self._refresh_one(reason, item, False)
+            except Exception as exc:
+                return item, exc
+
+        # Consume completions as they arrive.  A fast Kalshi scan can therefore
+        # launch/reconcile its bots while a slow or unavailable Polymarket API
+        # is still retrying.  Each partial allocation includes the other
+        # venue's current picks, so the global bot ceiling remains enforced.
+        tasks = {asyncio.create_task(run_venue(item)) for item in self.enabled_venues}
+        updates_ok = False
+        try:
+            # A fast venue may launch workers while another venue's screener
+            # is still scanning.  Keep each manager's heartbeat/control loop
+            # running during that wait; otherwise the slow scan blocks
+            # ``monitor_once`` until the startup hard cap expires and the
+            # already-quoting fast-venue workers are recycled as stale.
+            pending = set(tasks)
+            while pending:
+                completed, pending = await asyncio.wait(
+                    pending, timeout=0.5, return_when=asyncio.FIRST_COMPLETED,
+                )
+                for task in completed:
+                    item, result = task.result()
+                    if isinstance(result, Exception):
+                        LOGGER.warning("venue refresh failed venue=%s: %s", item, result)
+                        self.last_error = str(result)
+                        continue
+                    updates_ok = updates_ok or bool(result)
+                    update = self._pending_updates.pop(item, None)
+                    if update is not None and not self.shutdown_requested.is_set():
+                        await self.manager.apply_updates({item: update})
+                if not self.shutdown_requested.is_set():
+                    await self.manager.monitor_once()
+                    self._drain_manager_events()
+                    self.publish_status("running")
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            pending_tasks = [task for task in tasks if not task.done()]
+            if pending_tasks:
+                await asyncio.gather(*pending_tasks, return_exceptions=True)
+        return updates_ok
 
     async def _handle_control(self, request: ControlRequest) -> None:
         self.pending_action = {
@@ -653,7 +770,7 @@ class Launcher:
             "receivedAt": request.received_at_ms,
         }
         try:
-            known = set(self.manager.current_picks) | set(load_disable_list(self.watchdog_disable_file))
+            known = {key[1] if isinstance(key, tuple) else key for key in self.manager.current_picks} | set(load_disable_list(self.watchdog_disable_file))
             try:
                 known.update(
                     pick.ticker
@@ -734,15 +851,27 @@ class Launcher:
                 except (ValueError, OSError):
                     pass
         try:
-            self._portfolio_task = asyncio.create_task(self.portfolio.refresh())
+            self._portfolio_tasks = {venue: asyncio.create_task(portfolio.refresh()) for venue, portfolio in self.portfolios.items()}
+            self._portfolio_task = self._portfolio_tasks.get(self.venue)
             fixed_ticker = str(getattr(self.arguments, "fixed_ticker", "") or "").strip()
             if fixed_ticker:
-                await self._seed_fixed_ticker(fixed_ticker)
+                for venue in self.enabled_venues:
+                    await self._seed_fixed_ticker(fixed_ticker, venue)
                 self.next_refresh_at = None
             elif self.arguments.run_screener_on_start:
                 await self.refresh("startup")
             else:
-                await self._seed_from_csv()
+                for venue in self.enabled_venues:
+                    if venue == self.venue:
+                        await self._seed_from_csv()
+                    else:
+                        old = (self.venue, self.client, self.client_config, self.screener, self.portfolio, self.manager)
+                        self.venue, self.client, self.client_config = venue, self.clients[venue], self.client_configs[venue]
+                        self.screener, self.portfolio, self.manager = self.screeners[venue], self.portfolios[venue], self.managers[venue]
+                        try:
+                            await self._seed_from_csv()
+                        finally:
+                            self.venue, self.client, self.client_config, self.screener, self.portfolio, self.manager = old
                 self.next_refresh_at = (
                     time.time() + self.arguments.refresh_interval_seconds
                     if self.arguments.refresh_interval_seconds > 0
@@ -751,7 +880,7 @@ class Launcher:
             if self.shutdown_requested.is_set():
                 return 0
             if self.arguments.dry_run:
-                await self._portfolio_task
+                await asyncio.gather(*self._portfolio_tasks.values())
                 self.publish_status("running")
                 return 0
             self.publish_status("running")
@@ -769,14 +898,17 @@ class Launcher:
                         break
                     await self._handle_control(request)
                 await self.manager.monitor_once()
-                if self._portfolio_task is not None and self._portfolio_task.done():
-                    try:
-                        self._portfolio_task.result()
-                    except Exception as exc:
-                        self.last_error = str(exc)
-                    self._portfolio_task = None
-                if self._portfolio_task is None and self.portfolio.due():
-                    self._portfolio_task = asyncio.create_task(self.portfolio.refresh())
+                for venue, task in list(self._portfolio_tasks.items()):
+                    if task.done():
+                        try:
+                            task.result()
+                        except Exception as exc:
+                            self.last_error = f"{venue} portfolio: {exc}"
+                        self._portfolio_tasks.pop(venue, None)
+                for venue, portfolio in self.portfolios.items():
+                    if venue not in self._portfolio_tasks and portfolio.due():
+                        self._portfolio_tasks[venue] = asyncio.create_task(portfolio.refresh())
+                self._portfolio_task = self._portfolio_tasks.get(self.venue)
                 if self.next_refresh_at is not None and time.time() >= self.next_refresh_at:
                     await self.refresh("scheduled")
                 self._drain_manager_events()
@@ -818,19 +950,18 @@ class Launcher:
                     self._drain_manager_events()
                 except Exception as exc:
                     self._record_observability_failure("log manager events", exc)
-                if self._portfolio_task is not None:
+                for task in list(getattr(self, "_portfolio_tasks", {}).values()):
                     try:
-                        await self._portfolio_task
+                        await task
                     except Exception:
                         pass
-                    self._portfolio_task = None
+                self._portfolio_tasks = {}
+                self._portfolio_task = None
                 if shutdown_error is None:
                     # Replace the pre-stop portfolio cache so the final status
                     # cannot keep showing orders that cleanup just removed.
-                    await self.portfolio.refresh()
-                await self.client.close()
-                if self.portfolio_client is not self.client:
-                    await self.portfolio_client.close()
+                    await asyncio.gather(*(portfolio.refresh() for portfolio in self.portfolios.values()), return_exceptions=True)
+                await asyncio.gather(*(client.close() for client in self.clients.values()), return_exceptions=True)
                 control_server.stop()
                 self.publish_status("shutdown_failed" if shutdown_error else "stopped")
                 if self.session_store is not None and self.run_id:
@@ -846,3 +977,11 @@ class Launcher:
             if shutdown_error is not None:
                 raise shutdown_error
         return 0
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Venue-neutral multi-market launcher runtime")
+    parser.add_argument("--venue", choices=("kalshi", "polymarket"), help="single-venue compatibility mode")
+    parser.add_argument("--venues", help="comma-separated enabled venues")
+    parser.add_argument("--max-bots", type=int, help="global bot ceiling")
+    parser.parse_args()

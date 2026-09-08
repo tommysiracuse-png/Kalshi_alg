@@ -12,6 +12,7 @@ import pytest
 
 import ui_api.app as app_module
 from clients.models import AccountFill, AccountOrder
+from portfolio.portfolio_analytics import PortfolioAnalyticsStore
 from ui_api.config import Settings
 from ui_api.store import OperationsStore
 from top_of_book_bot import TelemetryStore
@@ -194,6 +195,40 @@ async def test_portfolio_analytics_endpoints_are_storage_backed():
         assert orders.json()["items"][0]["ticker"] == "TEST-1"
         assert orders.json()["items"][0]["ordersAttempted"] == 9
         assert orders.json()["items"][0]["marketUrl"] == "https://kalshi.com/markets/test/test-market/test-event"
+
+
+def test_portfolio_analytics_reads_the_current_per_venue_store():
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        operations = fixture_store(root)
+        venue_store = PortfolioAnalyticsStore(root / "runtime" / "portfolio_kalshi.sqlite3")
+        venue_store.record_refresh({
+            "generatedAtMs": 3_000_000,
+            "warnings": [],
+            "summary": {
+                "availableCashUnits": 200_000,
+                "midpointPositionValueUnits": 7_500,
+                "totalPortfolioValueUnits": 207_500,
+                "positionsLiquidationValueUnits": 7_000,
+                "apiTier": "advanced",
+                "positionCount": 1,
+            },
+            "positions": [{
+                "marketId": "VENUE-1", "ticker": "VENUE-1", "title": "Venue market", "side": "yes",
+                "contractsUnits": 100, "bidPriceUnits": 7_000, "askPriceUnits": 7_500,
+                "midPriceUnits": 7_500, "costBasisUnits": 5_000,
+                "averageCostPriceUnits": 5_000, "liquidationValueUnits": 7_000,
+                "unrealizedValueUnits": 7_500, "openOrderCount": 0,
+            }],
+            "orders": {"items": []},
+        }, [], [], [])
+
+        summary = operations.portfolio_summary()
+        positions = operations.portfolio_positions()
+        assert summary["snapshotAtMs"] == 3_000_000
+        assert summary["summary"]["availableCashUnits"] == 200_000
+        assert positions["items"][0]["ticker"] == "VENUE-1"
+        assert positions["source"]["available"] is True
 
 
 @pytest.mark.anyio

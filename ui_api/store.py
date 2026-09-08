@@ -1373,6 +1373,11 @@ class OperationsStore:
         self.optimizer = OptimizerService(settings, self.audit)
         self.sessions = SessionStore(settings.session_dir or settings.workspace / "session_data")
         self.portfolio_analytics = PortfolioAnalyticsStore(settings.runtime_dir / "portfolio_analytics.sqlite3")
+        # Multi-venue launchers persist one analytics stream per enabled venue.
+        # Keep the legacy store for older runs and tests, but discover the
+        # venue stores lazily so a launcher started after this API process is
+        # still picked up without restarting the API.
+        self._portfolio_analytics_by_venue: Dict[str, PortfolioAnalyticsStore] = {}
         self._position_cache: Dict[str, tuple[int, Dict[str, Any]]] = {}
         self._pnl_lock = threading.Lock()
         self._pnl_cache: Dict[str, tuple[int, Dict[str, Any]]] = {}
@@ -1836,7 +1841,9 @@ class OperationsStore:
                 if net and ticker not in managed
             }
             try:
-                fleet_traded = self.portfolio_analytics.bot_traded_markets(unmanaged)
+                fleet_traded = set()
+                for analytics in self._portfolio_analytics_stores(status["data"]).values():
+                    fleet_traded.update(analytics.bot_traded_markets(unmanaged))
             except Exception:
                 fleet_traded = set()
             orphaned = sorted(
@@ -1886,8 +1893,8 @@ class OperationsStore:
 
         The launcher's portfolio monitor publishes the exchange positions
         snapshot in ``launcher_status.json`` (``portfolio.positions``); when the
-        launcher is not running, the persisted snapshot in
-        ``runtime/portfolio_analytics.sqlite3`` is used instead. Returns
+        launcher is not running, the persisted per-venue or legacy analytics
+        snapshot is used instead. Returns
         ``available=False`` when neither carries a snapshot.
         """
         portfolio = status.get("portfolio") if isinstance(status.get("portfolio"), dict) else {}
@@ -1898,7 +1905,7 @@ class OperationsStore:
                 "positions": self._position_rows_to_contracts(portfolio["positions"]),
             }
         try:
-            snapshot = self.portfolio_analytics.positions(active_run=None)
+            snapshot = self._merged_portfolio_positions(self._portfolio_analytics_stores(status))
         except (sqlite3.Error, OSError, ValueError, TypeError):
             snapshot = {}
         source = snapshot.get("source") or {}
@@ -2041,20 +2048,269 @@ class OperationsStore:
             "warnings": list(dict.fromkeys(warnings)),
         }
 
+    def _portfolio_venue_names(self, status_data: Optional[Mapping[str, Any]] = None) -> tuple[str, ...]:
+        """Find venues represented by the currently running launcher.
+
+        The launcher status is authoritative while it is available.  The
+        session configuration and existing files provide fallbacks for startup
+        races and for older status snapshots that predate ``venues``.
+        """
+        data = status_data if isinstance(status_data, Mapping) else {}
+        venues = data.get("venues")
+        if isinstance(venues, Mapping) and venues:
+            names = tuple(
+                str(name).lower()
+                for name in venues
+                if str(name).lower() in {"kalshi", "polymarket"}
+            )
+            if names:
+                return names
+        active = self.sessions.active_run()
+        configuration = active.get("configuration") if isinstance(active, Mapping) else None
+        configured = configuration.get("venues") if isinstance(configuration, Mapping) else None
+        if isinstance(configured, Mapping):
+            names = tuple(
+                str(name).lower()
+                for name, value in configured.items()
+                if str(name).lower() in {"kalshi", "polymarket"}
+                and isinstance(value, Mapping) and bool(value.get("enabled"))
+            )
+            if names:
+                return names
+        names = tuple(
+            name for name in ("kalshi", "polymarket")
+            if (self.settings.runtime_dir / f"portfolio_{name}.sqlite3").exists()
+        )
+        return names
+
+    def _portfolio_analytics_stores(
+        self, status_data: Optional[Mapping[str, Any]] = None,
+    ) -> Dict[str, PortfolioAnalyticsStore]:
+        stores: Dict[str, PortfolioAnalyticsStore] = {}
+        for venue in self._portfolio_venue_names(status_data):
+            path = self.settings.runtime_dir / f"portfolio_{venue}.sqlite3"
+            if not path.exists():
+                continue
+            store = self._portfolio_analytics_by_venue.get(venue)
+            if store is None or store.path != path:
+                store = PortfolioAnalyticsStore(path)
+                self._portfolio_analytics_by_venue[venue] = store
+            stores[venue] = store
+        # Legacy single-venue installations and tests use this path.  It is
+        # also the safe fallback while a newly enabled venue has not written its
+        # first analytics file yet.
+        return stores or {"legacy": self.portfolio_analytics}
+
+    @staticmethod
+    def _portfolio_source(payloads: Iterable[Mapping[str, Any]]) -> Dict[str, Any]:
+        sources = [payload.get("source") for payload in payloads if isinstance(payload.get("source"), Mapping)]
+        timestamps = [
+            int(source["updatedAt"])
+            for source in sources
+            if isinstance(source.get("updatedAt"), (int, float))
+        ]
+        return {
+            "available": any(bool(source.get("available")) for source in sources),
+            "updatedAt": max(timestamps) if timestamps else None,
+            "stale": not sources or any(bool(source.get("stale")) for source in sources),
+        }
+
+    @staticmethod
+    def _portfolio_warnings(payloads: Iterable[Mapping[str, Any]]) -> List[str]:
+        return list(dict.fromkeys(
+            str(warning)
+            for payload in payloads
+            for warning in (payload.get("warnings") or [])
+        ))
+
+    def _merged_portfolio_summary(self, stores: Mapping[str, PortfolioAnalyticsStore], window_ms: int) -> Dict[str, Any]:
+        payloads = [store.summary(window_ms=window_ms) for store in stores.values()]
+        if len(payloads) == 1:
+            return payloads[0]
+        generated = now_ms()
+        snapshot_values = [payload.get("snapshotAtMs") for payload in payloads if isinstance(payload.get("snapshotAtMs"), (int, float))]
+        fields = (
+            "availableCashUnits", "midpointPositionValueUnits",
+            "totalPortfolioValueUnits", "positionsLiquidationValueUnits",
+        )
+        summary: Dict[str, Any] = {}
+        for field in fields:
+            values = [
+                payload.get("summary", {}).get(field)
+                for payload in payloads
+                if isinstance(payload.get("summary"), Mapping)
+            ]
+            summary[field] = sum(int(value) for value in values) if len(values) == len(payloads) and all(value is not None for value in values) else None
+            summary[field.replace("Units", "Complete")] = summary[field] is not None
+        tiers = {
+            str(payload.get("summary", {}).get("apiTier"))
+            for payload in payloads
+            if isinstance(payload.get("summary"), Mapping) and payload.get("summary", {}).get("apiTier")
+        }
+        summary["apiTier"] = next(iter(tiers)) if len(tiers) == 1 else ("multiple" if tiers else None)
+        summary["positionCount"] = sum(
+            int(payload.get("summary", {}).get("positionCount") or 0)
+            for payload in payloads
+            if isinstance(payload.get("summary"), Mapping)
+        )
+        history: Dict[str, Any] = {}
+        for key in ("availableCash", "totalPortfolioValue", "positionsLiquidationValue"):
+            points_by_time: Dict[int, int] = {}
+            partial = False
+            for payload in payloads:
+                metric = (payload.get("history") or {}).get(key) if isinstance(payload.get("history"), Mapping) else None
+                if not isinstance(metric, Mapping):
+                    partial = True
+                    continue
+                partial = partial or bool(metric.get("partial"))
+                for point in metric.get("points") or []:
+                    if isinstance(point, Mapping) and isinstance(point.get("timestampMs"), (int, float)) and isinstance(point.get("valueUnits"), (int, float)):
+                        timestamp = int(point["timestampMs"])
+                        points_by_time[timestamp] = points_by_time.get(timestamp, 0) + int(point["valueUnits"])
+            points = [{"timestampMs": timestamp, "valueUnits": points_by_time[timestamp]} for timestamp in sorted(points_by_time)]
+            current = summary.get({
+                "availableCash": "availableCashUnits",
+                "totalPortfolioValue": "totalPortfolioValueUnits",
+                "positionsLiquidationValue": "positionsLiquidationValueUnits",
+            }[key])
+            baseline = points[0]["valueUnits"] if points else None
+            change = int(current) - baseline if current is not None and baseline is not None else None
+            history[key] = {
+                "currentUnits": current,
+                "baselineUnits": baseline,
+                "changeUnits": change,
+                "changeBps": int(round(change * 10_000 / abs(baseline))) if change is not None and baseline else None,
+                "points": points,
+                "partial": partial or not points,
+                "actualWindowMs": max(
+                    int(((payload.get("history") or {}).get(key) or {}).get("actualWindowMs") or 0)
+                    for payload in payloads
+                ),
+            }
+        started = [
+            int((payload.get("coverage") or {}).get("startedAtMs"))
+            for payload in payloads
+            if isinstance((payload.get("coverage") or {}).get("startedAtMs"), (int, float))
+        ]
+        return {
+            "generatedAt": generated,
+            "snapshotAtMs": max(snapshot_values) if snapshot_values else None,
+            "source": self._portfolio_source(payloads),
+            "coverage": {
+                "startedAtMs": min(started) if started else None,
+                "requestedWindowMs": window_ms,
+                "actualWindowMs": max((payload.get("coverage") or {}).get("actualWindowMs", 0) for payload in payloads),
+                "partial": any(bool((payload.get("coverage") or {}).get("partial")) for payload in payloads),
+            },
+            "summary": summary,
+            "history": history,
+            "warnings": self._portfolio_warnings(payloads),
+        }
+
+    def _merged_portfolio_positions(self, stores: Mapping[str, PortfolioAnalyticsStore]) -> Dict[str, Any]:
+        payloads = [store.positions(active_run=self.sessions.active_run()) for store in stores.values()]
+        if len(payloads) == 1:
+            return payloads[0]
+        items: List[Dict[str, Any]] = []
+        seen: set[tuple[str, str]] = set()
+        for payload in payloads:
+            for raw in payload.get("items") or []:
+                if not isinstance(raw, dict):
+                    continue
+                key = (str(raw.get("marketId") or raw.get("ticker") or ""), str(raw.get("ticker") or ""))
+                if key not in seen:
+                    seen.add(key)
+                    items.append(dict(raw))
+        started = [
+            int((payload.get("coverage") or {}).get("startedAtMs"))
+            for payload in payloads
+            if isinstance((payload.get("coverage") or {}).get("startedAtMs"), (int, float))
+        ]
+        snapshots = [payload.get("snapshotAtMs") for payload in payloads if isinstance(payload.get("snapshotAtMs"), (int, float))]
+        return {
+            "generatedAt": now_ms(),
+            "snapshotAtMs": max(snapshots) if snapshots else None,
+            "source": self._portfolio_source(payloads),
+            "coverage": {"startedAtMs": min(started) if started else None},
+            "items": items,
+            "warnings": self._portfolio_warnings(payloads),
+        }
+
+    def _merged_portfolio_orders(
+        self, stores: Mapping[str, PortfolioAnalyticsStore], placement_attempts: Mapping[str, int],
+    ) -> Dict[str, Any]:
+        payloads = [store.orders(active_run=self.sessions.active_run(), placement_attempts=placement_attempts) for store in stores.values()]
+        if len(payloads) == 1:
+            return payloads[0]
+        items: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+        for payload in payloads:
+            for raw in payload.get("items") or []:
+                if not isinstance(raw, dict):
+                    continue
+                key = str(raw.get("orderId") or f"{raw.get('ticker')}:{raw.get('side')}:{len(items)}")
+                if key not in seen:
+                    seen.add(key)
+                    items.append(dict(raw))
+        summaries = [payload.get("summary") or {} for payload in payloads]
+        latency_samples = [int(summary.get("fillSampleSize") or 0) for summary in summaries]
+        latency_values = [summary.get("averageFillTimeMs") for summary in summaries]
+        weighted_latency = sum(int(value) * count for value, count in zip(latency_values, latency_samples) if value is not None)
+        sample_count = sum(latency_samples)
+        values = [summary.get("totalMarketValueUnits") for summary in summaries]
+        started = [
+            int((payload.get("coverage") or {}).get("startedAtMs"))
+            for payload in payloads
+            if isinstance((payload.get("coverage") or {}).get("startedAtMs"), (int, float))
+        ]
+        return {
+            "generatedAt": now_ms(),
+            "snapshotAtMs": max((payload.get("snapshotAtMs") for payload in payloads if isinstance(payload.get("snapshotAtMs"), (int, float))), default=None),
+            "source": self._portfolio_source(payloads),
+            "coverage": {"startedAtMs": min(started) if started else None},
+            "summary": {
+                "totalOpenOrders": sum(int(summary.get("totalOpenOrders") or 0) for summary in summaries),
+                "ordersAttempted": sum(int(summary.get("ordersAttempted") or 0) for summary in summaries),
+                "lastOrderAtMs": max((summary.get("lastOrderAtMs") for summary in summaries if isinstance(summary.get("lastOrderAtMs"), (int, float))), default=None),
+                "averageTimeBetweenOrdersMs": int(round(sum(int(summary["averageTimeBetweenOrdersMs"]) for summary in summaries if summary.get("averageTimeBetweenOrdersMs") is not None) / max(1, sum(1 for summary in summaries if summary.get("averageTimeBetweenOrdersMs") is not None)))) if any(summary.get("averageTimeBetweenOrdersMs") is not None for summary in summaries) else None,
+                "lastFillAtMs": max((summary.get("lastFillAtMs") for summary in summaries if isinstance(summary.get("lastFillAtMs"), (int, float))), default=None),
+                "averageFillTimeMs": int(round(weighted_latency / sample_count)) if sample_count else None,
+                "fillSampleSize": sample_count,
+                "totalMarketValueUnits": sum(int(value) for value in values) if all(value is not None for value in values) else None,
+            },
+            "items": items,
+            "warnings": self._portfolio_warnings(payloads),
+        }
+
     def portfolio_summary(self, window: str = "24h") -> Dict[str, Any]:
         windows = {"24h": 86_400_000, "7d": 7 * 86_400_000, "30d": 30 * 86_400_000}
         if window not in windows:
             raise ValueError("window must be one of 24h, 7d, or 30d")
-        return self.portfolio_analytics.summary(window_ms=windows[window])
+        live_status = self.status().get("data") or {}
+        stores = self._portfolio_analytics_stores(live_status)
+        analytics = self._merged_portfolio_summary(stores, windows[window])
+        aggregate = live_status.get("portfolioAggregate") if isinstance(live_status, dict) else None
+        if isinstance(aggregate, dict) and isinstance(aggregate.get("summary"), dict):
+            summary = dict(analytics.get("summary") or {})
+            summary.update({key: value for key, value in aggregate["summary"].items() if key.endswith("Units") or key.endswith("Complete")})
+            analytics["summary"] = summary
+            analytics["perVenue"] = aggregate.get("perVenue", {})
+            analytics["includedVenues"] = aggregate.get("includedVenues", [])
+            analytics["missingVenues"] = aggregate.get("missingVenues", [])
+            analytics["displayCurrency"] = aggregate.get("displayCurrency", "USD-equivalent")
+        return analytics
 
     def portfolio_positions(self) -> Dict[str, Any]:
-        result = self.portfolio_analytics.positions(active_run=self.sessions.active_run())
-        return self._apply_portfolio_links(result, self.status()["data"])
+        status = self.status()["data"]
+        result = self._merged_portfolio_positions(self._portfolio_analytics_stores(status))
+        return self._apply_portfolio_links(result, status)
 
     def portfolio_fills(self, ticker: str, *, limit: int = 100, cursor: str = "") -> Dict[str, Any]:
-        if not self.portfolio_analytics.has_market(ticker):
-            raise KeyError(ticker)
-        return self.portfolio_analytics.fills(ticker, limit=limit, cursor=cursor)
+        stores = self._portfolio_analytics_stores(self.status().get("data"))
+        for store in stores.values():
+            if store.has_market(ticker):
+                return store.fills(ticker, limit=limit, cursor=cursor)
+        raise KeyError(ticker)
 
     def portfolio_orders(self) -> Dict[str, Any]:
         active_run = self.sessions.active_run()
@@ -2071,11 +2327,16 @@ class OperationsStore:
             create = (((client.get("orderActivity") or {}).get("byAction") or {}).get("create") or {})
             if market_id:
                 attempts[market_id] = max(attempts.get(market_id, 0), int(create.get("attempts") or 0))
-        result = self.portfolio_analytics.orders(active_run=active_run, placement_attempts=attempts)
+        result = self._merged_portfolio_orders(
+            self._portfolio_analytics_stores(status), attempts,
+        )
         return self._apply_portfolio_links(result, status)
 
     def run_markets(self, run_id: str) -> Dict[str, Any]:
-        return self.sessions.run_markets(run_id, market_links=self.portfolio_analytics.market_links())
+        links: Dict[str, str] = {}
+        for analytics in self._portfolio_analytics_stores(self.status().get("data")).values():
+            links.update(analytics.market_links())
+        return self.sessions.run_markets(run_id, market_links=links)
 
     def metrics_heartbeat(self) -> Dict[str, Any]:
         """Share a brief session-row result across all SSE/polling clients."""
@@ -2125,8 +2386,12 @@ class OperationsStore:
             url = market.get("marketUrl")
             if market_id and is_canonical_market_url(url):
                 current_links[market_id] = str(url)
-        self.portfolio_analytics.cache_market_links(current_links)
-        cached_links = self.portfolio_analytics.market_links()
+        analytics_stores = self._portfolio_analytics_stores(status)
+        for analytics in analytics_stores.values():
+            analytics.cache_market_links(current_links)
+        cached_links: Dict[str, str] = {}
+        for analytics in analytics_stores.values():
+            cached_links.update(analytics.market_links())
         items = []
         for raw in payload.get("items") or []:
             if not isinstance(raw, dict):

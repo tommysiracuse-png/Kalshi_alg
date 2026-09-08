@@ -75,6 +75,9 @@ class BotManagerConfig:
     # for CLI compatibility and are translated by the launcher/factory.
     venue: str = "kalshi"
     client_config: Optional[Any] = None
+    # Per-venue ceiling used by the multi-venue coordinator.  The validated
+    # session still carries the global ceiling; this value only narrows it.
+    venue_max_bots: Optional[int] = None
 
 
 @dataclass

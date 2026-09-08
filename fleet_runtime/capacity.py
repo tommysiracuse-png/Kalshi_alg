@@ -48,9 +48,14 @@ def calculate_fleet_capacity(
     reserved = available - allocatable
     committed = max(0, int(cash_committed_units))
     api_known = bool(str(api_tier).strip()) and read_refill_rate > 0 and write_refill_rate > 0
-    capacity_ok = normal_sides >= requested_markets
+    # A normal market needs two quote sides.  Capacity is therefore measured
+    # in complete markets for admission; one unused side is intentionally not
+    # enough to start a normal market.
+    capacity_market_limit = normal_sides // 2
+    capacity_ok = capacity_market_limit >= requested_markets
     cash_consistent = committed <= allocatable
-    gate_open = api_known and capacity_ok and cash_consistent
+    usable_capacity = capacity_market_limit > 0 or requested_markets == 0
+    gate_open = api_known and usable_capacity and cash_consistent
     errors = []
     if not api_known:
         errors.append("API tier or token limits unavailable")
@@ -58,8 +63,13 @@ def calculate_fleet_capacity(
         errors.append(f"write capacity admits {normal_sides} quote sides for {requested_markets} markets")
     if not cash_consistent:
         errors.append("committed capital exceeds allocatable cash")
-    admitted_markets = requested_markets if gate_open else 0
-    admitted_sides = min(normal_sides, requested_markets * 2) if gate_open else 0
+    admitted_markets = min(requested_markets, capacity_market_limit) if gate_open else 0
+    admitted_sides = min(normal_sides, admitted_markets * 2) if gate_open else 0
+    fatal_errors = []
+    if not api_known:
+        fatal_errors.append("API tier or token limits unavailable")
+    if not cash_consistent:
+        fatal_errors.append("committed capital exceeds allocatable cash")
     return FleetCapacity(
         api_tier=str(api_tier),
         read_refill_rate=max(0, int(read_refill_rate)),
@@ -75,7 +85,14 @@ def calculate_fleet_capacity(
         freshness_seconds=float(freshness_seconds),
         gate_open=gate_open,
         reduction_only=not gate_open,
-        error="; ".join(errors),
+        # A shortfall against the request is an expected partial-capacity
+        # condition, not a fail-closed error.  Keep it in omitted_reason and
+        # leave error empty so usable markets can quote.
+        error="; ".join(fatal_errors),
+        capacity_market_limit=capacity_market_limit,
+        capacity_limited=bool(gate_open and not capacity_ok),
+        omitted_markets=max(0, requested_markets - admitted_markets),
+        omitted_reason=("capacity" if gate_open and not capacity_ok else "; ".join(errors)),
     )
 
 
@@ -133,6 +150,10 @@ class AllocationResult:
     # Fleet-wide live-cap withholding (only used when the venue reported no
     # per-shard balance breakdown); feeds the next pass's hysteresis.
     withholding: bool = False
+    requested_markets: int = 0
+    admitted_markets: int = 0
+    omitted_markets: int = 0
+    omitted_reason: str = ""
 
 
 def _dollars(units: int) -> str:
@@ -220,6 +241,7 @@ class CapitalAllocator:
         with risk to manage keeps its side.
         """
         ordered = sorted(requests, key=lambda item: (item.rank, item.ticker))
+        requested_count = len(ordered)
         available = max(0, int(available_cash_units))
         allocatable = math.floor(available * (1.0 - self.cash_reserve_fraction))
         reserved = available - allocatable
@@ -313,11 +335,16 @@ class CapitalAllocator:
             shard_used[index] = shard_used.get(index, 0) + notional
             return None
 
+        # Capacity shortfalls are partial admission.  Keep reducing-side
+        # carryovers first, then admit only complete two-sided normal markets
+        # in deterministic rank order.  This prevents a half-admitted market
+        # from reaching a worker when the venue can only fund one side.
+        reducing = [item for item in ordered if item.reducing_sides]
+        normal = [item for item in ordered if not item.reducing_sides]
         if side_capacity < len(ordered):
-            return AllocationResult(
-                False, {}, committed, allocatable, reserved, "API capacity cannot allocate one side per market",
-                oversubscription, budget_cap, live_total, (), withholding,
-            )
+            reducing = reducing[:side_capacity]
+            normal_slots = max(0, side_capacity - len(reducing)) // 2
+            ordered = sorted(reducing + normal[:normal_slots], key=lambda item: (item.rank, item.ticker))
 
         result: dict[str, list[QuoteSide]] = {item.ticker: [] for item in ordered}
         # Reducing actions consume an admission slot but never consume additional capital.
@@ -395,6 +422,7 @@ class CapitalAllocator:
             return AllocationResult(
                 False, {}, committed, allocatable, reserved, f"no market could be funded: {reasons}",
                 oversubscription, budget_cap, live_total, shards, withholding,
+                requested_markets=requested_count, admitted_markets=0, omitted_markets=requested_count, omitted_reason="capital",
             )
         error = ""
         if skipped:
@@ -405,6 +433,8 @@ class CapitalAllocator:
         return AllocationResult(
             True, frozen, committed, allocatable, reserved, error,
             oversubscription, budget_cap, live_total, shards, withholding,
+            requested_markets=requested_count, admitted_markets=admitted,
+            omitted_markets=max(0, requested_count - admitted), omitted_reason="capacity" if requested_count > admitted else "",
         )
 
     @staticmethod

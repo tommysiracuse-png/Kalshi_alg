@@ -290,6 +290,35 @@ def test_screener_defaults_equal_kalshi_screener_config_constants():
     assert "fee_buffer_cents" not in screener_settings_from_configuration(default_session_configuration())
 
 
+def test_screener_max_market_limits_are_independent_per_venue():
+    config = default_session_configuration()
+    config["screener"]["general"]["maxMarketsToScan"] = 100_000
+    config["screener"]["venues"]["kalshi"]["maxMarketsToScan"] = 80_000
+    config["screener"]["venues"]["polymarket"]["maxMarketsToScan"] = 2_500
+
+    normalized = validate_session_configuration(config)
+    assert normalized["screener"]["general"]["maxMarketsToScan"] == 100_000
+    assert normalized["screener"]["venues"]["kalshi"]["maxMarketsToScan"] == 80_000
+    assert normalized["screener"]["venues"]["polymarket"]["maxMarketsToScan"] == 2_500
+
+    assert screener_settings_from_configuration(normalized, "kalshi")["max_markets_to_scan"] == 80_000
+    assert screener_settings_from_configuration(normalized, "polymarket")["max_markets_to_scan"] == 2_500
+    # An omitted venue override inherits the shared/general value.
+    del config["screener"]["venues"]["polymarket"]["maxMarketsToScan"]
+    assert screener_settings_from_configuration(config, "polymarket")["max_markets_to_scan"] == 100_000
+
+    # A client that adds an override before a legacy flat section has been
+    # migrated must retain the flat values as the shared/general settings.
+    legacy = default_screener_configuration()
+    legacy["maxMarketsToScan"] = 75_000
+    legacy["venues"] = {"polymarket": {"maxMarketsToScan": 1_500}}
+    legacy_config = default_session_configuration()
+    legacy_config["screener"] = legacy
+    migrated = validate_session_configuration(legacy_config)
+    assert migrated["screener"]["general"]["maxMarketsToScan"] == 75_000
+    assert screener_settings_from_configuration(migrated, "polymarket")["max_markets_to_scan"] == 1_500
+
+
 def test_stored_screener_section_drops_retired_fee_buffer_field(tmp_path: Path):
     stored = default_session_configuration()
     stored["screener"]["feeBufferCents"] = 3  # written by the schema-v4 editor before the field was retired
