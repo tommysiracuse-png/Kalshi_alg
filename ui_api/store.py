@@ -2009,6 +2009,7 @@ class OperationsStore:
             "schemaVersion": data.get("schemaVersion"),
             "source": status["source"],
             "manager": data.get("manager") or {},
+            "venues": data.get("venueMonitoring") or [],
             "workers": data.get("workers") or [],
             "broker": data.get("broker") or {},
             "capacity": data.get("capacity"),

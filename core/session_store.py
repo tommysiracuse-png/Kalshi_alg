@@ -1734,7 +1734,9 @@ class RunMetricsAccumulator:
         per_market: Dict[str, Dict[str, Any]] = {}
         for client in status.get("clients") or []:
             runtime = client.get("runtime") or {}
-            key = f"{client.get('marketId')}:{client.get('pid')}:{runtime.get('startedAtMs')}"
+            if not runtime.get("startedAtMs"):
+                continue
+            key = f"{client.get('venue')}:{client.get('marketId')}:{client.get('pid')}:{runtime.get('startedAtMs')}"
             pnl = client.get("pnl") or {}
             rest = (client.get("apiActivity") or {}).get("rest") or {}
             self.processes[key] = {
@@ -1743,8 +1745,9 @@ class RunMetricsAccumulator:
                 "orderSuccesses": self._sum_actions(client, "successes"), "orderErrors": self._sum_actions(client, "errors"),
                 "fills": int((client.get("fills") or {}).get("count") or 0), "apiCalls": int(rest.get("total") or 0),
                 "apiErrors": int(rest.get("errors") or 0), "realizedCents": float(pnl.get("realizedCents") or 0),
+                "feesCents": float(pnl.get("feesCents") or 0),
                 "unrealizedCents": float(pnl.get("unrealizedCents") or 0), "totalCents": float(pnl.get("totalCents") or 0),
-                "pnlComplete": not pnl.get("sessionPositionUnits") or pnl.get("markPriceUnits") is not None,
+                "pnlComplete": bool(pnl) and (not pnl.get("sessionPositionUnits") or pnl.get("markPriceUnits") is not None),
                 "markoutsByHorizon": client.get("markouts") or {},
             }
         for component in ("screener", "portfolio"):
@@ -1773,6 +1776,7 @@ class RunMetricsAccumulator:
             "orderErrors": sum(item["orderErrors"] for item in values), "fills": sum(item["fills"] for item in values),
             "apiCalls": sum(api_by_component.values()), "apiErrors": bot_errors + sum(item["errors"] for item in self.components.values()),
             "apiByComponent": api_by_component, "realizedCents": round(sum(item["realizedCents"] for item in values), 4),
+            "feesCents": round(sum(item["feesCents"] for item in values), 4),
             "unrealizedCents": round(sum(item["unrealizedCents"] for item in values), 4),
             "totalCents": round(sum(item["totalCents"] for item in values), 4),
             "pnlComplete": all(item["pnlComplete"] for item in values), "markets": per_market,

@@ -66,6 +66,39 @@ describe("monitoring and screener pages", () => {
     expect(screen.getByRole("heading", { name: "Refresh activity" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Historical runs" })).toBeInTheDocument();
   });
+
+  it("renders aggregate venue, shard, and market telemetry with configurable columns", async () => {
+    class MockEventSource {
+      static OPEN = 1; readyState = MockEventSource.OPEN; onerror: (() => void) | null = null;
+      addEventListener() {} close() {}
+    }
+    vi.stubGlobal("EventSource", MockEventSource);
+    const initial: Monitoring = {
+      ...monitoring([]), schemaVersion: 5,
+      manager: {
+        lifecycle: "running", activeVenues: ["kalshi", "polymarket"], configuredBots: 3, botsRunning: 2,
+        pnl: { fills: 4, feesCents: 10, realizedCents: 125, unrealizedCents: 25, totalCents: 150, complete: true },
+        apiActivity: { rest: { total: 30, requestsLast60s: 5, errors: 1 } },
+      },
+      venues: [{ venue: "kalshi", active: true, botsRunning: 2, configuredBots: 3, apiActivity: { rest: { total: 30, successes: 29, errors: 1, requestsLast60s: 5, averageLatencyMs: 12 }, stream: { connections: 1, message: 50, messagesLast60s: 8 } } }],
+      workers: [{ venue: "kalshi", workerId: "worker-00", pid: 123, running: true, phase: "healthy", startedAtMs: 1_000, assignedMarkets: 1, marketIds: ["TEST-1"], botsRunning: 1, watchdog: { mode: "reduction_only", counts: { reduction_only: 1 } }, heartbeatAtMs: 4_900, stale: false, memoryRssBytes: 1024, queueDepth: 0, eventLagMs: 10 }],
+      clients: [{ venue: "kalshi", workerId: "worker-00", marketId: "TEST-1", title: "Test market", pid: 123, lifecycle: "running", socketHealthy: true, runtime: { startedAtMs: 1_000 }, market: { priceUnits: 5_000, priceSource: "ticker", lastQuoteAtMs: 4_700 }, portfolio: { currentPositionUnits: 100 }, pnl: { fills: 1, feesCents: 1, realizedCents: 2, unrealizedCents: 3, totalCents: 5 }, fills: { count: 1, lastFillAtMs: 4_500 }, orderActivity: { byAction: { create: { attempts: 2 } }, lastCreateAtMs: 4_600 }, watchdog: { running: true, mode: "normal" } }],
+    };
+    render(<LiveMonitoring initial={initial} />);
+    expect(screen.getByText("kalshi · polymarket")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Venue transport activity" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Shard health" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Market activity" })).toBeInTheDocument();
+    expect(screen.getByText("TEST-1")).toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Markets: Last fill"));
+    expect(screen.queryByRole("columnheader", { name: "Last fill" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Move REST total right in API" }));
+    const restHeader = screen.getByRole("columnheader", { name: "REST total" });
+    const handle = restHeader.querySelector(".metrics-column-resize-handle");
+    fireEvent.pointerDown(handle as Element, { clientX: 100 });
+    fireEvent.pointerMove(window, { clientX: 150 }); fireEvent.pointerUp(window, { clientX: 150 });
+    await waitFor(() => expect(window.localStorage.getItem("kalshi.monitoring.columns.v1")).toContain("lastFill"));
+  });
 });
 
 describe("ScreenerHistory", () => {

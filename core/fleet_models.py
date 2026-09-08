@@ -71,6 +71,12 @@ class MarketHealth:
     order_activity: Mapping[str, Mapping[str, int]] = field(default_factory=dict)
     pnl: Mapping[str, object] = field(default_factory=dict)
     markouts: Mapping[str, Mapping[str, object]] = field(default_factory=dict)
+    last_quote_at_ms: int = 0
+    last_order_create_at_ms: int = 0
+    last_fill_at_ms: int = 0
+    price_units: Optional[int] = None
+    price_source: str = "unavailable"
+    price_at_ms: Optional[int] = None
     # Why the worker's risk evaluator chose ``risk_mode`` (e.g.
     # ``elevated_price_move``); surfaced as ``bots[].watchdogReason``.
     risk_reason: str = ""
@@ -86,6 +92,7 @@ class WorkerHeartbeat:
     event_lag_ms: int
     generated_at_ms: int
     venue: str = "kalshi"
+    api_activity: Mapping[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

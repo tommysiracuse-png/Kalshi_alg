@@ -315,3 +315,34 @@ def merge_activity_snapshots(snapshots: Iterable[Mapping[str, Any]]) -> dict[str
         "rest": rest,
         "stream": stream,
     }
+
+
+class SessionActivityAccumulator:
+    """Retain process-generation counters while keeping rolling rates live."""
+
+    def __init__(self) -> None:
+        self._snapshots: dict[str, dict[str, Mapping[str, Any]]] = {}
+
+    def observe(
+        self,
+        venue: str,
+        sources: Iterable[tuple[str, Mapping[str, Any]]],
+    ) -> dict[str, Any]:
+        venue_key = str(venue).lower()
+        stored = self._snapshots.setdefault(venue_key, {})
+        active: list[Mapping[str, Any]] = []
+        for source_id, snapshot in sources:
+            if not isinstance(snapshot, Mapping):
+                continue
+            stored[str(source_id)] = dict(snapshot)
+            active.append(snapshot)
+        cumulative = merge_activity_snapshots(stored.values())
+        live = merge_activity_snapshots(active)
+        cumulative_rest = cumulative.get("rest") or {}
+        live_rest = live.get("rest") or {}
+        for key in ("requestsLast60s", "errorsLast60s", "rateLimitErrorsLast60s"):
+            cumulative_rest[key] = int(live_rest.get(key) or 0)
+        cumulative_stream = cumulative.get("stream") or {}
+        live_stream = live.get("stream") or {}
+        cumulative_stream["messagesLast60s"] = int(live_stream.get("messagesLast60s") or 0)
+        return cumulative

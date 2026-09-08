@@ -121,7 +121,7 @@ export type RunMarketActivityResponse = {
   fills: { items: RunFillActivity[]; totalCount: number; truncated: boolean };
   orders: { items: RunOrderRevision[]; totalCount: number; truncated: boolean }; warnings: string[];
 };
-export type PnlTotals = { fills: number; feesCents: number; realizedCents: number; unrealizedCents: number; totalCents: number };
+export type PnlTotals = { fills: number; feesCents: number; realizedCents: number; unrealizedCents: number; totalCents: number; complete?: boolean };
 export type BotState = { ticker: string; title: string; botRunning: boolean; watchdogRunning: boolean; watchdogMode: string; watchdogConfidence?: number; watchdogReason?: string; yesBudgetCents: number; noBudgetCents: number };
 export type Overview = {
   generatedAt: number;
@@ -140,21 +140,22 @@ export type ApiActivity = {
   stream?: { connections?: number; reconnects?: number; connectionErrors?: number; streamErrors?: number; adapterErrors?: number; subscriptionsSent?: number; message?: number; event?: number; messagesLast60s?: number; sequenceResets?: number; lastActivityAtMs?: number; byEventType?: Record<string, number> };
 };
 export type ClientMonitoring = {
-  marketId: string; title: string; pid?: number; lifecycle?: string; socketHealthy?: boolean; restartCount?: number;
+  venue?: string; workerId?: string; marketId: string; title: string; pid?: number; lifecycle?: string; socketHealthy?: boolean; restartCount?: number;
   runtime?: { startedAtMs?: number; runningForMs?: number };
-  market?: { marketId?: string; title?: string; seriesTicker?: string; eventTicker?: string; seriesTitle?: string; marketUrl?: string | null; priceUnits?: number | null; priceSource?: string; priceAtMs?: number | null };
+  market?: { marketId?: string; title?: string; seriesTicker?: string; eventTicker?: string; seriesTitle?: string; marketUrl?: string | null; priceUnits?: number | null; priceSource?: string; priceAtMs?: number | null; lastQuoteAtMs?: number | null };
   portfolio?: { startingPositionUnits?: number; currentPositionUnits?: number; updatedAtMs?: number };
   pnl?: PnlTotals & { sessionPositionUnits?: number; markPriceUnits?: number | null; markSource?: string; markAtMs?: number | null };
   fills?: { count?: number; quantityUnits?: number; lastFillAtMs?: number | null; recent?: Array<Record<string, unknown>> };
-  orderActivity?: { byAction?: Record<string, { attempts?: number; successes?: number; errors?: number }>; lastActivityAtMs?: number | null; active?: Record<string, Record<string, unknown>>; recent?: Array<Record<string, unknown>> };
+  orderActivity?: { byAction?: Record<string, { attempts?: number; successes?: number; errors?: number }>; lastActivityAtMs?: number | null; lastCreateAtMs?: number | null; active?: Record<string, Record<string, unknown>>; recent?: Array<Record<string, unknown>> };
   apiActivity?: ApiActivity;
   watchdog?: { running?: boolean; mode?: string; confidence?: number; reason?: string; updatedAtMs?: number };
 };
 export type Monitoring = {
   generatedAt: number; schemaVersion?: number; source: SourceState; warnings: string[];
-  manager: { running?: boolean; lifecycle?: string; startedAtMs?: number; runningForMs?: number; botsRunning?: number; portfolio?: { items?: Array<{ marketId: string; title?: string; positionUnits?: number | null; updatedAtMs?: number; stale?: boolean; available?: boolean }>; grossPositionUnits?: number; netPositionUnits?: number; unknownMarkets?: number; staleMarkets?: number }; pnl?: PnlTotals; apiActivity?: ApiActivity };
+  manager: { running?: boolean; lifecycle?: string; startedAtMs?: number; runningForMs?: number; activeVenues?: string[]; configuredBots?: number; botsRunning?: number; portfolio?: { items?: Array<{ marketId: string; title?: string; positionUnits?: number | null; updatedAtMs?: number; stale?: boolean; available?: boolean }>; grossPositionUnits?: number; netPositionUnits?: number; unknownMarkets?: number; staleMarkets?: number }; pnl?: PnlTotals; apiActivity?: ApiActivity };
+  venues?: Array<{ venue: string; active: boolean; botsRunning: number; configuredBots: number; apiActivity?: ApiActivity }>;
   clients: ClientMonitoring[];
-  workers?: Array<{ workerId: string; pid?: number; running: boolean; phase?: string; lastRecoveryError?: string | null; assignedMarkets: number; heartbeatAtMs?: number | null; stale: boolean; memoryRssBytes?: number | null; queueDepth?: number | null; eventLagMs?: number | null }>;
+  workers?: Array<{ venue?: string; workerId: string; pid?: number; running: boolean; phase?: string; lastRecoveryError?: string | null; startedAtMs?: number | null; runningForMs?: number | null; assignedMarkets: number; marketIds?: string[]; botsRunning?: number; watchdog?: { mode?: string; counts?: Record<string, number> }; heartbeatAtMs?: number | null; stale: boolean; memoryRssBytes?: number | null; queueDepth?: number | null; eventLagMs?: number | null; apiActivity?: ApiActivity }>;
   broker?: { pid?: number | null; running?: boolean };
   capacity?: Record<string, unknown> | null;
   allocation?: Record<string, unknown> | null;

@@ -874,6 +874,41 @@ class FleetWorkerProcess(mp.Process):
                         await asyncio.sleep(60.0 / max(1, len(ordered)))
                 await asyncio.sleep(max(0.1, 60.0 / max(1, len(ordered))))
 
+        def market_health(actor: MarketActor, now: int, *, rich: bool) -> MarketHealth:
+            price_units, price_source, price_at_ms = actor.current_market_price()
+            return MarketHealth(
+                book_available=actor.book_ready,
+                book_age_ms=(now - actor.last_orderbook_event_timestamp_ms)
+                if actor.last_orderbook_event_timestamp_ms else None,
+                decision_age_ms=(now - actor.last_quote_decision_at_ms)
+                if actor.last_quote_decision_at_ms else None,
+                risk_mode=actor.fleet_risk_mode or "startup",
+                risk_age_ms=(now - actor.fleet_risk_generated_at_ms)
+                if actor.fleet_risk_generated_at_ms else None,
+                resting_order_count=sum(
+                    1 for item in actor.orders.values() if item.has_active_resting_order
+                ),
+                position_units=actor.net_position_units,
+                started_at_ms=actor.started_at_ms,
+                fill_count=actor.session_fill_count,
+                order_activity=(
+                    {
+                        action: {name: int(value) for name, value in counters.items()}
+                        for action, counters in actor.order_activity.items()
+                    }
+                    if rich else {}
+                ),
+                pnl=actor.session_pnl_snapshot() if rich else {},
+                markouts=actor.session_markout_snapshot(current_ms=now) if rich else {},
+                risk_reason=str(getattr(actor, "fleet_risk_reason", "") or ""),
+                last_quote_at_ms=actor.last_quote_decision_at_ms,
+                last_order_create_at_ms=int(actor.last_order_create_at_ms or 0),
+                last_fill_at_ms=actor.last_fill_timestamp_ms,
+                price_units=price_units,
+                price_source=price_source,
+                price_at_ms=price_at_ms,
+            )
+
         def lightweight_heartbeat(now: int) -> WorkerHeartbeat:
             """Build a watchdog-only heartbeat without touching SQLite.
 
@@ -885,26 +920,7 @@ class FleetWorkerProcess(mp.Process):
             """
             with actors_lock:
                 actor_items = list(actors.items())
-            health = {
-                ticker: MarketHealth(
-                    book_available=actor.book_ready,
-                    book_age_ms=(now - actor.last_orderbook_event_timestamp_ms)
-                    if actor.last_orderbook_event_timestamp_ms else None,
-                    decision_age_ms=(now - actor.last_quote_decision_at_ms)
-                    if actor.last_quote_decision_at_ms else None,
-                    risk_mode=actor.fleet_risk_mode or "startup",
-                    risk_age_ms=(now - actor.fleet_risk_generated_at_ms)
-                    if actor.fleet_risk_generated_at_ms else None,
-                    resting_order_count=sum(
-                        1 for item in actor.orders.values() if item.has_active_resting_order
-                    ),
-                    position_units=actor.net_position_units,
-                    started_at_ms=actor.started_at_ms,
-                    fill_count=actor.session_fill_count,
-                    risk_reason=str(getattr(actor, "fleet_risk_reason", "") or ""),
-                )
-                for ticker, actor in actor_items
-            }
+            health = {ticker: market_health(actor, now, rich=False) for ticker, actor in actor_items}
             return WorkerHeartbeat(
                 self.worker_id,
                 tuple(sorted(health)),
@@ -914,6 +930,7 @@ class FleetWorkerProcess(mp.Process):
                 max((item.book_age_ms or 0 for item in health.values()), default=0),
                 now,
                 self.venue,
+                direct.activity_snapshot(),
             )
 
         def heartbeat_fallback_thread() -> None:
@@ -943,27 +960,7 @@ class FleetWorkerProcess(mp.Process):
             while not stop_requested.is_set():
                 now = int(time.time() * 1000)
                 try:
-                    health = {
-                        ticker: MarketHealth(
-                            book_available=actor.book_ready,
-                            book_age_ms=(now - actor.last_orderbook_event_timestamp_ms) if actor.last_orderbook_event_timestamp_ms else None,
-                            decision_age_ms=(now - actor.last_quote_decision_at_ms) if actor.last_quote_decision_at_ms else None,
-                            risk_mode=actor.fleet_risk_mode,
-                            risk_age_ms=(now - actor.fleet_risk_generated_at_ms) if actor.fleet_risk_generated_at_ms else None,
-                            resting_order_count=sum(1 for item in actor.orders.values() if item.has_active_resting_order),
-                            position_units=actor.net_position_units,
-                            started_at_ms=actor.started_at_ms,
-                            fill_count=actor.session_fill_count,
-                            order_activity={
-                                action: {name: int(value) for name, value in counters.items()}
-                                for action, counters in actor.order_activity.items()
-                            },
-                            pnl=actor.session_pnl_snapshot(),
-                            markouts=actor.session_markout_snapshot(current_ms=now),
-                            risk_reason=str(getattr(actor, "fleet_risk_reason", "") or ""),
-                        )
-                        for ticker, actor in actors.items()
-                    }
+                    health = {ticker: market_health(actor, now, rich=True) for ticker, actor in actors.items()}
                     # Markets still waiting for their actor stay visible as
                     # ``startup`` with the retry state as the reason.
                     for ticker, item in list(pending_adds.items()):
@@ -984,6 +981,7 @@ class FleetWorkerProcess(mp.Process):
                         self.worker_id, tuple(sorted(actors)), health, _rss_bytes(),
                         len(pending_adds), max((item.book_age_ms or 0 for item in health.values()), default=0), now,
                         self.venue,
+                        direct.activity_snapshot(),
                     ))
                     with heartbeat_signal_lock:
                         heartbeat_signal["last_async_ms"] = now
@@ -1006,26 +1004,12 @@ class FleetWorkerProcess(mp.Process):
                     # minimal health payload so a quoting worker is not
                     # repeatedly recycled as stale.
                     log.exception("WORKER_HEARTBEAT_ERROR | error=%s", exc)
-                    fallback_health = {
-                        ticker: MarketHealth(
-                            book_available=actor.book_ready,
-                            book_age_ms=(now - actor.last_orderbook_event_timestamp_ms)
-                            if actor.last_orderbook_event_timestamp_ms else None,
-                            decision_age_ms=(now - actor.last_quote_decision_at_ms)
-                            if actor.last_quote_decision_at_ms else None,
-                            risk_mode=actor.fleet_risk_mode,
-                            risk_age_ms=(now - actor.fleet_risk_generated_at_ms)
-                            if actor.fleet_risk_generated_at_ms else None,
-                            position_units=actor.net_position_units,
-                            started_at_ms=actor.started_at_ms,
-                            risk_reason=str(getattr(actor, "fleet_risk_reason", "") or ""),
-                        )
-                        for ticker, actor in actors.items()
-                    }
+                    fallback_health = {ticker: market_health(actor, now, rich=False) for ticker, actor in actors.items()}
                     try:
                         self.heartbeat_queue.put(WorkerHeartbeat(
                             self.worker_id, tuple(sorted(actors)), fallback_health, _rss_bytes(),
                             len(pending_adds), 0, now, self.venue,
+                            direct.activity_snapshot(),
                         ))
                         with heartbeat_signal_lock:
                             heartbeat_signal["last_async_ms"] = now

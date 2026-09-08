@@ -16,6 +16,7 @@ from typing import Dict, Optional
 
 from core.bot_manager import BotManagerConfig
 from clients.factory import build_client_config
+from clients.monitoring import SessionActivityAccumulator, merge_activity_snapshots
 from clients.models import AccountPositionQuery
 from fleet_runtime.manager import ShardedBotManager
 from fleet_runtime.multi_manager import MultiVenueBotManager
@@ -242,10 +243,9 @@ class Launcher:
         self._last_metric_sample_ms = 0
         self._observability_warning: Optional[str] = None
         self._last_observability_warning_log_ms = 0
-        self._metrics = None
-        if self.session_store is not None:
-            from core.session_store import RunMetricsAccumulator
-            self._metrics = RunMetricsAccumulator(self.started_at_ms)
+        from core.session_store import RunMetricsAccumulator
+        self._metrics = RunMetricsAccumulator(self.started_at_ms)
+        self._activity = SessionActivityAccumulator()
         self._append_run_log("launcher initialized")
 
     def _append_run_log(self, message: str) -> None:
@@ -330,6 +330,40 @@ class Launcher:
         counts = dict(manager_status["counts"])
         counts["disabledTickers"] = len(disabled)
         manager_monitoring = dict(manager_status.get("monitoring") or {})
+        venue_rows = []
+        venue_activity = []
+        for venue in self.enabled_venues:
+            venue_manager = (manager_status.get("venues") or {}).get(venue, {})
+            launcher_activity = self.clients[venue].activity_snapshot()
+            sources = [(
+                f"launcher:{int(launcher_activity.get('startedAtMs') or self.started_at_ms)}",
+                launcher_activity,
+            )]
+            broker = venue_manager.get("broker") or {}
+            broker_activity = broker.get("apiActivity") or {}
+            if broker_activity and broker.get("running"):
+                sources.append((
+                    f"broker:{broker.get('pid')}:{int(broker_activity.get('startedAtMs') or 0)}",
+                    broker_activity,
+                ))
+            for worker in venue_manager.get("workers") or []:
+                activity = worker.get("apiActivity") or {}
+                if activity and worker.get("running") and not worker.get("stale"):
+                    sources.append((
+                        f"worker:{worker.get('workerId')}:{worker.get('pid')}:{int(activity.get('startedAtMs') or 0)}",
+                        activity,
+                    ))
+            activity = self._activity.observe(venue, sources)
+            venue_activity.append(activity)
+            venue_rows.append({
+                "venue": venue,
+                "active": lifecycle in {"starting", "running"},
+                "botsRunning": int((venue_manager.get("counts") or {}).get("activeBots") or 0),
+                "configuredBots": int((venue_manager.get("counts") or {}).get("configuredBots") or 0),
+                "apiActivity": activity,
+            })
+        manager_monitoring["activeVenues"] = [item["venue"] for item in venue_rows if item["active"]]
+        manager_monitoring["apiActivity"] = merge_activity_snapshots(venue_activity)
         manager_monitoring.update(
             {
                 "running": lifecycle in {"starting", "running"},
@@ -360,6 +394,7 @@ class Launcher:
             "allocation": manager_status.get("allocation"),
             "manager": manager_monitoring,
             "clients": manager_status.get("clients", []),
+            "venueMonitoring": venue_rows,
             "screener": self.screeners[self.enabled_venues[0]].status_snapshot(),
             "portfolio": self.portfolios[self.enabled_venues[0]].status_snapshot(),
             "portfolioAggregate": aggregate_portfolio_status(portfolio_statuses, list(self.enabled_venues)),
@@ -385,6 +420,17 @@ class Launcher:
 
     def publish_status(self, lifecycle: str = "running") -> Dict[str, object]:
         status = self.status_snapshot(lifecycle)
+        metrics = self._metrics.observe(status)
+        manager = status.get("manager") if isinstance(status.get("manager"), dict) else {}
+        manager["pnl"] = {
+            "fills": int(metrics.get("fills") or 0),
+            "feesCents": float(metrics.get("feesCents") or 0),
+            "realizedCents": float(metrics.get("realizedCents") or 0),
+            "unrealizedCents": float(metrics.get("unrealizedCents") or 0),
+            "totalCents": float(metrics.get("totalCents") or 0),
+            "complete": bool(metrics.get("pnlComplete", False)),
+        }
+        status["manager"] = manager
         with self.status_lock:
             self.latest_status = status
         # In-memory status is published first so trading/control loops remain
@@ -395,8 +441,7 @@ class Launcher:
         except OSError as exc:
             runtime_snapshot_ok = False
             self._record_observability_failure("runtime snapshot", exc)
-        if self.session_store is not None and self.run_id and self._metrics is not None:
-            metrics = self._metrics.observe(status)
+        if self.session_store is not None and self.run_id:
             current = int(time.time() * 1000)
             sample = current - self._last_metric_sample_ms >= 15_000
             try:

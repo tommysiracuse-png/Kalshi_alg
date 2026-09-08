@@ -325,14 +325,27 @@ def test_status_snapshot_publishes_the_worker_risk_reason_per_bot(tmp_path: Path
         "MKT": MarketHealth(
             book_available=True, book_age_ms=500, decision_age_ms=100,
             risk_mode="reduction_only", risk_age_ms=1_000, risk_reason="elevated_price_move",
+            last_quote_at_ms=now - 100, last_order_create_at_ms=now - 200,
+            last_fill_at_ms=now - 300, price_units=5_100, price_source="ticker", price_at_ms=now,
         ),
     }
-    manager._workers["worker-00"].heartbeat = WorkerHeartbeat("worker-00", ("MKT",), health, 0, 0, 0, now)
+    manager._workers["worker-00"].heartbeat = WorkerHeartbeat(
+        "worker-00", ("MKT",), health, 0, 0, 0, now, "kalshi",
+        {"startedAtMs": now - 1_000, "rest": {"total": 4, "successes": 4, "errors": 0}},
+    )
     snapshot = manager.status_snapshot()
     bot = snapshot["bots"][0]
     assert (bot["ticker"], bot["watchdogMode"], bot["watchdogReason"]) == ("MKT", "reduction_only", "elevated_price_move")
     assert snapshot["clients"][0]["watchdog"]["reason"] == "elevated_price_move"
     assert snapshot["counts"]["watchdogModes"] == {"reduction_only": 1}
+    assert snapshot["counts"]["activeBots"] == 1
+    assert snapshot["workers"][0]["watchdog"] == {"mode": "reduction_only", "counts": {"reduction_only": 1}}
+    assert snapshot["workers"][0]["marketIds"] == ["MKT"]
+    assert snapshot["apiActivity"]["rest"]["total"] == 4
+    client = snapshot["clients"][0]
+    assert client["market"]["lastQuoteAtMs"] == now - 100
+    assert client["orderActivity"]["lastCreateAtMs"] == now - 200
+    assert client["fills"]["lastFillAtMs"] == now - 300
 
     # A heartbeat from a worker running older code (no reason) and a market
     # still waiting for its actor keep the previous shape.

@@ -4,6 +4,7 @@ import pytest
 
 from clients.http_client import HTTPClient, HTTPClientError
 from clients.websocket_client import WebsocketClient
+from clients.monitoring import SessionActivityAccumulator
 
 
 class FakeResponse:
@@ -14,6 +15,27 @@ class FakeResponse:
 
     def json(self):
         return self.payload
+
+
+def activity(total, recent, messages=0):
+    return {
+        "startedAtMs": 1,
+        "rest": {"total": total, "successes": total, "errors": 0, "requestsLast60s": recent},
+        "stream": {"message": messages, "messagesLast60s": messages},
+    }
+
+
+def test_session_activity_retains_old_generations_but_not_their_rolling_rate():
+    accumulator = SessionActivityAccumulator()
+    first = accumulator.observe("kalshi", [("worker:100", activity(10, 3, 4))])
+    assert first["rest"]["total"] == 10
+    assert first["rest"]["requestsLast60s"] == 3
+
+    restarted = accumulator.observe("kalshi", [("worker:101", activity(2, 2, 1))])
+    assert restarted["rest"]["total"] == 12
+    assert restarted["rest"]["requestsLast60s"] == 2
+    assert restarted["stream"]["message"] == 5
+    assert restarted["stream"]["messagesLast60s"] == 1
 
 
 class FakeSession:

@@ -31,6 +31,7 @@ def fixture_store(root: Path) -> OperationsStore:
         "launcher": {"lifecycle": "running", "heartbeatAt": 9999999999999},
         "bots": [], "counts": {},
         "manager": {"running": True, "botsRunning": 1, "pnl": {"totalCents": 12.5}},
+        "venueMonitoring": [{"venue": "kalshi", "active": True, "botsRunning": 1, "configuredBots": 1, "apiActivity": {"rest": {"total": 9}}}],
         "clients": [{
             "marketId": "TEST-1", "title": "Test market",
             "market": {"marketId": "TEST-1", "marketUrl": "https://kalshi.com/markets/test/test-market/test-event"},
@@ -82,6 +83,7 @@ async def test_monitoring_contract_and_client_detail():
             detail = await client.get("/api/v1/monitoring/clients/TEST-1", headers=headers)
         assert snapshot.status_code == 200
         assert snapshot.json()["manager"]["botsRunning"] == 1
+        assert snapshot.json()["venues"][0]["apiActivity"]["rest"]["total"] == 9
         assert snapshot.json()["screener"]["generationId"] == 3
         assert detail.json()["client"]["apiActivity"]["rest"]["total"] == 4
 

@@ -77,3 +77,31 @@ def test_priority_allocation_obeys_global_maximum():
         assert status["venues"]["kalshi"]["admittedMarkets"] == 0
 
     asyncio.run(run())
+
+
+def test_status_snapshot_aggregates_all_venue_monitoring():
+    class MonitoringManager(_FakeManager):
+        def __init__(self, count, pnl, requests):
+            super().__init__()
+            self.count, self.pnl, self.requests = count, pnl, requests
+
+        def status_snapshot(self):
+            return {
+                "counts": {"configuredBots": self.count, "activeBots": self.count},
+                "bots": [], "workers": [], "clients": [],
+                "portfolio": {"items": []},
+                "pnl": {"fills": self.count, "feesCents": 0, "realizedCents": self.pnl, "unrealizedCents": 0, "totalCents": self.pnl},
+                "apiActivity": {"rest": {"total": self.requests, "successes": self.requests, "errors": 0}},
+            }
+
+    pnl = 125.5
+    manager = MultiVenueBotManager(
+        {"kalshi": MonitoringManager(2, pnl, 7), "polymarket": MonitoringManager(3, -25.5, 11)},
+        global_max_bots=10,
+        venue_configs={"kalshi": {}, "polymarket": {}},
+    )
+    snapshot = manager.status_snapshot()
+    assert snapshot["monitoring"]["activeVenues"] == ["kalshi", "polymarket"]
+    assert snapshot["monitoring"]["botsRunning"] == 5
+    assert snapshot["monitoring"]["pnl"]["totalCents"] == 100
+    assert snapshot["monitoring"]["apiActivity"]["rest"]["total"] == 18

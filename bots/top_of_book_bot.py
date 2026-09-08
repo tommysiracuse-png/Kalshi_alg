@@ -2624,6 +2624,7 @@ class MarketActor:
             for action in ("create", "amend", "decrease", "cancel")
         }
         self.last_order_activity_at_ms: Optional[int] = None
+        self.last_order_create_at_ms: Optional[int] = None
         self.recent_order_activity: Deque[Dict[str, object]] = deque(maxlen=20)
         self.watchdog_last_mode_logged: Optional[str] = None
         self.watchdog_shutdown_in_progress = False
@@ -2694,6 +2695,8 @@ class MarketActor:
             self.order_activity[action]["attempts"] += 1
         elif outcome == "success":
             self.order_activity[action]["successes"] += 1
+            if action == "create":
+                self.last_order_create_at_ms = timestamp
         else:
             self.order_activity[action]["errors"] += 1
         self.last_order_activity_at_ms = timestamp
@@ -5526,6 +5529,7 @@ class MarketActor:
                 "orderActivity": {
                     "byAction": self.order_activity,
                     "lastActivityAtMs": self.last_order_activity_at_ms,
+                    "lastCreateAtMs": self.last_order_create_at_ms,
                     "active": active_orders,
                     "recent": list(self.recent_order_activity),
                 },

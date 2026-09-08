@@ -12,6 +12,7 @@ import asyncio
 import time
 from typing import Any, Mapping
 
+from clients.monitoring import merge_activity_snapshots
 from core.fleet_models import BotManagerEvent, ScreenerPick, ScreenerUpdate
 
 
@@ -164,6 +165,34 @@ class MultiVenueBotManager:
         configured = sum(int(item.get("counts", {}).get("configuredBots", 0) or 0) for item in venue_status.values())
         active = sum(int(item.get("counts", {}).get("activeBots", 0) or 0) for item in venue_status.values())
         admitted = sum(len(manager.current_picks) for manager in self.managers.values())
+        pnl = {"fills": 0, "feesCents": 0.0, "realizedCents": 0.0, "unrealizedCents": 0.0, "totalCents": 0.0}
+        portfolio_items = []
+        for item in venue_status.values():
+            venue_pnl = item.get("pnl") or {}
+            for key in pnl:
+                value = venue_pnl.get(key)
+                if isinstance(value, (int, float)):
+                    pnl[key] += value
+            portfolio_items.extend((item.get("portfolio") or {}).get("items") or [])
+        gross_units = sum(abs(int(item.get("positionUnits") or 0)) for item in portfolio_items)
+        net_units = sum(int(item.get("positionUnits") or 0) for item in portfolio_items)
+        monitoring = {
+            "running": True,
+            "activeVenues": list(self.managers),
+            "botsRunning": active,
+            "configuredBots": configured,
+            "portfolio": {
+                "items": portfolio_items,
+                "grossPositionUnits": gross_units,
+                "netPositionUnits": net_units,
+                "unknownMarkets": sum(1 for item in portfolio_items if not item.get("available")),
+                "staleMarkets": sum(1 for item in portfolio_items if item.get("stale")),
+            },
+            "pnl": {key: round(value, 4) if isinstance(value, float) else value for key, value in pnl.items()},
+            "apiActivity": merge_activity_snapshots(
+                item.get("apiActivity") or {} for item in venue_status.values()
+            ),
+        }
         return {
             "venues": venue_status,
             "counts": {"configuredBots": configured, "activeBots": active},
@@ -173,5 +202,6 @@ class MultiVenueBotManager:
             "clients": [client for item in venue_status.values() for client in item.get("clients", [])],
             "capacity": {venue: item.get("capacity") for venue, item in venue_status.items()},
             "broker": {venue: item.get("broker") for venue, item in venue_status.items()},
+            "monitoring": monitoring,
             "manager": {"running": True, "generatedAtMs": int(time.time() * 1000)},
         }

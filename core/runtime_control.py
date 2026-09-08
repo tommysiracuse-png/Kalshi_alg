@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 
-STATUS_SCHEMA_VERSION = 4
+STATUS_SCHEMA_VERSION = 5
 ALLOWED_ACTIONS = {"status", "refresh", "disable_ticker", "enable_ticker", "shutdown"}
 
 _HAS_AF_UNIX = hasattr(socket, "AF_UNIX")

@@ -2099,6 +2099,7 @@ class ExecutionBrokerProcess(mp.Process):
                             "dropped_stale": dropped_stale, "decode_errors": decode_errors,
                             "reader_errors": reader_errors,
                             "shard_exposure": self._ledger.snapshot(self._registry.snapshot()),
+                            "api_activity": client.activity_snapshot(),
                         })
                     except Exception:
                         pass

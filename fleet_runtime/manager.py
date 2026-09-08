@@ -28,6 +28,7 @@ from core.fleet_models import (
     WorkerControlAck,
     WorkerHeartbeat,
 )
+from clients.monitoring import merge_activity_snapshots
 from core.session_config import default_session_configuration, validate_session_configuration
 from .assignment import assign_markets, derive_worker_count
 from .capacity import AllocationRequest, AllocationResult, CapitalAllocator, calculate_fleet_capacity
@@ -289,6 +290,7 @@ class ShardedBotManager:
         self._broker_last_success_ms = 0
         self._broker_consecutive_timeouts = 0
         self._broker_stats: dict[str, Any] = {}
+        self._broker_api_activity: dict[str, Any] = {}
         self._broker_rpc_timeouts: list[int] = []
         self._broker_rpc_timeout_total = 0
         self._broker_restarted_at_ms = 0
@@ -532,6 +534,9 @@ class ShardedBotManager:
                 key: message.get(key)
                 for key in ("pending", "in_flight", "dropped_stale", "decode_errors", "reader_errors")
             }
+            activity = message.get("api_activity")
+            if isinstance(activity, Mapping):
+                self._broker_api_activity = dict(activity)
             exposure = message.get("shard_exposure")
             flat_changed = False
             if isinstance(exposure, Mapping):
@@ -652,6 +657,7 @@ class ShardedBotManager:
         self._broker_consecutive_timeouts = 0
         self._broker_rpc_timeouts = []
         self._broker_stats = {}
+        self._broker_api_activity = {}
         self._broker_shard_exposure = {}
         self._broker_flat_reduce_only = frozenset()
         self._broker_restarted_at_ms = self._broker_started_at_ms
@@ -1699,35 +1705,69 @@ class ShardedBotManager:
         clients = []
         workers = []
         risk_modes: dict[str, int] = {}
+        pnl_totals: dict[str, float | int] = {
+            "fills": 0, "feesCents": 0.0, "realizedCents": 0.0,
+            "unrealizedCents": 0.0, "totalCents": 0.0,
+        }
+        portfolio_items: list[dict[str, Any]] = []
+        activity_sources: list[Mapping[str, Any]] = []
+        if self._broker_api_activity:
+            activity_sources.append(self._broker_api_activity)
+        stale_ms = int(float(self.fleet_config["workerStaleSeconds"]) * 1000)
+        watchdog_priority = {"normal": 0, "startup": 1, "reduction_only": 2, "flatten_only": 3}
         for worker_id, managed in self._workers.items():
             heartbeat = managed.heartbeat
             liveness_at_ms = max(
                 managed.last_liveness_at_ms,
                 heartbeat.generated_at_ms if heartbeat else 0,
             )
+            worker_stale = bool(
+                managed.pending_action != "reconcile" or now > managed.control_deadline_ms
+            ) and (not liveness_at_ms or now - liveness_at_ms > stale_ms)
+            assigned_tickers = tuple(self._assignments.get(worker_id, ()))
+            actor_tickers = set(heartbeat.assigned_tickers if heartbeat else ())
+            running_tickers = actor_tickers if managed.process.is_alive() and not worker_stale else set()
+            health = heartbeat.market_health if heartbeat else {}
+            shard_modes: dict[str, int] = {}
+            for ticker in assigned_tickers:
+                mode = health[ticker].risk_mode if ticker in health else "startup"
+                shard_modes[mode] = shard_modes.get(mode, 0) + 1
+            if not managed.process.is_alive():
+                shard_watchdog = "stopped"
+            elif worker_stale or heartbeat is None:
+                shard_watchdog = "unavailable"
+            else:
+                shard_watchdog = max(
+                    shard_modes or {"startup": 1},
+                    key=lambda mode: watchdog_priority.get(mode, 1),
+                )
+            if heartbeat and managed.process.is_alive() and not worker_stale and isinstance(heartbeat.api_activity, Mapping):
+                activity_sources.append(heartbeat.api_activity)
             workers.append({
                 "venue": self.venue,
                 "workerId": worker_id, "pid": managed.process.pid,
                 "running": managed.process.is_alive(),
                 "phase": managed.phase,
                 "lastRecoveryError": managed.last_error or None,
-                "assignedMarkets": len(self._assignments.get(worker_id, ())),
+                "startedAtMs": managed.started_at_ms or None,
+                "runningForMs": max(0, now - managed.started_at_ms) if managed.started_at_ms else None,
+                "assignedMarkets": len(assigned_tickers),
+                "marketIds": list(assigned_tickers),
+                "botsRunning": len(running_tickers),
+                "watchdog": {"mode": shard_watchdog, "counts": shard_modes},
                 "heartbeatAtMs": heartbeat.generated_at_ms if heartbeat else None,
-                "stale": (
-                    False
-                    if managed.pending_action == "reconcile" and now <= managed.control_deadline_ms
-                    else not liveness_at_ms or now - liveness_at_ms > int(float(self.fleet_config["workerStaleSeconds"]) * 1000)
-                ),
+                "stale": worker_stale,
                 "memoryRssBytes": heartbeat.memory_rss_bytes if heartbeat else None,
                 "queueDepth": heartbeat.queue_depth if heartbeat else None,
                 "eventLagMs": heartbeat.event_lag_ms if heartbeat else None,
+                "apiActivity": dict(heartbeat.api_activity) if heartbeat else {},
             })
-            health = heartbeat.market_health if heartbeat else {}
-            for ticker in self._assignments.get(worker_id, ()):
+            for ticker in assigned_tickers:
                 item = health.get(ticker)
                 pick = self._desired.get(ticker)
                 risk_mode = item.risk_mode if item else "startup"
                 risk_modes[risk_mode] = risk_modes.get(risk_mode, 0) + 1
+                bot_running = ticker in running_tickers
                 # Evaluator reason (``elevated_price_move`` ...) or, for a
                 # market still waiting on its actor, the retry state.
                 risk_reason = (
@@ -1741,8 +1781,8 @@ class ShardedBotManager:
                     # heartbeat rather than by a separate child process.
                     # Report it as running only when this market has a current
                     # heartbeat health record.
-                    "botRunning": managed.process.is_alive(),
-                    "watchdogRunning": bool(managed.process.is_alive() and heartbeat is not None and item is not None),
+                    "botRunning": bot_running,
+                    "watchdogRunning": bool(bot_running and item is not None),
                     "yesBudgetCents": pick.yes_budget_cents if pick else 0,
                     "noBudgetCents": pick.no_budget_cents if pick else 0,
                     "watchdogMode": risk_mode,
@@ -1752,16 +1792,37 @@ class ShardedBotManager:
                     "eventLagMs": item.book_age_ms if item else None,
                     "positionUnits": item.position_units if item else None,
                     "restingOrderCount": item.resting_order_count if item else 0,
-                    "socketHealthy": heartbeat is not None,
+                    "socketHealthy": bool(heartbeat is not None and not worker_stale),
                 })
+                position_units = item.position_units if item else None
+                portfolio_items.append({
+                    "venue": self.venue, "marketId": ticker,
+                    "title": pick.title if pick else ticker,
+                    "positionUnits": position_units,
+                    "updatedAtMs": heartbeat.generated_at_ms if heartbeat else None,
+                    "stale": worker_stale or item is None,
+                    "available": item is not None,
+                })
+                if item:
+                    for key in pnl_totals:
+                        value = item.pnl.get(key)
+                        if isinstance(value, (int, float)):
+                            pnl_totals[key] += value
                 clients.append({
                     "venue": self.venue,
+                    "workerId": worker_id,
                     "marketId": ticker,
                     "title": pick.title if pick else ticker,
                     "pid": managed.process.pid,
-                    "lifecycle": "running" if managed.process.is_alive() else "stopped",
-                    "socketHealthy": heartbeat is not None,
-                    "market": {"marketId": ticker, "title": pick.title if pick else ticker},
+                    "lifecycle": "running" if bot_running else "startup" if managed.process.is_alive() else "stopped",
+                    "socketHealthy": bool(item is not None and heartbeat is not None and not worker_stale),
+                    "market": {
+                        "marketId": ticker, "title": pick.title if pick else ticker,
+                        "priceUnits": item.price_units if item else None,
+                        "priceSource": item.price_source if item else "unavailable",
+                        "priceAtMs": item.price_at_ms if item else None,
+                        "lastQuoteAtMs": item.last_quote_at_ms or None if item else None,
+                    },
                     "portfolio": {
                         "currentPositionUnits": item.position_units if item else None,
                         "updatedAtMs": heartbeat.generated_at_ms if heartbeat else None,
@@ -1772,14 +1833,18 @@ class ShardedBotManager:
                     },
                     "pnl": dict(item.pnl) if item else {},
                     "markouts": dict(item.markouts) if item else {},
-                    "fills": {"count": item.fill_count if item else 0, "recent": []},
+                    "fills": {
+                        "count": item.fill_count if item else 0,
+                        "lastFillAtMs": item.last_fill_at_ms or None if item else None,
+                        "recent": [],
+                    },
                     "orderActivity": {
                         "byAction": dict(item.order_activity) if item else {},
+                        "lastCreateAtMs": item.last_order_create_at_ms or None if item else None,
                         "active": {}, "recent": [],
                     },
-                    "apiActivity": {"rest": {}},
                     "watchdog": {
-                        "running": managed.process.is_alive(), "mode": risk_mode,
+                        "running": bool(bot_running and item is not None), "mode": risk_mode,
                         "reason": risk_reason,
                         "updatedAtMs": heartbeat.generated_at_ms if heartbeat else None,
                     },
@@ -1803,6 +1868,27 @@ class ShardedBotManager:
                 "admittedQuoteSides": int(capacity.get("admitted_quote_sides", 0)),
             })
         allocation = asdict(self._allocation) if self._allocation else None
+        gross_units = sum(
+            abs(int(item["positionUnits"]))
+            for item in portfolio_items if isinstance(item.get("positionUnits"), (int, float))
+        )
+        net_units = sum(
+            int(item["positionUnits"])
+            for item in portfolio_items if isinstance(item.get("positionUnits"), (int, float))
+        )
+        api_activity = merge_activity_snapshots(activity_sources)
+        bots_running = sum(int(item["botsRunning"]) for item in workers)
+        rounded_pnl = {
+            key: round(value, 4) if isinstance(value, float) else value
+            for key, value in pnl_totals.items()
+        }
+        portfolio = {
+            "items": portfolio_items,
+            "grossPositionUnits": gross_units,
+            "netPositionUnits": net_units,
+            "unknownMarkets": sum(1 for item in portfolio_items if not item["available"]),
+            "staleMarkets": sum(1 for item in portfolio_items if item["stale"]),
+        }
         return {
             "venue": self.venue,
             "bots": rows,
@@ -1818,6 +1904,7 @@ class ShardedBotManager:
                 "restarts": self._broker_restart_count,
                 "reconcilePendingBrokerReady": self._reconcile_after_broker_ready,
                 "queue": dict(self._broker_stats),
+                "apiActivity": dict(self._broker_api_activity),
                 "exposureLimits": dict(self._last_exposure_limits),
                 "shardExposure": dict(self._broker_shard_exposure),
             },
@@ -1825,18 +1912,22 @@ class ShardedBotManager:
             "allocation": allocation,
             "counts": {
                 "desiredBots": len(self._desired), "managedBots": len(rows),
-                "runningBots": sum(1 for item in rows if item["botRunning"]),
-                "activeBots": sum(1 for item in rows if item["botRunning"]),
+                "runningBots": bots_running,
+                "activeBots": bots_running,
                 "configuredBots": len(self._desired),
                 "workers": len(workers), "staleWorkers": sum(1 for item in workers if item["stale"]),
                 "watchdogModes": risk_modes,
             },
             "monitoring": {
                 "shutdownCleanup": dict(self._shutdown_cleanup), "hostWarnings": self._host_warnings,
-                "botsRunning": sum(1 for item in rows if item["botRunning"]),
+                "botsRunning": bots_running,
                 "queueDepth": sum(int(item.get("queueDepth") or 0) for item in workers),
+                "portfolio": portfolio,
+                "pnl": rounded_pnl,
+                "apiActivity": api_activity,
             },
             "clients": clients,
-            "portfolio": {"items": []},
-            "pnl": {"fills": 0, "feesCents": 0.0, "realizedCents": 0.0, "unrealizedCents": 0.0, "totalCents": 0.0},
+            "portfolio": portfolio,
+            "pnl": rounded_pnl,
+            "apiActivity": api_activity,
         }
