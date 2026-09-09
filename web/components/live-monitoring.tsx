@@ -126,7 +126,7 @@ function MonitoringTable<T>({ kind, rows, preferences, widths, sort, rowKey, sor
   return <div className="table-wrap monitoring-table"><table style={{ minWidth: columns.reduce((total, column) => total + widths[column.id], 0) }}><colgroup>{columns.map(column => <col key={column.id} style={{ width: widths[column.id] }} />)}</colgroup><thead><tr>{columns.map(column => <MonitoringHeader key={column.id} column={column} width={widths[column.id]} activeSort={sort} dragRef={dragRef} onSort={onSort} onReorder={onReorder} onResize={width => onResize(column.id, width)} />)}</tr></thead><tbody>{sorted.map(row => <tr key={rowKey(row)}>{columns.map(column => <td key={column.id}>{renderCell(row, column.id)}</td>)}</tr>)}</tbody></table>{rows.length === 0 && <p className="empty">{empty}</p>}</div>;
 }
 
-type ScreenerColumnId = "session" | "status" | "started" | "ended" | "markets" | "api" | "duration" | "changes";
+type ScreenerColumnId = "venue" | "session" | "status" | "started" | "ended" | "markets" | "api" | "duration" | "changes";
 type ScreenerSortDirection = "asc" | "desc";
 type ScreenerSort = { id: ScreenerColumnId; direction: ScreenerSortDirection };
 type ScreenerColumnPreference = { id: ScreenerColumnId; enabled: boolean };
@@ -140,13 +140,13 @@ const SCREENER_COLUMN_VERSION = 1;
 const SCREENER_MIN_WIDTH = 90;
 const SCREENER_MAX_WIDTH = 720;
 const SCREENER_COLUMNS: Array<{ id: ScreenerColumnId; label: string }> = [
-  { id: "session", label: "Session run in" }, { id: "status", label: "Status of screener run" },
+  { id: "venue", label: "Venue" }, { id: "session", label: "Session run in" }, { id: "status", label: "Status of screener run" },
   { id: "started", label: "Time Started" }, { id: "ended", label: "Time Ended" },
   { id: "markets", label: "Markets to Screen" }, { id: "api", label: "API Requests to Venue" },
   { id: "duration", label: "Duration" }, { id: "changes", label: "Latest Changes" },
 ];
 const DEFAULT_SCREENER_WIDTHS: ScreenerColumnWidths = {
-  session: 240, status: 180, started: 170, ended: 170,
+  venue: 130, session: 240, status: 180, started: 170, ended: 170,
   markets: 180, api: 180, duration: 130, changes: 220,
 };
 
@@ -220,6 +220,8 @@ function ScreenerSortableHeader({ column, width, sort, dragRef, onSort, onReorde
 
 function ScreenerRunCell({ run, column, durationMs }: { run: ScreenerRun; column: ScreenerColumnId; durationMs?: number | null }) {
   switch (column) {
+    case "venue":
+      return <td><strong>{run.venue ?? "unknown"}</strong></td>;
     case "session":
       return <td><strong>{run.sessionName}</strong><small className="mono">run {run.fleetRunId.slice(0, 8)}</small></td>;
     case "status":
@@ -277,7 +279,7 @@ export function ScreenerHistory({ initial, onLoadMore, clockMs }: { initial: Mon
   const selectSort = (id: ScreenerColumnId) => setSort(previous => previous.id === id ? { id, direction: previous.direction === "asc" ? "desc" : "asc" } : { id, direction: id === "started" ? "desc" : "asc" });
   const resize = (id: ScreenerColumnId, width: number) => setWidths(previous => ({ ...previous, [id]: width }));
   const columns = preferences.filter(item => item.enabled).map(item => SCREENER_COLUMNS.find(column => column.id === item.id)).filter((column): column is { id: ScreenerColumnId; label: string } => Boolean(column));
-  const sortedRows = useMemo(() => [...rows].sort((a, b) => { const value = (item: ScreenerRun): string | number => { if (sort.id === "session") return `${item.sessionName} ${item.fleetRunId}`; if (sort.id === "status") return item.status ?? ""; if (sort.id === "started") return Number(item.startedAt ?? 0); if (sort.id === "ended") return Number(item.endedAt ?? 0); if (sort.id === "markets") return Number(item.scannedMarkets ?? -1); if (sort.id === "api") return Number(item.apiRequests ?? -1); if (sort.id === "duration") return Number(item.durationMs ?? -1); return Number(item.added ?? 0) + Number(item.changed ?? 0) + Number(item.removed ?? 0); }; const left = value(a); const right = value(b); const comparison = typeof left === "string" ? left.localeCompare(String(right)) : Number(left) - Number(right); return (sort.direction === "asc" ? comparison : -comparison) || b.id.localeCompare(a.id); }), [rows, sort]);
+  const sortedRows = useMemo(() => [...rows].sort((a, b) => { const value = (item: ScreenerRun): string | number => { if (sort.id === "venue") return item.venue ?? "unknown"; if (sort.id === "session") return `${item.sessionName} ${item.fleetRunId}`; if (sort.id === "status") return item.status ?? ""; if (sort.id === "started") return Number(item.startedAt ?? 0); if (sort.id === "ended") return Number(item.endedAt ?? 0); if (sort.id === "markets") return Number(item.scannedMarkets ?? -1); if (sort.id === "api") return Number(item.apiRequests ?? -1); if (sort.id === "duration") return Number(item.durationMs ?? -1); return Number(item.added ?? 0) + Number(item.changed ?? 0) + Number(item.removed ?? 0); }; const left = value(a); const right = value(b); const comparison = typeof left === "string" ? left.localeCompare(String(right)) : Number(left) - Number(right); return (sort.direction === "asc" ? comparison : -comparison) || b.id.localeCompare(a.id); }), [rows, sort]);
   const loadMore = async () => { if (!nextCursor || loadingMore) return; setLoadingMore(true); setLoadError(null); try { const result = await onLoadMore(nextCursor); setRows(previous => mergeScreenerRuns(previous, result.items)); setNextCursor(result.nextCursor ?? null); } catch (error) { setLoadError(error instanceof Error ? error.message : String(error)); } finally { setLoadingMore(false); } };
   const currentDuration = (run: ScreenerRun) => run.durationMs ?? (run.status === "running" && run.startedAt ? Math.max(0, clockMs - run.startedAt) : null);
   const historyWarnings = initial.screener.historyWarnings ?? [];

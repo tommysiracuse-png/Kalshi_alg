@@ -14,7 +14,7 @@ import logging
 import os
 import threading
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 from types import SimpleNamespace
@@ -57,6 +57,7 @@ POLYMARKET_COLLATERAL_BASE_SCALE = 1_000_000
 # bucket that permanently queues every worker read.
 LOCAL_READ_RATE = 60
 LOCAL_WRITE_RATE = 30
+OPEN_INTEREST_BATCH_SIZE = 100
 
 
 _SDK_PROXY_LOCK = threading.Lock()
@@ -117,6 +118,20 @@ def _price_units(value: Any) -> int:
 
 def _size_units(value: Any) -> int:
     return int((_decimal(value) * TOKEN_SCALE).to_integral_value(rounding=ROUND_HALF_UP))
+
+
+def _optional_size_units(value: Any) -> Optional[int]:
+    """Convert an optional token/contract count without inventing zero."""
+
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    try:
+        parsed = Decimal(str(value))
+        if not parsed.is_finite():
+            return None
+        return int((parsed * TOKEN_SCALE).to_integral_value(rounding=ROUND_HALF_UP))
+    except (ArithmeticError, TypeError, ValueError):
+        return None
 
 
 def _money_units(value: Any) -> int:
@@ -229,6 +244,19 @@ class PolymarketClientConfig:
     rate_limit_profile: str = "standard"
     rate_limit_overrides: Optional[Mapping[str, Any]] = None
     venue: str = "polymarket"
+    # Local mirror settings.  The launcher child owns writes; the foreground
+    # client only opens the mirror read-only for screening.
+    mirror_enabled: bool = False
+    mirror_required_complete_snapshot: bool = True
+    mirror_db_path: str = ""
+    mirror_status_path: str = ""
+    mirror_snapshot_max_age_seconds: float = 60.0
+    mirror_book_stale_after_seconds: float = 60.0
+    mirror_ws_shards: int = 1
+    mirror_book_recovery_parallelism: int = 16
+    mirror_catalog_page_size: int = 100
+    mirror_sync_interval_seconds: float = 30.0
+    mirror_max_markets: int = 0
 
     def __post_init__(self) -> None:
         if self.rest_timeout_seconds <= 0:
@@ -255,6 +283,14 @@ class PolymarketClientConfig:
             raise ValueError("Polymarket production trading requires Polygon chain 137")
         if self.signature_type not in {0, 1, 2, 3}:
             raise ValueError("Polymarket signature_type must be 0 (EOA), 1 (proxy), 2 (Safe), or 3 (deposit wallet)")
+        if self.mirror_snapshot_max_age_seconds <= 0 or self.mirror_book_stale_after_seconds <= 0:
+            raise ValueError("mirror freshness intervals must be > 0")
+        if self.mirror_ws_shards <= 0 or self.mirror_book_recovery_parallelism <= 0:
+            raise ValueError("mirror concurrency settings must be > 0")
+        if self.mirror_catalog_page_size <= 0 or self.mirror_catalog_page_size > 100:
+            raise ValueError("mirror_catalog_page_size must be between 1 and 100")
+        if self.mirror_sync_interval_seconds <= 0:
+            raise ValueError("mirror_sync_interval_seconds must be > 0")
         if self.proxy_url:
             parsed_proxy = urlparse(str(self.proxy_url))
             scheme = parsed_proxy.scheme.lower()
@@ -337,10 +373,21 @@ class PolymarketClient(BaseClient):
         self._asset_market: dict[str, tuple[str, str]] = {}
         self.book_cache = PolymarketBookCache(config.book_cache_path or None)
         self.catalog_store = PolymarketCatalogStore(config.catalog_path) if config.catalog_path else None
+        self.mirror_store = None
+        if config.mirror_enabled and config.mirror_db_path:
+            from polymarket_mirror import PolymarketMirrorStore
+            self.mirror_store = PolymarketMirrorStore(config.mirror_db_path)
         self._catalog_last_refresh_ms = 0
         self._catalog_loaded_statuses: set[str] = set()
         self._catalog_refresh_lock = threading.Lock()
         self._catalog_metrics: dict[str, Any] = {}
+        self._open_interest_metrics: dict[str, int] = {
+            "batches": 0,
+            "marketsRequested": 0,
+            "marketsResolved": 0,
+            "marketsMissing": 0,
+            "apiErrors": 0,
+        }
         self._book_metrics: dict[str, Any] = {}
         self._market_stream_task: Optional[asyncio.Task[Any]] = None
         self._market_stream_started = False
@@ -476,8 +523,30 @@ class PolymarketClient(BaseClient):
         merged["proxyConfigured"] = bool(self.proxy_url)
         merged["rateLimit"] = self._rate_limiter.snapshot()
         merged["catalog"] = dict(self._catalog_metrics)
+        merged["openInterest"] = dict(self._open_interest_metrics)
         merged["book"] = dict(self._book_metrics)
         merged["bookReadiness"] = self.book_readiness()
+        if self.mirror_store is not None:
+            try:
+                mirror_status = self.mirror_store.status()
+                # The SQLite status is only updated after a complete catalog
+                # or book publication. During a cold sync the child writes a
+                # heartbeat/status file so the launcher can expose
+                # ``syncing_catalog`` (and the child's API counters) instead
+                # of reporting an ambiguous unavailable mirror.
+                status_path = str(getattr(self.config, "mirror_status_path", "") or "")
+                if status_path:
+                    try:
+                        with open(status_path, "r", encoding="utf-8") as handle:
+                            child_status = json.load(handle)
+                        if isinstance(child_status, Mapping):
+                            from polymarket_mirror import merge_mirror_status
+                            mirror_status = merge_mirror_status(mirror_status, child_status)
+                    except (OSError, ValueError, TypeError):
+                        pass
+                merged["mirror"] = mirror_status
+            except Exception as exc:
+                merged["mirror"] = {"complete": False, "reason": str(exc)}
         merged["components"] = {
             "clob": clob,
             "gamma": gamma,
@@ -493,6 +562,8 @@ class PolymarketClient(BaseClient):
             return "clob_auth"
         if "catalog" in name or "list_market" in name or "get_market" in name:
             return "gamma_markets"
+        if "open_interest" in name:
+            return "data_open_interest"
         if "position" in name:
             return "data_positions"
         if "fill" in name or "trade" in name:
@@ -642,6 +713,9 @@ class PolymarketClient(BaseClient):
             status = "paused"
         if payload.get("enableOrderBook") is False or payload.get("enable_order_book") is False:
             status = "paused"
+        open_interest = payload.get("openInterest")
+        if open_interest is None:
+            open_interest = payload.get("open_interest")
         market = Market(
             market_id=market_id,
             native_market_id=market_id,
@@ -657,7 +731,7 @@ class PolymarketClient(BaseClient):
             market_url=(f"https://polymarket.com/event/{payload.get('slug')}" if payload.get("slug") else None),
             series_title=str(payload.get("eventTitle") or ""),
             volume_24h_units=_size_units(payload.get("volume24hr") or payload.get("volume24h") or payload.get("volume") or 0),
-            open_interest_units=_size_units(payload.get("openInterest") or payload.get("open_interest") or 0),
+            open_interest_units=_optional_size_units(open_interest),
             yes_token_id=yes_token,
             no_token_id=no_token,
             min_order_size_units=_size_units(payload.get("minOrderSize") or payload.get("minimum_order_size") or 0),
@@ -669,6 +743,99 @@ class PolymarketClient(BaseClient):
             self._asset_market[no_token] = (market_id, "no")
         self._market_cache[market_id] = market
         return market
+
+    def hydrate_market_open_interest(
+        self,
+        markets: Sequence[Market],
+    ) -> tuple[list[Market], dict[str, int]]:
+        """Hydrate per-market OI from Polymarket's Data API.
+
+        Gamma catalog pages do not reliably carry a market-level open-interest
+        value.  The Data API exposes that value through ``/oi`` and accepts
+        a comma-separated ``market`` query parameter.  Missing or failed lookups stay
+        ``None`` so callers can distinguish unavailable data from an explicit
+        API value of zero.
+        """
+
+        source = list(markets)
+        stats = {
+            "batches": 0,
+            "marketsRequested": len(source),
+            "marketsResolved": 0,
+            "marketsMissing": 0,
+            "apiErrors": 0,
+        }
+        if not source:
+            return [], stats
+
+        requested_ids = [str(market.market_id) for market in source if market.market_id]
+        resolved: dict[str, Optional[int]] = {}
+        for offset in range(0, len(requested_ids), OPEN_INTEREST_BATCH_SIZE):
+            batch = requested_ids[offset:offset + OPEN_INTEREST_BATCH_SIZE]
+            if not batch:
+                continue
+            stats["batches"] += 1
+            try:
+                response = self._http_call(
+                    self.data_http,
+                    "get",
+                    "/oi",
+                    # The live Data API treats repeated ``market`` keys as a
+                    # single value and only returns the last one. Its array
+                    # parameter must be encoded as a comma-separated list.
+                    params={"market": ",".join(batch)},
+                    operation="polymarket_get_open_interest",
+                )
+            except Exception as exc:
+                stats["apiErrors"] += 1
+                LOGGER.warning(
+                    "POLYMARKET_OPEN_INTEREST_ERROR | batch=%s size=%s error=%s",
+                    offset // OPEN_INTEREST_BATCH_SIZE,
+                    len(batch),
+                    _redact_proxy_text(exc, self.proxy_url),
+                )
+                continue
+
+            if isinstance(response, Mapping):
+                entries = response.get("data") or response.get("oi") or response.get("markets") or []
+            else:
+                entries = response
+            if not isinstance(entries, list):
+                stats["apiErrors"] += 1
+                LOGGER.warning(
+                    "POLYMARKET_OPEN_INTEREST_ERROR | batch=%s invalid response=%s",
+                    offset // OPEN_INTEREST_BATCH_SIZE,
+                    type(entries).__name__,
+                )
+                continue
+
+            batch_ids = set(batch)
+            for entry in entries:
+                if not isinstance(entry, Mapping):
+                    continue
+                market_id = entry.get("market") or entry.get("conditionId") or entry.get("condition_id")
+                if market_id is None or str(market_id) not in batch_ids:
+                    continue
+                value = entry.get("value")
+                parsed = _optional_size_units(value)
+                if value is not None and parsed is not None:
+                    resolved[str(market_id)] = parsed
+
+        stats["marketsResolved"] = sum(1 for market in source if str(market.market_id) in resolved)
+        stats["marketsMissing"] = max(0, len(source) - stats["marketsResolved"])
+        self._open_interest_metrics["batches"] += stats["batches"]
+        self._open_interest_metrics["marketsRequested"] += stats["marketsRequested"]
+        self._open_interest_metrics["marketsResolved"] += stats["marketsResolved"]
+        self._open_interest_metrics["marketsMissing"] += stats["marketsMissing"]
+        self._open_interest_metrics["apiErrors"] += stats["apiErrors"]
+
+        hydrated = [
+            replace(market, open_interest_units=resolved.get(str(market.market_id)))
+            for market in source
+        ]
+        for market in hydrated:
+            self._market_cache[market.market_id] = market
+        return hydrated, stats
 
     def prime_market(self, payload: Mapping[str, Any]) -> Optional[Market]:
         """Seed the worker cache from a screener pick's normalized metadata.
@@ -1832,6 +1999,36 @@ class PolymarketClient(BaseClient):
             self._market_stream_task = asyncio.create_task(self._consume_market_stream())
             self._market_stream_started = True
         return self.book_cache.snapshot()
+
+    async def start_market_book_stream(self, markets: Sequence[Market]) -> None:
+        """Subscribe and consume book updates without blocking on snapshots.
+
+        The mirror already has a persisted generation to screen while a new
+        catalog is being fetched.  Waiting for every initial dump here would
+        delay that stream until the catalog task completes, so the initial
+        dump and subsequent deltas are consumed by the background task.
+        """
+
+        assets = [
+            token for market in markets
+            for token in (market.yes_token_id, market.no_token_id)
+            if token
+        ]
+        expected = tuple(dict.fromkeys(assets))
+        self._market_stream_assets = expected
+        self.book_cache.expected_assets = len(expected)
+        if not expected:
+            return
+        await self.websocket_client.subscribe([
+            json.dumps({
+                "type": "market",
+                "assets_ids": list(expected),
+                "initial_dump": True,
+            })
+        ])
+        self._market_stream_started = True
+        if self._market_stream_task is None or self._market_stream_task.done():
+            self._market_stream_task = asyncio.create_task(self._consume_market_stream())
 
     async def _consume_market_stream(self) -> None:
         """Keep the market-channel cache current after bootstrap."""

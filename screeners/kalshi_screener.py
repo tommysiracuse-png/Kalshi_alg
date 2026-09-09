@@ -30,6 +30,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import heapq
 import asyncio
 import math
 import os
@@ -132,6 +133,12 @@ def valid_price(p: Optional[int]) -> bool:
 
 
 def get_price_cents(mkt: Dict[str, Any], dollars_field: str, cents_field: str) -> Optional[int]:
+    cached = mkt.get(cents_field)
+    if isinstance(cached, (int, float)):
+        try:
+            return int(cached)
+        except Exception:
+            pass
     d = parse_decimal(mkt.get(dollars_field))
     if d is not None:
         return round_cents(d * D100)
@@ -220,6 +227,9 @@ class KalshiPublicClient:
 
 
 def compute_cutoff_times(mkt: Dict[str, Any]) -> Tuple[Optional[datetime], str]:
+    cached_ms = mkt.get("_cutoff_ms")
+    if isinstance(cached_ms, (int, float)) and cached_ms > 0:
+        return datetime.fromtimestamp(float(cached_ms) / 1000.0, tz=timezone.utc), str(mkt.get("_cutoff_field") or "close_time")
     close_dt = parse_iso8601(mkt.get("close_time"))
     expected_exp_dt = parse_iso8601(mkt.get("expected_expiration_time"))
     exp_dt = parse_iso8601(mkt.get("expiration_time"))
@@ -360,10 +370,12 @@ def market_passes_safety_filters(mkt: Dict[str, Any], book: Dict[str, Any], sett
     # Keyword-based permanent exclusion (e.g. temperature markets). The session
     # supplies the list via settings; a settings dict without the key (older
     # callers, tests) falls back to the module constant.
-    raw_keywords = settings.get("excluded_ticker_keywords")
-    if raw_keywords is None:
-        raw_keywords = getattr(config, "EXCLUDED_TICKER_KEYWORDS", [])
-    excluded_keywords = [str(kw).upper() for kw in raw_keywords if str(kw).strip()]
+    excluded_keywords = settings.get("_excluded_ticker_keywords_upper")
+    if excluded_keywords is None:
+        raw_keywords = settings.get("excluded_ticker_keywords")
+        if raw_keywords is None:
+            raw_keywords = getattr(config, "EXCLUDED_TICKER_KEYWORDS", [])
+        excluded_keywords = tuple(str(kw).upper() for kw in raw_keywords if str(kw).strip())
     if excluded_keywords:
         ticker_upper = str(mkt.get("ticker") or "").upper()
         if any(kw in ticker_upper for kw in excluded_keywords):
@@ -405,9 +417,8 @@ def market_passes_safety_filters(mkt: Dict[str, Any], book: Dict[str, Any], sett
 
 
 def estimate_maker_fee_cents(price_c: int, fee_factor: float) -> float:
-    p = Decimal(price_c) / D100
-    baseline_fee_cents = Decimal("7.0") * p * (D1 - p)
-    return float(baseline_fee_cents * Decimal(str(fee_factor)))
+    p = float(price_c) / 100.0
+    return 7.0 * p * (1.0 - p) * float(fee_factor)
 
 
 def estimate_orderbook_imbalance(book: Dict[str, Any]) -> float:
@@ -699,7 +710,60 @@ def build_market_row(mkt: Dict[str, Any], book: Dict[str, Any], settings: Dict[s
     }
 
 
+def _fast_side_ev(book: Dict[str, Any], side: str, fair_yes_c: int, settings: Dict[str, Any]) -> Optional[float]:
+    """Numeric-only EV pass used for mirror scans before row materialization."""
+    tick = int(book["tick_c"])
+    best_bid = int(book[f"{side}_bid_c"])
+    max_bid = int(book[f"{side}_ask_c"]) - tick
+    if max_bid < tick:
+        return None
+    candidate = min(max_bid, floor_to_tick(price_after_passive_offset(
+        best_bid, tick, int(settings["passive_offset_ticks_when_not_improving"])
+    ), tick))
+    fair_side = float(fair_yes_c if side == "yes" else 100 - fair_yes_c)
+    tox = estimate_toxicity_cents(side, book, settings)
+    inv = estimate_inventory_penalty_cents(side, settings)
+    floor = float(settings["minimum_expected_edge_cents_to_quote"])
+    best: Optional[float] = None
+    for _ in range(max(1, int(settings["candidate_price_levels_to_scan"]))):
+        if candidate > max_bid:
+            break
+        queue = projected_queue_ahead_contracts(side, candidate, book)
+        ev = fair_side - candidate - estimate_maker_fee_cents(candidate, float(settings["maker_fee_factor"])) \
+            - tox - inv - estimate_queue_penalty_cents(queue, settings)
+        if ev >= floor and (best is None or ev > best):
+            best = ev
+        candidate += tick
+    return best
+
+
+def fast_market_score(mkt: Dict[str, Any], settings: Dict[str, Any]) -> Optional[tuple[float, float, Dict[str, Any]]]:
+    """Return the ranking score and book without constructing a full output row."""
+    book = extract_book_snapshot(mkt, settings["default_tick_cents"])
+    if book is None or not market_passes_safety_filters(mkt, book, settings):
+        return None
+    excluded = settings.get("excluded_series") or []
+    if excluded:
+        event_ticker = str(mkt.get("event_ticker") or mkt.get("ticker") or "")
+        series_prefix = event_ticker.split("-")[0].upper() if "-" in event_ticker else event_ticker.upper()
+        if series_prefix in {str(item).upper() for item in excluded}:
+            return None
+    fair_yes = estimate_fair_yes_cents(mkt, book, settings)
+    yes_ev = _fast_side_ev(book, "yes", fair_yes, settings)
+    no_ev = _fast_side_ev(book, "no", fair_yes, settings)
+    best = max((value for value in (yes_ev, no_ev) if value is not None), default=None)
+    if best is None:
+        return None
+    nominal = nominal_ev_dollars(best, int(settings["quote_size"]))
+    return float(best), float(nominal), book
+
+
 def screen_markets(pub: KalshiPublicClient, settings: Dict[str, Any]) -> pd.DataFrame:
+    started_at = time.perf_counter()
+    if "_excluded_ticker_keywords_upper" not in settings:
+        settings["_excluded_ticker_keywords_upper"] = tuple(
+            str(item).upper() for item in (settings.get("excluded_ticker_keywords") or ()) if str(item).strip()
+        )
     requested_limit_value = settings.get("max_markets_to_scan")
     try:
         requested_limit = int(requested_limit_value)
@@ -759,7 +823,45 @@ def screen_markets(pub: KalshiPublicClient, settings: Dict[str, Any]) -> pd.Data
             toxic_series = set()
             toxic_tickers = set()
 
+    vectorized_reader = getattr(pub, "vectorized_mirror_rows", None)
+    if callable(vectorized_reader):
+        vectorized = vectorized_reader(settings, toxic_tickers=toxic_tickers, toxic_series=toxic_series)
+        if vectorized is not None:
+            payloads, scanned_markets = vectorized
+            rows = []
+            for payload in payloads:
+                book = extract_book_snapshot(payload, settings["default_tick_cents"])
+                row = build_market_row(payload, book, settings) if book is not None else None
+                if row is not None:
+                    rows.append(row)
+            scan_metadata = {
+                "requestedLimit": requested_limit,
+                "effectiveLimit": effective_limit,
+                "scannedMarkets": scanned_markets,
+                "truncated": bool(requested_limit <= 0 or requested_limit > effective_limit or scanned_markets >= effective_limit),
+                "screenDurationMs": int((time.perf_counter() - started_at) * 1000),
+                "filterDurationMs": int((time.perf_counter() - started_at) * 1000),
+                "rankingDurationMs": 0,
+                "boundedRanking": True,
+                "retainedMarkets": len(rows),
+                "vectorized": True,
+            }
+            frame = pd.DataFrame(rows)
+            if not frame.empty:
+                frame = frame.sort_values(by=["Best EV(c)", "Best nominal EV($)", "Vol24h", "OI", "Hrs->Cutoff"], ascending=[False, False, False, False, True]).reset_index(drop=True)
+                frame.insert(0, "Rank", range(1, len(frame) + 1))
+            frame.attrs["market_scan"] = scan_metadata
+            frame.attrs["warnings"] = tuple(scan_warnings)
+            return frame
+
     rows: List[Dict[str, Any]] = []
+    # A local mirror can screen a very large catalog without retaining every
+    # passing row.  Keep only the rows that can appear in the exported/fleet
+    # result; the REST path retains its historical behaviour.
+    bounded_source = bool(getattr(pub, "bounded_results", False))
+    retention_limit = max(1, int(settings.get("top_n") or 1))
+    ranked_heap: list[tuple[tuple[float, float, float, float, float, int], Dict[str, Any]]] = []
+    sequence = 0
     dropped_toxic = 0
     scanned_markets = 0
     for market in markets:
@@ -777,6 +879,31 @@ def screen_markets(pub: KalshiPublicClient, settings: Dict[str, Any]) -> pd.Data
             if series_key in toxic_series:
                 dropped_toxic += 1
                 continue
+
+        if bounded_source:
+            scored = fast_market_score(market, settings)
+            if scored is None:
+                continue
+            best_ev, nominal_ev, fast_book = scored
+            sequence += 1
+            cutoff_dt, _ = compute_cutoff_times(market)
+            hours = ((cutoff_dt - now_utc()).total_seconds() / 3600.0) if cutoff_dt else 1e12
+            key = (
+                best_ev, nominal_ev,
+                get_count_float(market, "volume_24h_fp", "volume_24h"),
+                get_count_float(market, "open_interest_fp", "open_interest"),
+                -hours, sequence,
+            )
+            if len(ranked_heap) < retention_limit or key > ranked_heap[0][0]:
+                full_row = build_market_row(market, fast_book, settings)
+                if full_row is None:
+                    continue
+                item = (key, full_row)
+                if len(ranked_heap) < retention_limit:
+                    heapq.heappush(ranked_heap, item)
+                else:
+                    heapq.heapreplace(ranked_heap, item)
+            continue
 
         book = extract_book_snapshot(market, settings["default_tick_cents"])
         if book is None:
@@ -796,6 +923,10 @@ def screen_markets(pub: KalshiPublicClient, settings: Dict[str, Any]) -> pd.Data
         if row is None:
             continue
         rows.append(row)
+
+    ranking_started_at = time.perf_counter()
+    if bounded_source:
+        rows = [item[1] for item in sorted(ranked_heap, key=lambda item: item[0], reverse=True)]
 
     if toxic_series or toxic_tickers:
         print(
@@ -818,6 +949,11 @@ def screen_markets(pub: KalshiPublicClient, settings: Dict[str, Any]) -> pd.Data
         "effectiveLimit": effective_limit,
         "scannedMarkets": scanned_markets,
         "truncated": bool(requested_limit <= 0 or requested_limit > effective_limit or reached_limit),
+        "screenDurationMs": int((time.perf_counter() - started_at) * 1000),
+        "filterDurationMs": int((ranking_started_at - started_at) * 1000),
+        "rankingDurationMs": int((time.perf_counter() - ranking_started_at) * 1000),
+        "boundedRanking": bounded_source,
+        "retainedMarkets": len(rows),
     }
 
     df = pd.DataFrame(rows)

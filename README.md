@@ -134,6 +134,18 @@ POLYMARKET_PROXY_URL=http://127.0.0.1:18080 \
   .venv/bin/python tools/test_polymarket_proxy.py
 ```
 
+For the Proton WireGuard profile at `~/.config/proton/polymarket.conf`, create
+the `pm-vpn` namespace, start Tinyproxy inside it, and verify a real Gamma API
+request with:
+
+```bash
+sudo tools/start_polymarket_proxy.sh
+```
+
+The script listens on `10.200.0.2:18080` and prints the
+`POLYMARKET_PROXY_URL` value to use for the launcher. The namespace and
+firewall rules need a systemd unit if they must be recreated after reboot.
+
 ### 2. Install and build the web application
 
 ```bash

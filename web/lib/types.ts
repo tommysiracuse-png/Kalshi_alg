@@ -181,7 +181,7 @@ export type ScreenerRunMetrics = {
 };
 
 export type ScreenerRun = ScreenerRunMetrics & {
-  id: string; fleetRunId: string; sessionId: string; sessionName: string;
+  id: string; fleetRunId: string; sessionId: string; sessionName: string; venue?: VenueName | "unknown";
 };
 
 export type ScreenerRunSummary = {

@@ -40,6 +40,9 @@ STANDARD_LIMITS: dict[str, tuple[float, float]] = {
     # token buckets.  Capacities preserve the documented ten-second burst.
     "gamma_markets": (30.0, 300.0),
     "gamma_general": (400.0, 4_000.0),
+    # Polymarket documents 1,000 requests per 10 seconds for the Data API
+    # general bucket; /oi has no narrower published endpoint limit.
+    "data_open_interest": (100.0, 1_000.0),
     "data_positions": (15.0, 150.0),
     "data_trades": (20.0, 200.0),
     "clob_book": (150.0, 1_500.0),

@@ -228,7 +228,22 @@ def default_session_configuration() -> Dict[str, Any]:
         "screener": default_screener_sections(),
         "venues": {
             "kalshi": {"enabled": True, "priority": 100, "maxBots": DEFAULT_MAX_BOTS, "client": {}},
-            "polymarket": {"enabled": False, "priority": 100, "maxBots": DEFAULT_MAX_BOTS, "client": {}},
+            "polymarket": {
+                "enabled": False, "priority": 100, "maxBots": DEFAULT_MAX_BOTS,
+                "client": {
+                    "mirror_enabled": False,
+                    # A mirror-backed screener must never fall back to an
+                    # unbounded synchronous catalog scan while warming.
+                    "mirror_required_complete_snapshot": True,
+                    "mirror_snapshot_max_age_seconds": 60.0,
+                    "mirror_book_stale_after_seconds": 60.0,
+                    "mirror_ws_shards": 1,
+                    "mirror_book_recovery_parallelism": 16,
+                    "mirror_catalog_page_size": 100,
+                    "mirror_sync_interval_seconds": 30.0,
+                    "mirror_max_markets": 0,
+                },
+            },
         },
     }
 
@@ -539,6 +554,21 @@ def _validate_venues(section: Mapping[str, Any], global_max: int) -> Dict[str, A
                     number = _require_number(client_value[key], f"venues.polymarket.client.{key}", integer=True)
                     if number < 1:
                         raise ValueError(f"venues.polymarket.client.{key} must be >= 1")
+            for key in ("mirror_snapshot_max_age_seconds", "mirror_book_stale_after_seconds", "mirror_sync_interval_seconds"):
+                if key in client_value and _require_number(client_value[key], f"venues.polymarket.client.{key}") <= 0:
+                    raise ValueError(f"venues.polymarket.client.{key} must be > 0")
+            for key in ("mirror_ws_shards", "mirror_book_recovery_parallelism", "mirror_catalog_page_size"):
+                if key in client_value:
+                    number = _require_number(client_value[key], f"venues.polymarket.client.{key}", integer=True)
+                    if number < 1:
+                        raise ValueError(f"venues.polymarket.client.{key} must be >= 1")
+            if "mirror_max_markets" in client_value:
+                number = _require_number(client_value["mirror_max_markets"], "venues.polymarket.client.mirror_max_markets", integer=True)
+                if number < 0:
+                    raise ValueError("venues.polymarket.client.mirror_max_markets must be >= 0")
+            for key in ("mirror_enabled", "mirror_required_complete_snapshot"):
+                if key in client_value and not isinstance(client_value[key], bool):
+                    raise ValueError(f"venues.polymarket.client.{key} must be a boolean")
         result[name] = {"enabled": enabled, "priority": int(priority), "maxBots": int(max_bots), "client": client_value}
     return result
 

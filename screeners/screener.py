@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import math
 import os
@@ -156,8 +157,57 @@ class _BaseClientMarketSource:
         # pass shared filter settings to this facade.  The actual settings are
         # applied by the screener lifecycle after market normalization.
         self.settings = settings or {}
+        config = getattr(client, "config", None)
+        self.bounded_results = bool(
+            getattr(client, "mirror_store", None) is not None
+            and bool(getattr(config, "mirror_enabled", False))
+        )
 
     def list_markets(self, *, status: str, limit: int, max_total: int, mve_filter: Optional[str]):
+        config = getattr(self.client, "config", None)
+        mirror = getattr(self.client, "mirror_store", None)
+        if mirror is not None and bool(getattr(config, "mirror_enabled", False)):
+            # Once the local mirror is enabled it is the screening source of
+            # truth. Falling back to the synchronous REST catalog here can
+            # issue tens of thousands of paginated requests and leave a
+            # launcher refresh running indefinitely while the mirror is still
+            # warming. A partial generation is valid as soon as its rows have
+            # fresh books; the reader simply omits markets that are missing
+            # either side or have crossed the stale cutoff.
+            mirror_status = mirror.status()
+            # During a cold sync the mirror database has no published
+            # generation yet, while the child status file already knows that
+            # it is alive and fetching the catalog. Surface that state in the
+            # screener error instead of the misleading ``no_snapshot`` value.
+            status_path = str(getattr(config, "mirror_status_path", "") or "")
+            if status_path:
+                try:
+                    with open(status_path, "r", encoding="utf-8") as handle:
+                        child_status = json.load(handle)
+                    if isinstance(child_status, Mapping):
+                        from polymarket_mirror import merge_mirror_status
+                        mirror_status = merge_mirror_status(mirror_status, child_status)
+                except (OSError, ValueError, TypeError):
+                    pass
+            # Incremental mirror generations are screenable as soon as they
+            # contain one or more active markets with fresh YES and NO books.
+            # The catalog may still be paging in the background; the SQL
+            # reader excludes every missing or stale market from this batch.
+            ready = bool(mirror_status.get("screenable") or mirror_status.get("complete"))
+            age_ok = (
+                ready
+                and int(time.time() * 1000) - int(mirror_status.get("capturedAtMs") or 0)
+                <= int(float(getattr(config, "mirror_snapshot_max_age_seconds", 60.0)) * 1000)
+            )
+            if ready and age_ok:
+                return mirror.iter_payloads(
+                    status="active" if status == "open" else status,
+                    limit=bounded_market_scan_limit(max_total),
+                    max_age_seconds=float(getattr(config, "mirror_snapshot_max_age_seconds", 60.0)),
+                    allow_partial=True,
+                )
+            from polymarket_mirror import MirrorNotReadyError
+            raise MirrorNotReadyError(f"Polymarket mirror not ready: {mirror_status}")
         query = MarketQuery(
             status=status,
             page_size=limit,
@@ -190,6 +240,20 @@ class _BaseClientMarketSource:
         # Yield payloads so the normalized Market list and a second full list
         # of dictionaries are not resident at the same time.
         return (market_to_screen_payload(market) for market in self.client.list_markets(query))
+
+    def vectorized_mirror_rows(self, settings: Mapping[str, object], *, toxic_tickers: set[str], toxic_series: set[str]):
+        mirror = getattr(self.client, "mirror_store", None)
+        if mirror is None or not self.bounded_results:
+            return None
+        return mirror.vectorized_rows(
+            status="active" if str(settings.get("status") or "open") == "open" else str(settings.get("status") or ""),
+            limit=bounded_market_scan_limit(settings.get("max_markets_to_scan")),
+            max_age_seconds=float(getattr(getattr(self.client, "config", None), "mirror_snapshot_max_age_seconds", 60.0)),
+            settings=settings,
+            toxic_tickers=toxic_tickers,
+            toxic_series=toxic_series,
+            allow_partial=True,
+        )
 
 
 class Screener(BaseScreener):
@@ -457,12 +521,16 @@ class Screener(BaseScreener):
             client_activity = self.client.activity_snapshot()
             self._last_scan_metadata.update(dict(client_activity.get("catalog") or {}))
             self._last_scan_metadata.update(dict(client_activity.get("book") or {}))
+            if client_activity.get("mirror") is not None:
+                self._last_scan_metadata["mirror"] = dict(client_activity.get("mirror") or {})
             if "bookReadiness" in client_activity:
                 self._last_scan_metadata["bookReadiness"] = client_activity["bookReadiness"]
         except Exception:
             pass
         warnings = [str(item) for item in screen_frame.attrs.get("warnings", ())]
+        export_started = time.perf_counter()
         export_frame = build_export_dataframe(screen_frame, self.settings)
+        self._last_scan_metadata["exportDurationMs"] = int((time.perf_counter() - export_started) * 1000)
         disabled = set(self.disabled_market_ids())
         funded_shards = self._refresh_funded_shards()
         # Per-shard pick caps (oversubscribed fleets only): a shard can only

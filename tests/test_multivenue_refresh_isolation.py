@@ -93,3 +93,33 @@ def test_refreshes_are_isolated_and_apply_as_each_venue_finishes():
         assert launcher.screeners["polymarket"].calls == ["test"]
 
     asyncio.run(run())
+
+
+def test_mirror_refresh_key_changes_for_books_not_heartbeat():
+    launcher = Launcher.__new__(Launcher)
+
+    class Mirror:
+        def __init__(self):
+            self.payload = {
+                "generationId": "generation-1",
+                "bookRevision": 4,
+                "capturedAtMs": 100,
+                "screenable": True,
+            }
+
+        def status(self):
+            return dict(self.payload)
+
+        def is_alive(self):
+            return True
+
+    mirror = Mirror()
+    launcher.mirror_processes = {"polymarket": mirror}
+    assert launcher._ready_mirror_generation() == "generation-1:4"
+
+    # A heartbeat alone must not schedule another expensive screen.
+    mirror.payload["capturedAtMs"] = 200
+    assert launcher._ready_mirror_generation() == "generation-1:4"
+
+    mirror.payload["bookRevision"] = 5
+    assert launcher._ready_mirror_generation() == "generation-1:5"

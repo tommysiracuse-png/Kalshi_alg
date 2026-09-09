@@ -17,7 +17,7 @@ const summary = (overrides: Partial<ScreenerRunSummary> = {}): ScreenerRunSummar
 });
 
 const run = (overrides: Partial<ScreenerRun>): ScreenerRun => ({
-  id: "screen-new", fleetRunId: "fleet-12345678", sessionId: "session-1", sessionName: "Newer",
+  id: "screen-new", fleetRunId: "fleet-12345678", sessionId: "session-1", sessionName: "Newer", venue: "kalshi",
   status: "running", reason: "scheduled", startedAt: 3_000, endedAt: null, durationMs: null,
   generationId: 2, configuredLimit: 20_000, effectiveLimit: 20_000, scannedMarkets: 20_000,
   apiRequests: 12, apiErrors: 0, added: 2, changed: 1, removed: 0,
@@ -106,7 +106,7 @@ describe("ScreenerHistory", () => {
     const older = run({ id: "screen-old", fleetRunId: "fleet-87654321", sessionName: "Older", status: "succeeded", startedAt: 1_000, endedAt: 2_000, durationMs: 1_000, scannedMarkets: 10_000, apiRequests: 6 });
     render(<ScreenerHistory initial={monitoring([older, run({})])} clockMs={5_000} onLoadMore={vi.fn()} />);
 
-    const requested = ["Session run in", "Status of screener run", "Time Started", "Time Ended", "Markets to Screen", "API Requests to Venue", "Duration", "Latest Changes"];
+    const requested = ["Venue", "Session run in", "Status of screener run", "Time Started", "Time Ended", "Markets to Screen", "API Requests to Venue", "Duration", "Latest Changes"];
     expect(screen.getAllByRole("columnheader").map(header => header.textContent?.replace(/[⋮↕↑↓]/g, ""))).toEqual(requested);
     const rowText = () => [...document.querySelectorAll(".screener-history-table tbody tr")].map(row => row.textContent ?? "");
     expect(rowText()[0]).toContain("Newer");
@@ -116,7 +116,7 @@ describe("ScreenerHistory", () => {
     fireEvent.click(screen.getByLabelText("Screener runs: Time Ended"));
     expect(screen.queryByRole("columnheader", { name: "Time Ended" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Move Session run in right in Screener runs" }));
-    expect(screen.getAllByRole("columnheader")[1]).toHaveTextContent("Session run in");
+    expect(screen.getAllByRole("columnheader")[2]).toHaveTextContent("Session run in");
 
     const sessionHeader = screen.getByRole("columnheader", { name: "Session run in" });
     const resizeHandle = sessionHeader.querySelector(".metrics-column-resize-handle");

@@ -688,6 +688,7 @@ def test_screener_run_history_persists_and_aggregates(tmp_path: Path):
     run = store.claim_run(store.prepare_run()["id"])
     record_id = store.start_screener_run(
         run["id"], reason="scheduled", started_at_ms=1000, configured_limit=20000,
+        venue="polymarket",
     )
     store.finish_screener_run(
         record_id, status="succeeded",
@@ -699,6 +700,7 @@ def test_screener_run_history_persists_and_aggregates(tmp_path: Path):
     result = store.screener_runs(limit=10)
     assert result["items"][0]["scannedMarkets"] == 18000
     assert result["items"][0]["configuredLimit"] == 20000
+    assert result["items"][0]["venue"] == "polymarket"
     assert result["summary"] == {
         "totalRuns": 1, "succeeded": 1, "failed": 0, "interrupted": 0, "running": 0,
         "scannedMarkets": 18000, "apiRequests": 12, "averageDurationMs": 250.0,

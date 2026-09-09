@@ -35,6 +35,7 @@ from portfolio.portfolio_monitor import PortfolioMonitorConfig
 from portfolio.multi_portfolio import aggregate_portfolio_status
 from venue_runtime import build_runtime
 from core.session_config import default_session_configuration, validate_session_configuration, enabled_venues, effective_screener_configuration
+from polymarket_mirror import MirrorConfig, PolymarketMirrorProcess
 
 
 LOGGER = logging.getLogger(__name__)
@@ -153,6 +154,8 @@ class Launcher:
                     "catalog_path": str(self.runtime_dir / "polymarket_catalog.sqlite3"),
                     "book_cache_path": str(self.runtime_dir / "polymarket_books.sqlite3"),
                     "scan_mode": os.getenv("POLYMARKET_SCAN_MODE", "catalog_plus_cached_books").strip(),
+                    "mirror_db_path": str(self.runtime_dir / "polymarket_mirror.sqlite3"),
+                    "mirror_status_path": str(self.runtime_dir / "polymarket_mirror_status.json"),
                     "rate_limit_profile": os.getenv("POLYMARKET_RATE_LIMIT_PROFILE", "standard").strip(),
                     "rest_timeout_seconds": float(os.getenv("POLYMARKET_REST_TIMEOUT_SECONDS", "15") or 15),
                     "rest_connect_timeout_seconds": float(os.getenv("POLYMARKET_REST_CONNECT_TIMEOUT_SECONDS", "10") or 10),
@@ -215,6 +218,27 @@ class Launcher:
             name: ShardedBotManager(manager_configs[name], cleanup_client=self.clients[name] if cleanup_by_venue.get(name) else None)
             for name in manager_configs
         }
+        self.mirror_processes = {}
+        for name, client_config in self.client_configs.items():
+            if name != "polymarket" or not bool(getattr(client_config, "mirror_enabled", False)):
+                continue
+            mirror_config = MirrorConfig(
+                enabled=True,
+                required_complete_snapshot=bool(getattr(client_config, "mirror_required_complete_snapshot", False)),
+                snapshot_max_age_seconds=float(getattr(client_config, "mirror_snapshot_max_age_seconds", 60.0)),
+                book_stale_after_seconds=float(getattr(client_config, "mirror_book_stale_after_seconds", 60.0)),
+                ws_shards=int(getattr(client_config, "mirror_ws_shards", 1)),
+                book_recovery_parallelism=int(getattr(client_config, "mirror_book_recovery_parallelism", 16)),
+                catalog_page_size=int(getattr(client_config, "mirror_catalog_page_size", 100)),
+                sync_interval_seconds=float(getattr(client_config, "mirror_sync_interval_seconds", 30.0)),
+                max_markets=int(getattr(client_config, "mirror_max_markets", 0)),
+            )
+            self.mirror_processes[name] = PolymarketMirrorProcess(
+                client_config,
+                getattr(client_config, "mirror_db_path", str(self.runtime_dir / "polymarket_mirror.sqlite3")),
+                getattr(client_config, "mirror_status_path", str(self.runtime_dir / "polymarket_mirror_status.json")),
+                mirror_config,
+            )
         self.manager = MultiVenueBotManager(
             self.managers,
             global_max_bots=int(self.session_configuration["launcher"]["maxBots"]),
@@ -243,6 +267,8 @@ class Launcher:
         self._last_metric_sample_ms = 0
         self._observability_warning: Optional[str] = None
         self._last_observability_warning_log_ms = 0
+        self._last_mirror_generation_seen: Optional[str] = None
+        self._last_mirror_refresh_ms = 0
         from core.session_store import RunMetricsAccumulator
         self._metrics = RunMetricsAccumulator(self.started_at_ms)
         self._activity = SessionActivityAccumulator()
@@ -254,6 +280,44 @@ class Launcher:
         self.run_artifact_path.mkdir(parents=True, exist_ok=True)
         with (self.run_artifact_path / "launcher.log").open("a", encoding="utf-8") as handle:
             handle.write(f"{int(time.time() * 1000)} {message}\n")
+
+    def _start_mirrors(self) -> None:
+        for venue, process in self.mirror_processes.items():
+            try:
+                process.start()
+                LOGGER.info("started %s mirror process pid=%s", venue, process.pid)
+            except Exception as exc:
+                self.last_error = f"{venue} mirror failed to start: {exc}"
+                LOGGER.exception("POLYMARKET_MIRROR_START_ERROR")
+
+    def _stop_mirrors(self) -> None:
+        for venue, process in self.mirror_processes.items():
+            try:
+                process.stop()
+            except Exception:
+                LOGGER.exception("POLYMARKET_MIRROR_STOP_ERROR venue=%s", venue)
+
+    def _ready_mirror_generation(self, venue: str = "polymarket") -> Optional[str]:
+        """Return a newly published mirror generation, if one is ready."""
+        process = self.mirror_processes.get(venue)
+        if process is None:
+            return None
+        try:
+            status = process.status()
+        except Exception:
+            return None
+        if not bool(status.get("screenable") or status.get("complete")):
+            return None
+        generation = str(status.get("generationId") or "").strip()
+        if not generation:
+            return None
+        # ``capturedAtMs`` is a heartbeat and changes even when no book did.
+        # Use the book revision so a refresh is requested only after the
+        # mirror actually publishes new book data. The generation is retained
+        # so a newly cataloged partial generation is screened immediately even
+        # when it reuses already cached books.
+        revision = int(status.get("bookRevision") or 0)
+        return f"{generation}:{revision}"
 
     # Manager events that mean the fleet degraded or recovered.  They are
     # logged at WARNING and appended to the run log so an operator reading
@@ -339,6 +403,13 @@ class Launcher:
                 f"launcher:{int(launcher_activity.get('startedAtMs') or self.started_at_ms)}",
                 launcher_activity,
             )]
+            mirror_status = (launcher_activity.get("mirror") or {}) if isinstance(launcher_activity, dict) else {}
+            mirror_activity = mirror_status.get("apiActivity") if isinstance(mirror_status, dict) else None
+            if mirror_activity and venue in self.mirror_processes:
+                sources.append((
+                    f"mirror:{venue}",
+                    mirror_activity,
+                ))
             broker = venue_manager.get("broker") or {}
             broker_activity = broker.get("apiActivity") or {}
             if broker_activity and broker.get("running"):
@@ -395,6 +466,14 @@ class Launcher:
             "manager": manager_monitoring,
             "clients": manager_status.get("clients", []),
             "venueMonitoring": venue_rows,
+            "mirrors": {
+                venue: {
+                    "pid": process.pid,
+                    "running": process.is_alive(),
+                    "status": process.status(),
+                }
+                for venue, process in self.mirror_processes.items()
+            },
             "screener": self.screeners[self.enabled_venues[0]].status_snapshot(),
             "portfolio": self.portfolios[self.enabled_venues[0]].status_snapshot(),
             "portfolioAggregate": aggregate_portfolio_status(portfolio_statuses, list(self.enabled_venues)),
@@ -661,6 +740,7 @@ class Launcher:
                     started_at_ms=int(time.time() * 1000),
                     configured_limit=int(configured_limit) if configured_limit is not None else None,
                     artifact_path=str(self.run_artifact_path) if self.run_artifact_path else None,
+                    venue=selected_venue,
                 )
                 self._active_screener_record_ids[selected_venue] = record_id
             except Exception as exc:
@@ -673,6 +753,18 @@ class Launcher:
         )
         try:
             while not refresh_task.done():
+                # A signal can arrive while the startup/scheduled screener is
+                # doing synchronous venue I/O in its worker thread. Do not
+                # make shutdown wait for the full catalog scan; cancel the
+                # asyncio coordination task and let its daemon worker unwind
+                # independently.
+                if self.shutdown_requested.is_set():
+                    self.publish_status("stopping")
+                    cancel_scan = getattr(screener.client, "cancel_screener_scan", None)
+                    if callable(cancel_scan):
+                        cancel_scan()
+                    refresh_task.cancel()
+                    raise asyncio.CancelledError
                 self.publish_status("stopping" if self.shutdown_requested.is_set() else "running")
                 try:
                     await asyncio.wait_for(asyncio.shield(refresh_task), timeout=0.5)
@@ -714,6 +806,9 @@ class Launcher:
             )
             return True
         except asyncio.CancelledError:
+            cancel_scan = getattr(screener.client, "cancel_screener_scan", None)
+            if callable(cancel_scan):
+                cancel_scan()
             if not refresh_task.done():
                 refresh_task.cancel()
                 try:
@@ -781,6 +876,12 @@ class Launcher:
             # already-quoting fast-venue workers are recycled as stale.
             pending = set(tasks)
             while pending:
+                if self.shutdown_requested.is_set():
+                    self.publish_status("stopping")
+                    for task in pending:
+                        task.cancel()
+                    await asyncio.gather(*pending, return_exceptions=True)
+                    return False
                 completed, pending = await asyncio.wait(
                     pending, timeout=0.5, return_when=asyncio.FIRST_COMPLETED,
                 )
@@ -869,6 +970,7 @@ class Launcher:
         self.publish_status("starting")
         control_server = ControlServer(self.socket_path, self.control_requests, self._status_provider)
         control_server.start()
+        self._start_mirrors()
         loop = asyncio.get_running_loop()
 
         def request_shutdown() -> None:
@@ -905,6 +1007,7 @@ class Launcher:
                 self.next_refresh_at = None
             elif self.arguments.run_screener_on_start:
                 await self.refresh("startup")
+                self._last_mirror_generation_seen = self._ready_mirror_generation()
             else:
                 for venue in self.enabled_venues:
                     if venue == self.venue:
@@ -954,6 +1057,27 @@ class Launcher:
                     if venue not in self._portfolio_tasks and portfolio.due():
                         self._portfolio_tasks[venue] = asyncio.create_task(portfolio.refresh())
                 self._portfolio_task = self._portfolio_tasks.get(self.venue)
+                # A cold mirror publishes usable pages while its catalog is
+                # still syncing. Trigger throttled Polymarket screens from
+                # those partial generations instead of waiting for the full
+                # catalog or the normal refresh interval.
+                mirror_generation = self._ready_mirror_generation()
+                polymarket_screener = self.screeners.get("polymarket")
+                now_ms = int(time.time() * 1000)
+                if (
+                    mirror_generation
+                    and mirror_generation != self._last_mirror_generation_seen
+                    and polymarket_screener is not None
+                    and not bool(polymarket_screener.status_snapshot().get("running"))
+                    and now_ms - self._last_mirror_refresh_ms >= 5_000
+                ):
+                    self._last_mirror_refresh_ms = now_ms
+                    refreshed = await self._refresh_one("mirror_ready", "polymarket", True)
+                    # Leave the revision pending after a failed read (for
+                    # example a transient SQLite busy error) so the same
+                    # fresh batch is retried after the normal throttle.
+                    if refreshed:
+                        self._last_mirror_generation_seen = mirror_generation
                 if self.next_refresh_at is not None and time.time() >= self.next_refresh_at:
                     await self.refresh("scheduled")
                 self._drain_manager_events()
@@ -995,9 +1119,18 @@ class Launcher:
                     self._drain_manager_events()
                 except Exception as exc:
                     self._record_observability_failure("log manager events", exc)
-                for task in list(getattr(self, "_portfolio_tasks", {}).values()):
+                # Portfolio refreshes use daemon worker threads for blocking
+                # venue calls. Await them only briefly during shutdown; an
+                # unresponsive REST call must not hold the launcher process
+                # open after the fleet has already been stopped.
+                portfolio_tasks = list(getattr(self, "_portfolio_tasks", {}).values())
+                for task in portfolio_tasks:
                     try:
-                        await task
+                        await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
+                    except asyncio.TimeoutError:
+                        task.cancel()
+                    except asyncio.CancelledError:
+                        pass
                     except Exception:
                         pass
                 self._portfolio_tasks = {}
@@ -1005,8 +1138,22 @@ class Launcher:
                 if shutdown_error is None:
                     # Replace the pre-stop portfolio cache so the final status
                     # cannot keep showing orders that cleanup just removed.
-                    await asyncio.gather(*(portfolio.refresh() for portfolio in self.portfolios.values()), return_exceptions=True)
-                await asyncio.gather(*(client.close() for client in self.clients.values()), return_exceptions=True)
+                    # This is best-effort and bounded: shutdown must not
+                    # depend on another venue round trip.
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.gather(*(portfolio.refresh() for portfolio in self.portfolios.values()), return_exceptions=True),
+                            timeout=5.0,
+                        )
+                    except asyncio.TimeoutError:
+                        pass
+                async def close_client(client: object) -> None:
+                    try:
+                        await asyncio.wait_for(client.close(), timeout=5.0)  # type: ignore[attr-defined]
+                    except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
+                        pass
+                await asyncio.gather(*(close_client(client) for client in self.clients.values()))
+                self._stop_mirrors()
                 control_server.stop()
                 self.publish_status("shutdown_failed" if shutdown_error else "stopped")
                 if self.session_store is not None and self.run_id:

@@ -87,6 +87,78 @@ def test_polymarket_positions_retain_data_api_marks_for_archived_markets():
     assert position.market_url == "https://polymarket.com/event/archived-market"
 
 
+def test_polymarket_market_normalization_keeps_missing_open_interest_optional():
+    client = PolymarketClient(PolymarketClientConfig())
+    base = {
+        "conditionId": "condition-1",
+        "question": "Question",
+        "active": True,
+        "outcomes": ["Yes", "No"],
+        "clobTokenIds": ["yes", "no"],
+    }
+
+    missing = client._normalize_market(dict(base))
+    supplied = client._normalize_market({**base, "conditionId": "condition-2", "openInterest": "12.34"})
+    explicit_zero = client._normalize_market({**base, "conditionId": "condition-3", "openInterest": 0})
+
+    assert missing is not None and missing.open_interest_units is None
+    assert supplied is not None and supplied.open_interest_units == 1_234
+    assert explicit_zero is not None and explicit_zero.open_interest_units == 0
+
+
+def test_polymarket_hydrates_open_interest_in_batches_and_preserves_missing_values():
+    client = PolymarketClient(PolymarketClientConfig())
+    calls = []
+
+    class Data:
+        def get(self, path, *, params, operation):
+            calls.append((path, dict(params), operation))
+            return [
+                {"market": "condition-1", "value": "12.34"},
+                {"market": "condition-2", "value": 0},
+            ]
+
+    client.data_http = Data()
+    markets = [
+        Market("condition-1", open_interest_units=None),
+        Market("condition-2", open_interest_units=None),
+        Market("condition-3", open_interest_units=9_999),
+    ]
+
+    hydrated, stats = client.hydrate_market_open_interest(markets)
+
+    assert len(calls) == 1
+    assert calls[0][0] == "/oi"
+    assert calls[0][1]["market"] == "condition-1,condition-2,condition-3"
+    assert calls[0][2] == "polymarket_get_open_interest"
+    assert [market.open_interest_units for market in hydrated] == [1_234, 0, None]
+    assert stats == {
+        "batches": 1,
+        "marketsRequested": 3,
+        "marketsResolved": 2,
+        "marketsMissing": 1,
+        "apiErrors": 0,
+    }
+
+
+def test_polymarket_open_interest_batch_failure_does_not_abort_catalog_enrichment():
+    client = PolymarketClient(PolymarketClientConfig())
+
+    class Data:
+        def get(self, path, *, params, operation):
+            raise RuntimeError("temporary data api failure")
+
+    client.data_http = Data()
+    hydrated, stats = client.hydrate_market_open_interest([Market("condition-1")])
+
+    assert hydrated[0].open_interest_units is None
+    assert stats["batches"] == 1
+    assert stats["marketsRequested"] == 1
+    assert stats["marketsResolved"] == 0
+    assert stats["marketsMissing"] == 1
+    assert stats["apiErrors"] == 1
+
+
 def test_polymarket_market_pagination_stops_on_a_cursor_cycle():
     market_payload = {
         "conditionId": "condition-1",
@@ -395,6 +467,39 @@ def test_polymarket_market_websocket_bootstrap_requests_initial_dump():
 
     assert result["yes"].bid_units == 4_000
     assert result["no"].ask_units == 7_000
+    subscription = json.loads(client.websocket_client.messages[0])
+    assert subscription["initial_dump"] is True
+    assert subscription["assets_ids"] == ["yes", "no"]
+
+
+def test_polymarket_market_stream_can_start_without_waiting_for_initial_dump():
+    class Ws:
+        def __init__(self):
+            self.messages = []
+
+        async def subscribe(self, messages):
+            self.messages.extend(messages)
+
+        async def close(self):
+            return None
+
+        def __aiter__(self):
+            async def iterate():
+                if False:
+                    yield None
+            return iterate()
+
+    client = PolymarketClient(PolymarketClientConfig())
+    client.websocket_client = Ws()
+    markets = [Market("condition-1", venue="polymarket", yes_token_id="yes", no_token_id="no")]
+
+    import asyncio
+    async def start_and_close():
+        await client.start_market_book_stream(markets)
+        await asyncio.sleep(0)
+        await client.close()
+
+    asyncio.run(start_and_close())
     subscription = json.loads(client.websocket_client.messages[0])
     assert subscription["initial_dump"] is True
     assert subscription["assets_ids"] == ["yes", "no"]

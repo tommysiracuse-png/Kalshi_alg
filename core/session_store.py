@@ -39,6 +39,26 @@ def now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _screener_venue(configuration: Mapping[str, Any], reason: str = "") -> str:
+    """Infer a historical screener venue when older rows lack the column."""
+    configured = str(configuration.get("venue") or "").strip().lower()
+    if configured in {"kalshi", "polymarket"}:
+        return configured
+    if str(reason or "").strip().lower() == "mirror_ready":
+        return "polymarket"
+    venues = configuration.get("venues")
+    if isinstance(venues, Mapping):
+        enabled = [
+            str(name).strip().lower()
+            for name, value in venues.items()
+            if str(name).strip().lower() in {"kalshi", "polymarket"}
+            and isinstance(value, Mapping) and bool(value.get("enabled"))
+        ]
+        if len(enabled) == 1:
+            return enabled[0]
+    return "unknown"
+
+
 class SessionStore:
     def __init__(self, root: Path) -> None:
         self.root = Path(root).expanduser().resolve()
@@ -101,6 +121,7 @@ class SessionStore:
                     fleet_run_id TEXT NOT NULL,
                     session_id TEXT NOT NULL,
                     session_name TEXT NOT NULL,
+                    venue TEXT NOT NULL DEFAULT 'unknown',
                     generation_id INTEGER,
                     reason TEXT NOT NULL,
                     status TEXT NOT NULL,
@@ -130,6 +151,35 @@ class SessionStore:
                 );
                 PRAGMA user_version=1;
             """)
+            screener_columns = {
+                str(row["name"])
+                for row in db.execute("PRAGMA table_info(screener_runs)").fetchall()
+            }
+            venue_column_added = "venue" not in screener_columns
+            if venue_column_added:
+                db.execute(
+                    "ALTER TABLE screener_runs ADD COLUMN venue TEXT NOT NULL DEFAULT 'unknown'"
+                )
+            # Older live rows predate the venue field. Recover it when the
+            # parent run configuration makes the answer unambiguous; rows
+            # from multi-venue sessions remain explicitly unknown.
+            if venue_column_added:
+                legacy_rows = db.execute(
+                    """SELECT screener_runs.id, screener_runs.reason, runs.configuration_json
+                       FROM screener_runs JOIN runs ON runs.id=screener_runs.fleet_run_id
+                       WHERE screener_runs.venue='unknown'"""
+                ).fetchall()
+                for row in legacy_rows:
+                    try:
+                        configuration = json.loads(row["configuration_json"] or "{}")
+                    except (TypeError, ValueError):
+                        configuration = {}
+                    venue = _screener_venue(configuration, row["reason"])
+                    if venue != "unknown":
+                        db.execute(
+                            "UPDATE screener_runs SET venue=? WHERE id=?",
+                            (venue, row["id"]),
+                        )
 
     @staticmethod
     def _configuration(row: sqlite3.Row) -> Dict[str, Any]:
@@ -386,6 +436,7 @@ class SessionStore:
         return {
             "id": row["id"], "fleetRunId": row["fleet_run_id"],
             "sessionId": row["session_id"], "sessionName": row["session_name"],
+            "venue": row["venue"] or "unknown",
             "generationId": row["generation_id"], "reason": row["reason"],
             "status": row["status"], "startedAt": row["started_at_ms"],
             "endedAt": row["ended_at_ms"], "durationMs": row["duration_ms"],
@@ -401,6 +452,7 @@ class SessionStore:
     def start_screener_run(
         self, fleet_run_id: str, *, reason: str, started_at_ms: int,
         configured_limit: Optional[int], artifact_path: Optional[str] = None,
+        venue: str = "unknown",
     ) -> Optional[str]:
         """Create a durable running screener record for a fleet refresh."""
         with self._connect() as db:
@@ -413,11 +465,12 @@ class SessionStore:
             source_key = f"live:{record_id}"
             db.execute(
                 """INSERT INTO screener_runs(
-                    id,source_key,fleet_run_id,session_id,session_name,reason,status,
+                    id,source_key,fleet_run_id,session_id,session_name,venue,reason,status,
                     started_at_ms,configured_limit,artifact_path,created_at_ms
-                ) VALUES(?,?,?,?,?,?, 'running',?,?,?,?)""",
+                ) VALUES(?,?,?,?,?,?,?,'running',?,?,?,?)""",
                 (
                     record_id, source_key, fleet_run_id, parent["session_id"], parent["session_name"],
+                    str(venue or "unknown").strip().lower() or "unknown",
                     str(reason or "scheduled"), int(started_at_ms),
                     int(configured_limit) if configured_limit is not None else None,
                     artifact_path, now_ms(),
@@ -499,12 +552,15 @@ class SessionStore:
                     )
                 except OSError:
                     continue
+                configuration: Dict[str, Any] = {}
+                configured_venue = "unknown"
                 try:
                     configuration = json.loads(run["configuration_json"] or "{}")
                     screener = configuration.get("screener") or {}
                     if isinstance(screener, dict) and isinstance(screener.get("general"), dict):
                         screener = screener["general"]
                     configured = screener.get("maxMarketsToScan") if isinstance(screener, dict) else None
+                    configured_venue = _screener_venue(configuration)
                 except (TypeError, ValueError, AttributeError):
                     configured = None
                 for path in paths:
@@ -524,6 +580,11 @@ class SessionStore:
                     if status == "running":
                         status = "interrupted"
                     changes = payload.get("changes") if isinstance(payload.get("changes"), dict) else {}
+                    reason = str(last_run.get("reason") or payload.get("reason") or "unknown")
+                    venue = str(
+                        last_run.get("venue") or payload.get("venue") or configured_venue
+                        or ("polymarket" if reason == "mirror_ready" else "unknown")
+                    ).strip().lower() or "unknown"
                     scan = payload.get("scanMetadata") if isinstance(payload.get("scanMetadata"), dict) else {}
                     record_id = str(uuid.uuid5(uuid.NAMESPACE_URL, source_key))
                     duration = last_run.get("durationMs", payload.get("lastDurationMs"))
@@ -550,15 +611,14 @@ class SessionStore:
                         changes_before = db.total_changes
                         db.execute(
                             """INSERT OR IGNORE INTO screener_runs(
-                                id,source_key,fleet_run_id,session_id,session_name,generation_id,reason,status,
+                                id,source_key,fleet_run_id,session_id,session_name,venue,generation_id,reason,status,
                                 started_at_ms,ended_at_ms,duration_ms,configured_limit,effective_limit,scanned_markets,
                                 api_requests,api_errors,added_count,changed_count,removed_count,inventory_carried_count,
                                 inventory_unknown_count,warnings_json,error,artifact_path,created_at_ms
-                            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                            ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                             (
                                 record_id, source_key, run["id"], run["session_id"], run["session_name"],
-                                generation,
-                                str(last_run.get("reason") or payload.get("reason") or "unknown"), status,
+                                venue, generation, reason, status,
                                 int(started), int(ended) if isinstance(ended, (int, float)) else None,
                                 int(duration) if isinstance(duration, (int, float)) else None,
                                 last_run.get("configuredLimit", scan.get("requestedLimit", configured)),
