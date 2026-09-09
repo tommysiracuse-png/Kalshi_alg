@@ -7,6 +7,7 @@ import heapq
 import logging
 import multiprocessing as mp
 import queue
+import re
 import threading
 import time
 import uuid
@@ -93,6 +94,20 @@ _NO_VENUE_OPERATIONS = {
 # HTTP gateway statuses that mean the venue front door failed the call, not
 # that the call was rejected.
 _GATEWAY_FAILURE_STATUSES = {502, 503, 504}
+
+
+def _compact_api_error(error: BaseException) -> str:
+    """Return a bounded, credential/HTML-free error description."""
+    status = getattr(error, "status_code", None)
+    method = str(getattr(error, "method", "") or "").upper()
+    path = str(getattr(error, "path", "") or "")
+    if status is not None:
+        target = f"{method} {path}".strip()
+        return f"{target} failed {int(status)}".strip()[:200]
+    text = str(error or "")
+    text = re.sub(r"https?://[^\s/@:]+:[^\s/@]+@", "https://[redacted]@", text)
+    text = re.sub(r"<[^>]{0,200}>", "", text)
+    return " ".join(text.split())[:200]
 
 
 def _transport_error_types() -> tuple[type, ...]:
@@ -1084,6 +1099,10 @@ class BrokerRpcClient:
         self._channel = channel
         self._pending: dict[str, "queue.Queue[Mapping[str, Any]]"] = {}
         self._pending_lock = threading.Lock()
+        self._api_error_lock = threading.Lock()
+        self._api_errors: dict[str, Any] = {
+            "total": 0, "byOperation": {}, "last": None,
+        }
         self._closed = threading.Event()
         self.rpc_timeout_seconds = float(rpc_timeout_seconds)
         # Shutdown-only escape hatches (see prepare_for_shutdown): when the
@@ -1101,6 +1120,35 @@ class BrokerRpcClient:
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._delegate, name)
+
+    def _record_api_error(self, operation: str, error: BaseException, *, status_code: Any = None) -> None:
+        operation = str(operation or "unknown")
+        status = status_code if status_code is not None else getattr(error, "status_code", None)
+        record = {
+            "operation": operation,
+            "statusCode": int(status) if isinstance(status, (int, float)) else None,
+            "errorClass": type(error).__name__,
+            "timestampMs": int(time.time() * 1000),
+            "message": _compact_api_error(error),
+        }
+        with self._api_error_lock:
+            self._api_errors["total"] = int(self._api_errors.get("total", 0)) + 1
+            by_operation = self._api_errors.setdefault("byOperation", {})
+            item = by_operation.setdefault(operation, {"count": 0, "last": None})
+            item["count"] = int(item.get("count", 0)) + 1
+            item["last"] = record
+            self._api_errors["last"] = record
+
+    def api_errors_snapshot(self) -> dict[str, Any]:
+        with self._api_error_lock:
+            return {
+                "total": int(self._api_errors.get("total", 0)),
+                "byOperation": {
+                    str(operation): {"count": int(item.get("count", 0)), "last": dict(item.get("last") or {})}
+                    for operation, item in (self._api_errors.get("byOperation") or {}).items()
+                },
+                "last": dict(self._api_errors.get("last") or {}) if self._api_errors.get("last") else None,
+            }
 
     @property
     def direct_only(self) -> bool:
@@ -1159,9 +1207,11 @@ class BrokerRpcClient:
         try:
             response = waiter.get(timeout=wait_seconds)
         except queue.Empty as exc:
+            timeout_error = TimeoutError(f"execution broker timed out during {operation}")
+            self._record_api_error(operation, timeout_error)
             if self._fallback_enabled and fallback is not None:
                 return fallback()
-            raise TimeoutError(f"execution broker timed out during {operation}") from exc
+            raise timeout_error from exc
         finally:
             with self._pending_lock:
                 self._pending.pop(request_id, None)
@@ -1174,7 +1224,16 @@ class BrokerRpcClient:
                 precise = _ERROR_TYPES.get(str(detail.get("error_class") or ""))
                 if precise is not None and issubclass(precise, error_type):
                     error_type = precise
-            raise error_type(str(response.get("error") or f"broker {operation} failed"))
+            error = error_type(str(response.get("error") or f"broker {operation} failed"))
+            status_code = response.get("status_code")
+            if status_code is not None:
+                try:
+                    setattr(error, "status_code", int(status_code))
+                except (TypeError, ValueError):
+                    pass
+            setattr(error, "operation", str(response.get("operation") or operation))
+            self._record_api_error(operation, error, status_code=status_code)
+            raise error
         return response.get("result")
 
     def ping(self, *, timeout: float = 3.0) -> Any:
@@ -1464,11 +1523,13 @@ class ExecutionBrokerProcess(mp.Process):
             detail = {"error_class": ShardExposureCapError.__name__, **error.detail}
         target.put({
             "request_id": request.request_id,
+            "operation": request.operation,
             "ok": error is None,
             "result": result,
-            "error": str(error) if error else None,
+            "error": _compact_api_error(error) if error else None,
             "error_type": error_type,
             "error_detail": detail,
+            "status_code": getattr(error, "status_code", None) if error else None,
         })
 
     def _reserve_exposure(
@@ -1907,12 +1968,59 @@ class ExecutionBrokerProcess(mp.Process):
             # instant the read started so a later copy of it can never roll
             # back fills applied since.
             self._ledger.record_positions(positions, at_ms=positions_at_ms)
+            orders = client.list_account_orders(
+                AccountOrderQuery(
+                    status="" if self.venue.lower() == "polymarket" else "resting",
+                    page_size=1_000,
+                )
+            )
+            if self.venue.lower() == "polymarket":
+                orders = [
+                    item for item in orders
+                    if str(getattr(item, "status", "")).lower() in {"live", "resting", "open"}
+                ]
             return {
                 "limits": client.get_account_limits(),
                 "balance": client.get_account_balance(),
-                "orders": client.list_account_orders(AccountOrderQuery(status="resting", page_size=1_000)),
+                "orders": orders,
                 "positions": positions,
                 "positions_at_ms": positions_at_ms,
+            }, True
+        if request.operation == "startup_account_snapshot":
+            from clients.models import AccountOrderQuery, AccountPositionQuery
+            captured_at_ms = int(time.time() * 1000)
+            positions = []
+            orders = []
+            positions_error = ""
+            orders_error = ""
+            try:
+                positions = client.list_account_positions(
+                    AccountPositionQuery(nonzero_only=True, page_size=1_000)
+                )
+            except Exception as exc:
+                positions_error = _compact_api_error(exc)
+            try:
+                orders = client.list_account_orders(
+                    AccountOrderQuery(
+                        status="" if self.venue.lower() == "polymarket" else "resting",
+                        page_size=1_000,
+                    )
+                )
+                if self.venue.lower() == "polymarket":
+                    orders = [
+                        item for item in orders
+                        if str(getattr(item, "status", "")).lower() in {"live", "resting", "open"}
+                    ]
+            except Exception as exc:
+                orders_error = _compact_api_error(exc)
+            return {
+                "captured_at_ms": captured_at_ms,
+                "positions": positions,
+                "orders": orders,
+                "positions_available": not bool(positions_error),
+                "orders_available": not bool(orders_error),
+                "positions_error": positions_error,
+                "orders_error": orders_error,
             }, True
         if request.operation == "shard_exposure_limits":
             # Controller-pushed live cap: allocatable cash per exchange shard
@@ -2014,6 +2122,42 @@ class ExecutionBrokerProcess(mp.Process):
         self._reader_errors = 0
         # Cleanup ops run detached from the loop: (future, request, deadline).
         in_flight: list[tuple[Future, BrokerRequest, float]] = []
+        queue_wait_stats: dict[str, Any] = {
+            "count": 0, "totalMs": 0, "maxMs": 0, "lastMs": 0,
+            "lastOperation": None, "byOperation": {},
+        }
+        api_error_stats: dict[str, Any] = {"total": 0, "byOperation": {}, "last": None}
+
+        def record_queue_wait(request: BrokerRequest) -> None:
+            wait_ms = max(0, int(time.time() * 1000) - int(request.submitted_at_ms))
+            queue_wait_stats["count"] += 1
+            queue_wait_stats["totalMs"] += wait_ms
+            queue_wait_stats["maxMs"] = max(int(queue_wait_stats["maxMs"]), wait_ms)
+            queue_wait_stats["lastMs"] = wait_ms
+            queue_wait_stats["lastOperation"] = request.operation
+            item = queue_wait_stats["byOperation"].setdefault(
+                request.operation, {"count": 0, "totalMs": 0, "maxMs": 0, "lastMs": 0},
+            )
+            item["count"] += 1
+            item["totalMs"] += wait_ms
+            item["maxMs"] = max(int(item["maxMs"]), wait_ms)
+            item["lastMs"] = wait_ms
+
+        def record_api_error(request: BrokerRequest, error: BaseException) -> None:
+            operation = str(request.operation or "unknown")
+            status = getattr(error, "status_code", None)
+            record = {
+                "operation": operation,
+                "statusCode": int(status) if isinstance(status, (int, float)) else None,
+                "errorClass": type(error).__name__,
+                "timestampMs": int(time.time() * 1000),
+                "message": _compact_api_error(error),
+            }
+            api_error_stats["total"] += 1
+            item = api_error_stats["byOperation"].setdefault(operation, {"count": 0, "last": None})
+            item["count"] += 1
+            item["last"] = record
+            api_error_stats["last"] = record
 
         def note_success() -> None:
             nonlocal last_success_at_ms, consecutive_timeouts
@@ -2026,6 +2170,8 @@ class ExecutionBrokerProcess(mp.Process):
                 consecutive_timeouts += 1
 
         def respond_all(request: BrokerRequest, *, result: Any = None, error: Optional[BaseException] = None) -> None:
+            if error is not None:
+                record_api_error(request, error)
             self._respond(request, result=result, error=error)
             for follower in followers.pop(request.request_id, []):
                 self._respond(follower, result=result, error=error)
@@ -2107,6 +2253,21 @@ class ExecutionBrokerProcess(mp.Process):
                             "pending": len(pending), "in_flight": len(in_flight),
                             "dropped_stale": dropped_stale, "decode_errors": decode_errors,
                             "reader_errors": reader_errors,
+                            "queue_wait_ms": {
+                                **queue_wait_stats,
+                                "averageMs": (
+                                    queue_wait_stats["totalMs"] / queue_wait_stats["count"]
+                                    if queue_wait_stats["count"] else 0
+                                ),
+                                "byOperation": {
+                                    op: {
+                                        **item,
+                                        "averageMs": item["totalMs"] / item["count"] if item["count"] else 0,
+                                    }
+                                    for op, item in queue_wait_stats["byOperation"].items()
+                                },
+                            },
+                            "api_errors": api_error_stats,
                             "shard_exposure": self._ledger.snapshot(self._registry.snapshot()),
                             "api_activity": client.activity_snapshot(),
                         })
@@ -2146,6 +2307,7 @@ class ExecutionBrokerProcess(mp.Process):
                 if not pending:
                     continue
                 urgency, _seq, request = heapq.heappop(pending)
+                record_queue_wait(request)
                 if request.request_id in superseded:
                     continue
                 if request.operation == "quote_intent":
@@ -2178,7 +2340,9 @@ class ExecutionBrokerProcess(mp.Process):
                         else normal_bucket.consume(cost)
                     )
                 else:
-                    reserved_read = request.operation in {"limits", "balance", "admission_snapshot"}
+                    reserved_read = request.operation in {
+                        "limits", "balance", "admission_snapshot", "startup_account_snapshot",
+                    }
                     permitted = (
                         (reserved_read_bucket.consume(cost) or normal_read_bucket.consume(cost))
                         if reserved_read else normal_read_bucket.consume(cost)

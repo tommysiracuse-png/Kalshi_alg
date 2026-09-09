@@ -141,6 +141,12 @@ export type ApiActivity = {
   openInterest?: { batches?: number; marketsRequested?: number; marketsResolved?: number; marketsMissing?: number; apiErrors?: number; forbiddenResponses?: number; cloudflare403?: number; retries?: number; retryExhausted?: number; suppressedRequests?: number };
   openInterestDiagnostics?: { lastCloudflare?: { atMs?: number; statusCode?: number; batch?: number; attempt?: number; cfRay?: string; cfCacheStatus?: string; server?: string; retryAfter?: string } | null };
 };
+export type ApiErrorRecord = {
+  operation?: string; statusCode?: number | null; errorClass?: string; timestampMs?: number; message?: string;
+};
+export type ApiErrors = {
+  total?: number; byOperation?: Record<string, { count?: number; last?: ApiErrorRecord | null }>; last?: ApiErrorRecord | null;
+};
 export type ClientMonitoring = {
   venue?: string; workerId?: string; marketId: string; title: string; pid?: number; lifecycle?: string; socketHealthy?: boolean; restartCount?: number;
   runtime?: { startedAtMs?: number; runningForMs?: number };
@@ -149,7 +155,7 @@ export type ClientMonitoring = {
   pnl?: PnlTotals & { sessionPositionUnits?: number; markPriceUnits?: number | null; markSource?: string; markAtMs?: number | null };
   fills?: { count?: number; quantityUnits?: number; lastFillAtMs?: number | null; recent?: Array<Record<string, unknown>> };
   orderActivity?: { byAction?: Record<string, { attempts?: number; successes?: number; errors?: number }>; lastActivityAtMs?: number | null; lastCreateAtMs?: number | null; active?: Record<string, Record<string, unknown>>; recent?: Array<Record<string, unknown>> };
-  apiActivity?: ApiActivity;
+  apiActivity?: ApiActivity; apiErrors?: ApiErrors;
   watchdog?: { running?: boolean; mode?: string; confidence?: number; reason?: string; updatedAtMs?: number };
 };
 export type Monitoring = {
@@ -157,9 +163,9 @@ export type Monitoring = {
   manager: { running?: boolean; lifecycle?: string; startedAtMs?: number; runningForMs?: number; activeVenues?: string[]; configuredBots?: number; botsRunning?: number; portfolio?: { items?: Array<{ marketId: string; title?: string; positionUnits?: number | null; updatedAtMs?: number; stale?: boolean; available?: boolean }>; grossPositionUnits?: number; netPositionUnits?: number; unknownMarkets?: number; staleMarkets?: number }; pnl?: PnlTotals; apiActivity?: ApiActivity; threadBudget?: Record<string, number | null> };
   venues?: Array<{ venue: string; active: boolean; botsRunning: number; configuredBots: number; apiActivity?: ApiActivity }>;
   clients: ClientMonitoring[];
-  workers?: Array<{ venue?: string; workerId: string; pid?: number; running: boolean; phase?: string; lastRecoveryError?: string | null; recoveryReason?: string | null; startedAtMs?: number | null; runningForMs?: number | null; assignedMarkets: number; marketIds?: string[]; botsRunning?: number; startupPendingMarkets?: string[]; startupAttempts?: Record<string, number>; startupProgressAtMs?: number | null; startupElapsedMs?: number; lastStartupError?: string | null; workerError?: string | null; watchdog?: { mode?: string; counts?: Record<string, number> }; heartbeatAtMs?: number | null; stale: boolean; memoryRssBytes?: number | null; queueDepth?: number | null; eventLagMs?: number | null; apiActivity?: ApiActivity }>;
+  workers?: Array<{ venue?: string; workerId: string; pid?: number; running: boolean; phase?: string; lastRecoveryError?: string | null; recoveryReason?: string | null; startedAtMs?: number | null; runningForMs?: number | null; assignedMarkets: number; marketIds?: string[]; botsRunning?: number; startupPendingMarkets?: string[]; startupAttempts?: Record<string, number>; startupProgressAtMs?: number | null; startupElapsedMs?: number; lastStartupError?: string | null; workerError?: string | null; watchdog?: { mode?: string; counts?: Record<string, number> }; heartbeatAtMs?: number | null; stale: boolean; memoryRssBytes?: number | null; queueDepth?: number | null; eventLagMs?: number | null; apiActivity?: ApiActivity; apiErrors?: ApiErrors }>;
   threadBudget?: Record<string, number | null>;
-  broker?: { pid?: number | null; running?: boolean };
+  broker?: { pid?: number | null; running?: boolean; queue?: { queueWaitMs?: Record<string, unknown> }; apiActivity?: ApiActivity; apiErrors?: ApiErrors };
   capacity?: Record<string, unknown> | null;
   allocation?: Record<string, unknown> | null;
   screener: {

@@ -45,6 +45,8 @@ from typing import Deque, Dict, Iterable, List, Optional, Tuple
 
 from clients.base_client import BaseClient
 from clients.models import (
+    AccountOrder,
+    AccountPosition,
     AmendOrderRequest,
     AmendTargetUnavailableError,
     CreateOrderRequest,
@@ -1972,17 +1974,20 @@ class FeeModel:
         self.upcoming_fee_changes: List[object] = []
         self.last_refresh_ms = 0
 
-    def refresh_from_api(self) -> None:
+    def refresh_from_api(self) -> bool:
+        successful = True
         try:
             series_payload = self.api_client.get_series(self.market.series_ticker)
             self.fee_type = str(series_payload.fee_type or self.fee_type)
             self.fee_multiplier = float(series_payload.fee_multiplier or self.fee_multiplier or 1.0)
             self.series_title = str(series_payload.title or self.series_title)
         except Exception as exc:
+            successful = False
             log_event("FEE_MODEL_SERIES_REFRESH_ERROR", error=str(exc), series=self.market.series_ticker)
         try:
             self.upcoming_fee_changes = self.api_client.get_series_fee_changes(self.market.series_ticker, show_historical=False)
         except Exception as exc:
+            successful = False
             log_event("FEE_MODEL_FEE_CHANGE_REFRESH_ERROR", error=str(exc), series=self.market.series_ticker)
         self.bootstrap_from_telemetry(limit=250)
         self.last_refresh_ms = now_ms()
@@ -1994,6 +1999,7 @@ class FeeModel:
             maker_fee_factor=round(self.maker_fee_factor, 4),
             upcoming_changes=len(self.upcoming_fee_changes),
         )
+        return successful
 
     def bootstrap_from_telemetry(self, *, limit: int = 250) -> None:
         for row in self.telemetry_store.load_recent_fills(limit=limit):
@@ -2051,7 +2057,8 @@ class IncentiveModel:
         self.programs: List[IncentiveProgram] = []
         self.last_refresh_ms = 0
 
-    def refresh_from_api(self) -> None:
+    def refresh_from_api(self) -> bool:
+        successful = True
         try:
             programs = self.api_client.get_incentive_programs(status="active", incentive_type="all", limit=10_000)
             self.programs = [
@@ -2062,7 +2069,9 @@ class IncentiveModel:
             self.last_refresh_ms = now_ms()
             log_event("INCENTIVE_MODEL_REFRESHED", ticker=self.market.ticker, active_programs=len(self.programs))
         except Exception as exc:
+            successful = False
             log_event("INCENTIVE_MODEL_REFRESH_ERROR", ticker=self.market.ticker, error=str(exc))
+        return successful
 
     def active_programs_for_market(self) -> List[IncentiveProgram]:
         return list(self.programs)
@@ -2532,6 +2541,10 @@ class MarketActor:
         self.market_rules = getattr(market, "market_rules", None)
         self.owns_api_client = owns_api_client
         self.quote_freshness_seconds = max(1.0, float(quote_freshness_seconds))
+        self._quoting_requested = bool(quoting_enabled)
+        self.models_ready = True
+        self.model_refresh_error: Optional[str] = None
+        self._defer_model_readiness = False
         self.quoting_enabled = bool(quoting_enabled)
         self.allowed_quote_sides: set[str] = {"yes", "no"}
         self.fleet_risk_mode = "normal"
@@ -2665,8 +2678,11 @@ class MarketActor:
                     return side
         return None
 
-    def load_startup_position(self) -> None:
-        positions = self.api_client.get_positions(self.settings.market_ticker)
+    def load_startup_position(self, positions: Optional[Iterable[AccountPosition]] = None) -> None:
+        if positions is None:
+            positions = self.api_client.get_positions(self.settings.market_ticker)
+        else:
+            positions = list(positions)
         if not positions:
             self.net_position_units = 0
             self.starting_position_units = 0
@@ -2782,11 +2798,15 @@ class MarketActor:
             )
         return result
 
-    def cancel_owned_resting_quotes_on_startup(self) -> None:
+    def cancel_owned_resting_quotes_on_startup(
+        self, resting_orders: Optional[Iterable[AccountOrder]] = None,
+    ) -> None:
         if not self.settings.cancel_strategy_quotes_on_startup:
             return
 
-        self.cancel_owned_resting_quotes(reason="startup", verify=False)
+        self.cancel_owned_resting_quotes(
+            reason="startup", verify=False, initial_orders=resting_orders,
+        )
 
     def cancel_owned_resting_quotes(
         self,
@@ -2794,6 +2814,7 @@ class MarketActor:
         reason: str,
         verify: bool = True,
         max_attempts: int = 5,
+        initial_orders: Optional[Iterable[object]] = None,
     ) -> int:
         """Cancel only bot-owned orders and optionally verify venue absence.
 
@@ -2808,7 +2829,11 @@ class MarketActor:
         canceled_count = 0
         attempts = max(1, int(max_attempts)) if verify else 1
         for attempt in range(attempts):
-            resting_orders = self.api_client.get_resting_orders(self.settings.market_ticker)
+            if initial_orders is not None:
+                resting_orders = list(initial_orders)
+                initial_orders = None
+            else:
+                resting_orders = self.api_client.get_resting_orders(self.settings.market_ticker)
             owned_orders = [
                 order
                 for order in resting_orders
@@ -3078,9 +3103,9 @@ class MarketActor:
             return None
         return max(0.0, (self.market.close_time_ms - now_ms()) / 1000.0)
 
-    def refresh_external_models(self) -> None:
-        self.fee_model.refresh_from_api()
-        self.incentive_model.refresh_from_api()
+    def refresh_external_models(self) -> bool:
+        fee_ok = self.fee_model.refresh_from_api() is not False
+        incentive_ok = self.incentive_model.refresh_from_api() is not False
         self.toxicity_model.bootstrap_from_telemetry(limit=5_000)
         self.fill_probability_model.bootstrap_from_telemetry(limit=10_000)
         series_title = self.fee_model.series_title or self.market.series_title
@@ -3097,6 +3122,7 @@ class MarketActor:
             series_title=series_title,
             market_url=market_url,
         )
+        return bool(fee_ok and incentive_ok)
 
     def side_book_snapshot(self, side: str) -> Tuple[Optional[int], Optional[int], Optional[int]]:
         yes_bid = self.best_bid("yes")
@@ -5066,12 +5092,31 @@ class MarketActor:
 
     async def model_refresh_worker(self) -> None:
         refresh_interval_seconds = max(60, int(self.settings.model_refresh_interval_seconds))
+        initial_models_ready = not self._defer_model_readiness
+        if not initial_models_ready:
+            # Let the worker publish ACTOR_START_OK and register the actor
+            # before Polymarket's non-critical model calls occupy the broker.
+            await asyncio.sleep(0)
         while not self.shutdown_requested:
             try:
-                await asyncio.to_thread(self.refresh_external_models)
+                refreshed = await asyncio.to_thread(self.refresh_external_models)
+                if refreshed is not False:
+                    self.model_refresh_error = None
+                    if not initial_models_ready:
+                        self.models_ready = True
+                        initial_models_ready = True
+                        self.quoting_enabled = self._quoting_requested
+                        self.requote_event.set()
+                else:
+                    self.model_refresh_error = "external model refresh failed"
+                    if not initial_models_ready:
+                        self.models_ready = False
             except Exception as exc:
                 log_event("MODEL_REFRESH_ERROR", error=str(exc))
-            await asyncio.sleep(refresh_interval_seconds)
+                if not initial_models_ready:
+                    self.models_ready = False
+                    self.model_refresh_error = str(exc)[:200]
+            await asyncio.sleep(5 if not initial_models_ready else refresh_interval_seconds)
 
     async def quote_freshness_worker(self) -> None:
         interval = min(1.0, self.quote_freshness_seconds / 4.0)
@@ -5088,7 +5133,8 @@ class MarketActor:
         self.requote_event.set()
 
     def set_quoting_enabled(self, enabled: bool) -> None:
-        self.quoting_enabled = bool(enabled)
+        self._quoting_requested = bool(enabled)
+        self.quoting_enabled = bool(enabled) and bool(self.models_ready)
         self.requote_event.set()
 
     def set_allowed_quote_sides(self, sides: Iterable[str]) -> None:
@@ -5418,7 +5464,14 @@ class MarketActor:
                 return
             self.handle_event(event)
 
-    async def start(self) -> None:
+    async def start(
+        self,
+        *,
+        startup_positions: Optional[Iterable[AccountPosition]] = None,
+        startup_orders: Optional[Iterable[AccountOrder]] = None,
+        startup_read_semaphore: Optional[asyncio.Semaphore] = None,
+        defer_external_models: bool = False,
+    ) -> None:
         """Initialize an actor and start its internal timers without a stream."""
 
         log_event(
@@ -5440,9 +5493,26 @@ class MarketActor:
         )
         # REST round-trips run off the event loop: in the fleet worker a slow
         # broker/venue must not stall heartbeats and control commands.
-        await asyncio.to_thread(self.load_startup_position)
-        await asyncio.to_thread(self.cancel_owned_resting_quotes_on_startup)
-        await asyncio.to_thread(self.refresh_external_models)
+        if startup_positions is None and startup_read_semaphore is not None:
+            async with startup_read_semaphore:
+                await asyncio.to_thread(self.load_startup_position)
+        elif startup_positions is None:
+            await asyncio.to_thread(self.load_startup_position)
+        else:
+            await asyncio.to_thread(self.load_startup_position, startup_positions)
+        if startup_orders is None and startup_read_semaphore is not None:
+            async with startup_read_semaphore:
+                await asyncio.to_thread(self.cancel_owned_resting_quotes_on_startup)
+        elif startup_orders is None:
+            await asyncio.to_thread(self.cancel_owned_resting_quotes_on_startup)
+        else:
+            await asyncio.to_thread(self.cancel_owned_resting_quotes_on_startup, startup_orders)
+        self._defer_model_readiness = bool(defer_external_models)
+        self.models_ready = not self._defer_model_readiness
+        if not defer_external_models:
+            # Preserve Kalshi's existing synchronous startup behavior.  A
+            # failed model refresh has historically not prevented startup.
+            await asyncio.to_thread(self.refresh_external_models)
         self.background_tasks = [
             asyncio.create_task(self.requote_worker()),
             asyncio.create_task(self.queue_position_worker()),
@@ -5468,6 +5538,10 @@ class MarketActor:
             api_activity = self.api_client.activity_snapshot()
         except Exception:
             api_activity = {"rest": {}, "stream": {}}
+        try:
+            api_errors = self.api_client.api_errors_snapshot()
+        except Exception:
+            api_errors = {}
         active_orders = {
             side: {
                 "orderId": state.order_id,
@@ -5481,6 +5555,9 @@ class MarketActor:
             "marketId": self.settings.market_ticker,
             "pid": os.getpid(),
             "lifecycle": "stopping" if self.shutdown_requested else "running",
+            "modelsReady": bool(getattr(self, "models_ready", True)),
+            "modelRefreshError": getattr(self, "model_refresh_error", None),
+            "quotingRequested": bool(getattr(self, "_quoting_requested", self.quoting_enabled)),
             "netPositionUnits": self.net_position_units,
             "bookReady": self.book_ready,
             "lastFillAtMs": self.last_fill_timestamp_ms or None,
@@ -5535,6 +5612,7 @@ class MarketActor:
                 },
                 "telemetry": self.telemetry_store.health_snapshot(),
                 "apiActivity": api_activity,
+                "apiErrors": api_errors,
             },
         }
 
@@ -5600,8 +5678,10 @@ TopOfBookBot = MarketActor
 # ---------------------------------------------------------------------------
 
 
-def load_market_metadata(api_client: BaseClient, market_id: str) -> MarketMetadata:
-    market = api_client.get_market(market_id)
+def load_market_metadata(
+    api_client: BaseClient, market_id: str, market: Optional[Market] = None,
+) -> MarketMetadata:
+    market = market if market is not None else api_client.get_market(market_id)
     return MarketMetadata(
         ticker=market.market_id,
         series_ticker=market.series_id,

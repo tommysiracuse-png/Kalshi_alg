@@ -582,13 +582,23 @@ class KalshiApiClient(BaseClient):
             return OrderNotFoundError(str(exc))
         return ClientError(str(exc))
 
+    @staticmethod
+    def _annotate_http_error(error: ClientError, exc: HTTPClientError) -> ClientError:
+        # Preserve the typed error behavior while allowing the execution
+        # broker to expose the provider status code in bounded telemetry.
+        try:
+            setattr(error, "status_code", int(exc.status_code))
+        except (AttributeError, TypeError, ValueError):
+            pass
+        return error
+
     def _get(self, path: str, *, params: Optional[dict] = None, operation: str = "get") -> dict:
         try:
             return self.http_client.get(
                 path, headers=self._headers("GET", path), params=params, operation=operation
             )
         except HTTPClientError as exc:
-            raise self._map_error(exc) from exc
+            raise self._annotate_http_error(self._map_error(exc), exc) from exc
 
     def _post(self, path: str, body: dict, *, action: str, params: Optional[dict] = None) -> dict:
         self._write_limiter.acquire(action)
@@ -597,7 +607,7 @@ class KalshiApiClient(BaseClient):
                 path, headers=self._headers("POST", path), body=body, params=params, operation=action
             )
         except HTTPClientError as exc:
-            raise self._map_error(exc, action=action) from exc
+            raise self._annotate_http_error(self._map_error(exc, action=action), exc) from exc
 
     def _delete(self, path: str, *, action: str, params: Optional[dict] = None) -> dict:
         self._write_limiter.acquire(action)
@@ -606,7 +616,7 @@ class KalshiApiClient(BaseClient):
                 path, headers=self._headers("DELETE", path), params=params, operation=action
             )
         except HTTPClientError as exc:
-            raise self._map_error(exc, action=action) from exc
+            raise self._annotate_http_error(self._map_error(exc, action=action), exc) from exc
 
     # ------------------------------------------------------------------
     # Exchange sharding (docs.kalshi.com/getting_started/exchange_sharding)

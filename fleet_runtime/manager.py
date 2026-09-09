@@ -32,6 +32,7 @@ from core.fleet_models import (
     WorkerControlAck,
     WorkerHeartbeat,
 )
+from clients.models import StartupAccountSnapshot
 from clients.monitoring import merge_activity_snapshots
 from core.session_config import default_session_configuration, validate_session_configuration
 from .assignment import assign_markets, derive_worker_count
@@ -156,6 +157,29 @@ class ManagedWorker:
     startup_error: str = ""
     worker_error: str = ""
     recovery_reason: str = ""
+
+
+def _startup_snapshot_from_payload(payload: Mapping[str, Any]) -> StartupAccountSnapshot:
+    """Convert broker account rows into a worker-safe, market-indexed snapshot."""
+    positions: dict[str, list[Any]] = {}
+    orders: dict[str, list[Any]] = {}
+    for item in payload.get("positions") or ():
+        market_id = str(getattr(item, "market_id", "") or "")
+        if market_id:
+            positions.setdefault(market_id, []).append(item)
+    for item in payload.get("orders") or ():
+        market_id = str(getattr(item, "market_id", "") or "")
+        if market_id:
+            orders.setdefault(market_id, []).append(item)
+    return StartupAccountSnapshot(
+        captured_at_ms=int(payload.get("captured_at_ms") or payload.get("positions_at_ms") or time.time() * 1000),
+        positions_by_market={key: tuple(value) for key, value in positions.items()},
+        orders_by_market={key: tuple(value) for key, value in orders.items()},
+        positions_available=bool(payload.get("positions_available", True)),
+        orders_available=bool(payload.get("orders_available", True)),
+        positions_error=str(payload.get("positions_error") or ""),
+        orders_error=str(payload.get("orders_error") or ""),
+    )
 
 
 @dataclass(frozen=True)
@@ -375,6 +399,7 @@ class ShardedBotManager:
         self._broker_consecutive_timeouts = 0
         self._broker_stats: dict[str, Any] = {}
         self._broker_api_activity: dict[str, Any] = {}
+        self._broker_api_errors: dict[str, Any] = {}
         self._broker_rpc_timeouts: list[int] = []
         self._broker_rpc_timeout_total = 0
         self._broker_restarted_at_ms = 0
@@ -404,6 +429,8 @@ class ShardedBotManager:
         # else the instant the controller asked): the ledger only re-baselines
         # a ticker from a snapshot at/after its last applied fill.
         self._position_snapshot_at_ms = 0
+        self._startup_account_snapshot: Optional[StartupAccountSnapshot] = None
+        self._startup_snapshot_lock = asyncio.Lock()
         # Restart carryover tickers granted only their position-reducing side.
         self._reduce_only_tickers: set[str] = set()
         self._shard_by_ticker: dict[str, int] = {}
@@ -479,6 +506,8 @@ class ShardedBotManager:
         managed.control_sent_at_ms = now
         managed.control_deadline_ms = int(now + timeout_seconds * 1000)
         if action == "reconcile":
+            if self.venue.lower() == "polymarket" and "startup_account_snapshot" not in payload:
+                payload["startup_account_snapshot"] = self._startup_account_snapshot
             picks = tuple(payload.get("picks") or ())
             managed.startup_target_tickers = tuple(
                 str(getattr(item, "market_id", "")) for item in picks
@@ -635,6 +664,10 @@ class ShardedBotManager:
                 key: message.get(key)
                 for key in ("pending", "in_flight", "dropped_stale", "decode_errors", "reader_errors")
             }
+            if isinstance(message.get("queue_wait_ms"), Mapping):
+                self._broker_stats["queueWaitMs"] = dict(message["queue_wait_ms"])
+            if isinstance(message.get("api_errors"), Mapping):
+                self._broker_api_errors = dict(message["api_errors"])
             activity = message.get("api_activity")
             if isinstance(activity, Mapping):
                 self._broker_api_activity = dict(activity)
@@ -699,6 +732,11 @@ class ShardedBotManager:
         """The current broker's loop is up: re-issue the assignment once."""
         if not self._reconcile_after_broker_ready or self._shutdown_started:
             return
+        # Polymarket must refresh admission first so the replacement workers
+        # receive the shared account snapshot instead of falling back to one
+        # account read per actor during broker recovery.
+        if self.venue.lower() == "polymarket":
+            return
         self._reconcile_after_broker_ready = False
         self._reissue_assignments()
 
@@ -759,6 +797,8 @@ class ShardedBotManager:
         self._broker_rpc_timeouts = []
         self._broker_stats = {}
         self._broker_api_activity = {}
+        self._broker_api_errors = {}
+        self._startup_account_snapshot = None
         self._broker_shard_exposure = {}
         self._broker_flat_reduce_only = frozenset()
         self._broker_restarted_at_ms = self._broker_started_at_ms
@@ -959,6 +999,8 @@ class ShardedBotManager:
                 "admission_snapshot",
                 timeout=min(float(self.fleet_config["startupTimeoutSeconds"]), 90.0),
             )
+            if self.venue.lower() == "polymarket" and isinstance(snapshot, Mapping):
+                self._startup_account_snapshot = _startup_snapshot_from_payload(snapshot)
             # The broker stamps the positions with the instant its venue read
             # started; an older broker does not, and the instant we asked is
             # the latest moment that is certainly not after the read.
@@ -1136,6 +1178,32 @@ class ShardedBotManager:
                 managed.command_queue.put({"action": "enable_quoting", "enabled": gate_open, "allocations": allocations})
         return gate_open, allocations
 
+    async def _ensure_startup_account_snapshot(self) -> Optional[StartupAccountSnapshot]:
+        """Reuse a recent Polymarket admission read, refreshing it once when stale."""
+        if self.venue.lower() != "polymarket" or self._planning_only:
+            return self._startup_account_snapshot
+        async with self._startup_snapshot_lock:
+            max_age_ms = int(float(self.fleet_config.get("startupAccountSnapshotMaxAgeSeconds", 30.0)) * 1000)
+            current = self._startup_account_snapshot
+            if current is not None and int(time.time() * 1000) - int(current.captured_at_ms) <= max_age_ms:
+                return current
+            if self._admin is None or not self._broker_usable():
+                return current
+            try:
+                payload = await self._admin.call(
+                    "startup_account_snapshot",
+                    timeout=min(float(self.fleet_config.get("startupTimeoutSeconds", 90.0)), 30.0),
+                )
+                if isinstance(payload, Mapping):
+                    self._startup_account_snapshot = _startup_snapshot_from_payload(payload)
+            except Exception as exc:
+                # A failed component is represented by the snapshot operation
+                # when possible. A total broker failure leaves the worker to
+                # use its bounded per-market fallback.
+                self._startup_account_snapshot = None
+                await self._emit("startup_account_snapshot_failed", "*", error=str(exc)[:200])
+            return self._startup_account_snapshot
+
     async def apply_update(self, update: ScreenerUpdate) -> None:
         if self._shutdown_started:
             await self._emit("update_skipped_shutdown", "*", generation_id=update.generation_id)
@@ -1162,10 +1230,15 @@ class ShardedBotManager:
         self._market_shard_history.update(self._market_to_worker)
         self._desired = dict(desired)
         self.bots = {ticker: ManagedMarket(pick, self._market_to_worker[ticker]) for ticker, pick in desired.items()}
+        # Polymarket actor startup is intentionally held until admission has
+        # supplied the account-wide snapshot.  Kalshi keeps its existing
+        # eager reconcile path.
         for worker_id, managed in self._workers.items():
             if not managed.process.is_alive():
                 continue
             if managed.recovering and managed.phase not in {"reconciling", "resume_pending"}:
+                continue
+            if self.venue.lower() == "polymarket":
                 continue
             self._send_control(
                 managed,
@@ -1186,14 +1259,18 @@ class ShardedBotManager:
             self._capacity_error = f"admission snapshot failed: {exc}"
             self._admission_pending = not self._planning_only
             self._admission_retry_at_ms = int(time.time() * 1000 + ADMISSION_RETRY_SECONDS * 1000)
+        if self.venue.lower() == "polymarket":
+            await self._ensure_startup_account_snapshot()
         # Admission may be partial (for example Polymarket can expose 51
         # quote sides while 200 markets were screened).  Trim before workers
         # are allowed to quote, preserving the deterministic allocator order.
+        admission_trimmed = False
         if self._capacity and self._allocation and self._allocation.gate_open:
             admitted_keys = {
                 ticker for ticker, sides in self._allocation.sides_by_ticker.items() if sides
             }
             if len(admitted_keys) < len(desired):
+                admission_trimmed = True
                 desired = {
                     ticker: pick for ticker, pick in desired.items() if ticker in admitted_keys
                 }
@@ -1224,6 +1301,17 @@ class ShardedBotManager:
                     capacityMarketLimit=self._capacity.capacity_market_limit,
                     omittedReason=self._capacity.omitted_reason or "capacity",
                 )
+        if self.venue.lower() == "polymarket" and not admission_trimmed:
+            # No capacity trimming was needed, but the workers still need the
+            # post-admission snapshot before their first actor starts.
+            for worker_id, managed in self._workers.items():
+                if managed.process.is_alive() and not managed.recovering:
+                    self._send_control(
+                        managed,
+                        "reconcile",
+                        picks=tuple(desired[ticker] for ticker in assignments[worker_id]),
+                        generation_id=update.generation_id,
+                    )
         gate_open = bool(
             self._capacity and self._capacity.gate_open
             and self._allocation and self._allocation.gate_open
@@ -1278,6 +1366,9 @@ class ShardedBotManager:
         self._capacity_error = self._capacity.error
         self._admission_pending = False
         gate_open, _allocations = self._broadcast_quoting_gate()
+        if self.venue.lower() == "polymarket":
+            self._reconcile_after_broker_ready = False
+            self._reissue_assignments()
         await self._emit("admission_recovered", "*", gate_open=gate_open)
 
     async def _retry_admission(self) -> None:
@@ -1463,6 +1554,7 @@ class ShardedBotManager:
         managed.last_error = "; ".join(errors)
         managed.recovery_retry_at_ms = 0
         tickers = self._assignments.get(worker_id, ())
+        await self._ensure_startup_account_snapshot()
         self._send_control(
             managed,
             "reconcile",
@@ -1974,6 +2066,7 @@ class ShardedBotManager:
                 "queueDepth": heartbeat.queue_depth if heartbeat else None,
                 "eventLagMs": heartbeat.event_lag_ms if heartbeat else None,
                 "apiActivity": dict(heartbeat.api_activity) if heartbeat else {},
+                "apiErrors": dict(getattr(heartbeat, "api_errors", {}) or {}) if heartbeat else {},
             })
             for ticker in assigned_tickers:
                 item = health.get(ticker)
@@ -2118,6 +2211,7 @@ class ShardedBotManager:
                 "reconcilePendingBrokerReady": self._reconcile_after_broker_ready,
                 "queue": dict(self._broker_stats),
                 "apiActivity": dict(self._broker_api_activity),
+                "apiErrors": dict(self._broker_api_errors),
                 "exposureLimits": dict(self._last_exposure_limits),
                 "shardExposure": dict(self._broker_shard_exposure),
             },

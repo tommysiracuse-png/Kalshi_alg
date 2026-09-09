@@ -100,6 +100,7 @@ class WorkerHeartbeat:
     startup_progress_at_ms: int = 0
     startup_error: str = ""
     worker_error: str = ""
+    api_errors: Mapping[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

@@ -238,6 +238,26 @@ class AccountOrder:
 
 
 @dataclass(frozen=True)
+class StartupAccountSnapshot:
+    """Account reads shared by a worker reconcile generation.
+
+    The mappings are intentionally keyed by normalized market id so workers
+    can filter locally instead of repeating account-wide venue requests for
+    every actor.  Availability is separate from an empty result: an empty
+    successful position list means a flat market, while ``positions_error``
+    means the snapshot could not be trusted for that component.
+    """
+
+    captured_at_ms: int
+    positions_by_market: Mapping[str, Tuple[AccountPosition, ...]] = field(default_factory=dict)
+    orders_by_market: Mapping[str, Tuple[AccountOrder, ...]] = field(default_factory=dict)
+    positions_available: bool = True
+    orders_available: bool = True
+    positions_error: str = ""
+    orders_error: str = ""
+
+
+@dataclass(frozen=True)
 class AccountFill:
     fill_id: str
     trade_id: str

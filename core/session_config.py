@@ -223,6 +223,11 @@ def default_session_configuration() -> Dict[str, Any]:
             # making progress.  Recycle a shard that cannot start any actor
             # within this interval, while leaving progressing shards alone.
             "startupProgressTimeoutSeconds": 90.0,
+            # Polymarket startup fallbacks share a small account-read gate so
+            # a failed generation cannot burst one positions/orders request
+            # per market through the venue.
+            "polymarketStartupAccountReadConcurrency": 2,
+            "startupAccountSnapshotMaxAgeSeconds": 30.0,
             # Worker-local risk evaluator (fleet_runtime/risk.py). The
             # defaults reproduce the previously hard-coded 7.5c / 20c mid-move
             # and 120 s staleness rules; the move window is time-bounded.
@@ -455,6 +460,8 @@ def validate_session_configuration(value: Mapping[str, Any]) -> Dict[str, Any]:
         "workerStaleSeconds", "startupTimeoutSeconds",
         "startupProgressTimeoutSeconds",
         "workerIoThreads",
+        "polymarketStartupAccountReadConcurrency",
+        "startupAccountSnapshotMaxAgeSeconds",
         "riskWindowSeconds", "riskElevatedMoveCents", "riskExtremeMoveCents", "riskStaleSeconds",
     ):
         fleet[key] = _require_number(
@@ -491,6 +498,10 @@ def validate_session_configuration(value: Mapping[str, Any]) -> Dict[str, Any]:
         raise ValueError("fleetRuntime.workerIoThreads must be between 1 and 32")
     if fleet["startupProgressTimeoutSeconds"] <= 0:
         raise ValueError("fleetRuntime.startupProgressTimeoutSeconds must be > 0")
+    if not 1 <= fleet["polymarketStartupAccountReadConcurrency"] <= 8:
+        raise ValueError("fleetRuntime.polymarketStartupAccountReadConcurrency must be between 1 and 8")
+    if fleet["startupAccountSnapshotMaxAgeSeconds"] <= 0:
+        raise ValueError("fleetRuntime.startupAccountSnapshotMaxAgeSeconds must be > 0")
 
     from bots.top_of_book_bot import BotSettings
 

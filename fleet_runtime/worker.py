@@ -25,12 +25,16 @@ from typing import Any, Iterable, Mapping, Optional
 from clients.base_client import BaseClient
 from clients.factory import build_client
 from clients.models import (
+    AccountOrder,
+    AccountPosition,
     Fill,
+    Market,
     OrderBookDelta,
     OrderBookSnapshot,
     OrderUpdate,
     PublicTrade,
     StreamReset,
+    StartupAccountSnapshot,
     TickerUpdate,
 )
 from core.fleet_models import MarketHealth, ScreenerPick, WorkerControlAck, WorkerHeartbeat
@@ -464,6 +468,11 @@ class FleetWorkerProcess(mp.Process):
         startup_progress_at_ms = 0
         startup_error = ""
         worker_error = ""
+        startup_account_snapshot: Optional[StartupAccountSnapshot] = None
+        startup_account_read_gate = (
+            asyncio.Semaphore(max(1, int(fleet.get("polymarketStartupAccountReadConcurrency", 2))))
+            if self.venue.lower() == "polymarket" else None
+        )
         io_executor = ThreadPoolExecutor(
             max_workers=worker_io_threads,
             thread_name_prefix=f"{self.worker_id}-io",
@@ -536,15 +545,38 @@ class FleetWorkerProcess(mp.Process):
             # ranking payload.  Prime the child client before its metadata
             # lookup so a worker does not repeat a full catalog scan.
             prime_market = getattr(direct, "prime_market", None)
+            primed_market: Optional[Market] = None
             if callable(prime_market) and pick.ranking:
-                prime_market(pick.ranking)
+                candidate = prime_market(pick.ranking)
+                if isinstance(candidate, Market) and str(candidate.market_id) == str(pick.market_id):
+                    primed_market = candidate
             log.info(
                 "ACTOR_START_ATTEMPT | ticker=%s attempt=%d venue=%s",
                 pick.market_id,
                 startup_attempts.get(pick.market_id, 0) + 1,
                 self.venue,
             )
-            metadata = await asyncio.to_thread(load_market_metadata, client, pick.market_id)
+            if primed_market is not None:
+                metadata = await asyncio.to_thread(
+                    load_market_metadata, client, pick.market_id, primed_market,
+                )
+                if metadata.yes_bid_units is None or metadata.no_bid_units is None:
+                    # Keep the old REST book recovery behavior for a ranking
+                    # that carries identity but not a usable top-of-book. The
+                    # direct Polymarket client reuses its book cache before
+                    # issuing token-book requests.
+                    try:
+                        hydrated = await asyncio.to_thread(direct.get_market, pick.market_id)
+                        metadata = await asyncio.to_thread(
+                            load_market_metadata, client, pick.market_id, hydrated,
+                        )
+                    except Exception as exc:
+                        log.info(
+                            "ACTOR_BOOK_RECOVERY_DEFERRED | ticker=%s error=%s",
+                            pick.market_id, exc,
+                        )
+            else:
+                metadata = await asyncio.to_thread(load_market_metadata, client, pick.market_id)
             telemetry = TelemetryStore(
                 str(shard_dir / "telemetry.sqlite3"),
                 enabled=settings.enable_sqlite_telemetry,
@@ -559,7 +591,23 @@ class FleetWorkerProcess(mp.Process):
                 quoting_enabled=False,
                 telemetry_store=telemetry,
             )
-            await actor.start()
+            snapshot = startup_account_snapshot
+            snapshot_positions: Optional[tuple[AccountPosition, ...]] = None
+            snapshot_orders: Optional[tuple[AccountOrder, ...]] = None
+            if snapshot is not None:
+                snapshot_age_ms = int(time.time() * 1000) - int(snapshot.captured_at_ms)
+                max_age_ms = int(float(fleet.get("startupAccountSnapshotMaxAgeSeconds", 30.0)) * 1000)
+                if snapshot_age_ms <= max_age_ms:
+                    if snapshot.positions_available:
+                        snapshot_positions = tuple(snapshot.positions_by_market.get(pick.market_id, ()))
+                    if snapshot.orders_available:
+                        snapshot_orders = tuple(snapshot.orders_by_market.get(pick.market_id, ()))
+            await actor.start(
+                startup_positions=snapshot_positions,
+                startup_orders=snapshot_orders,
+                startup_read_semaphore=startup_account_read_gate,
+                defer_external_models=self.venue.lower() == "polymarket",
+            )
             actor.telemetry_store.record_runtime_event(
                 ticker=pick.market_id, source="worker", event_type="actor_started",
                 payload={"worker_id": self.worker_id},
@@ -673,7 +721,7 @@ class FleetWorkerProcess(mp.Process):
             return added
 
         async def command_loop() -> None:
-            nonlocal startup_progress_at_ms, startup_error, worker_error
+            nonlocal startup_progress_at_ms, startup_error, worker_error, startup_account_snapshot
             nonlocal quoting_enabled, shutdown_frozen, stream_generation
             nonlocal allocations_known, broker_responsive_hint
             while not stop_requested.is_set():
@@ -696,6 +744,10 @@ class FleetWorkerProcess(mp.Process):
                         if shutdown_frozen:
                             raise RuntimeError("worker is permanently frozen")
                         desired = {item.market_id: item for item in command.get("picks") or ()}
+                        supplied_snapshot = command.get("startup_account_snapshot")
+                        startup_account_snapshot = (
+                            supplied_snapshot if isinstance(supplied_snapshot, StartupAccountSnapshot) else None
+                        )
                         async with reconcile_lock:
                             desired_picks.clear()
                             desired_picks.update(desired)
@@ -931,7 +983,7 @@ class FleetWorkerProcess(mp.Process):
                 if actor.last_orderbook_event_timestamp_ms else None,
                 decision_age_ms=(now - actor.last_quote_decision_at_ms)
                 if actor.last_quote_decision_at_ms else None,
-                risk_mode=actor.fleet_risk_mode or "startup",
+                risk_mode=("startup" if not getattr(actor, "models_ready", True) else actor.fleet_risk_mode or "startup"),
                 risk_age_ms=(now - actor.fleet_risk_generated_at_ms)
                 if actor.fleet_risk_generated_at_ms else None,
                 resting_order_count=sum(
@@ -956,6 +1008,7 @@ class FleetWorkerProcess(mp.Process):
                 price_units=price_units,
                 price_source=price_source,
                 price_at_ms=price_at_ms,
+                error=str(getattr(actor, "model_refresh_error", "") or ""),
             )
 
         def lightweight_heartbeat(now: int) -> WorkerHeartbeat:
@@ -985,6 +1038,7 @@ class FleetWorkerProcess(mp.Process):
                 startup_progress_at_ms,
                 startup_error,
                 worker_error,
+                api_errors=client.api_errors_snapshot(),
             )
 
         def heartbeat_fallback_thread() -> None:
@@ -1042,6 +1096,7 @@ class FleetWorkerProcess(mp.Process):
                         startup_progress_at_ms,
                         startup_error,
                         worker_error,
+                        api_errors=client.api_errors_snapshot(),
                     ))
                     with heartbeat_signal_lock:
                         heartbeat_signal["last_async_ms"] = now
@@ -1076,6 +1131,7 @@ class FleetWorkerProcess(mp.Process):
                             startup_progress_at_ms,
                             startup_error,
                             worker_error,
+                            api_errors=client.api_errors_snapshot(),
                         ))
                         with heartbeat_signal_lock:
                             heartbeat_signal["last_async_ms"] = now
