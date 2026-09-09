@@ -1794,6 +1794,21 @@ class PolymarketClient(BaseClient):
     def get_incentive_programs(self, *, status: str = "active", incentive_type: str = "all", limit: int = 10_000) -> List[IncentiveProgram]:
         return []
 
+    @staticmethod
+    def _order_terms(request: CreateOrderRequest) -> tuple[str, int]:
+        """Resolve the Polymarket TIF and wire expiration together.
+
+        The bot supplies an expiration for its normal resting quotes but does
+        not set a venue-specific ``time_in_force``.  Polymarket treats that
+        combination as invalid when it is sent as GTC: non-GTD orders must
+        carry an expiration of zero.  Infer GTD for an otherwise unspecified
+        expiring order, and normalize expiration to zero for every other TIF.
+        """
+        requested_tif = str(request.time_in_force or "").strip().upper()
+        tif = requested_tif or ("GTD" if request.expiration_timestamp_seconds else "GTC")
+        expiration = int(request.expiration_timestamp_seconds or 0) if tif == "GTD" else 0
+        return tif, expiration
+
     def _order_payload(self, request: CreateOrderRequest) -> dict[str, Any]:
         market = self._raw_market(request.market_id)
         token_id = market.yes_token_id if request.side == "yes" else market.no_token_id
@@ -1808,7 +1823,7 @@ class PolymarketClient(BaseClient):
             )
         if int(request.count_units) <= 0 or (market.min_order_size_units and int(request.count_units) < market.min_order_size_units):
             raise ValueError("Polymarket order size is below the market minimum")
-        tif = str(request.time_in_force or "GTC").upper()
+        tif, expiration = self._order_terms(request)
         if tif not in {"GTC", "GTD", "FOK", "FAK"}:
             raise ValueError("Polymarket time in force must be GTC, GTD, FOK, or FAK")
         if request.post_only and tif in {"FOK", "FAK"}:
@@ -1833,7 +1848,7 @@ class PolymarketClient(BaseClient):
                 raise PostOnlyCrossError("Polymarket post-only order would cross the book")
         price = Decimal(request.price_units) / PRICE_SCALE
         size = Decimal(request.count_units) / TOKEN_SCALE
-        return {"tokenID": token_id, "price": str(price), "size": str(size), "side": request.action.upper(), "orderType": tif, "postOnly": bool(request.post_only), "expiration": request.expiration_timestamp_seconds or 0, "clientOrderId": request.client_order_id}
+        return {"tokenID": token_id, "price": str(price), "size": str(size), "side": request.action.upper(), "orderType": tif, "postOnly": bool(request.post_only), "expiration": expiration, "clientOrderId": request.client_order_id}
 
     def create_order(self, request: CreateOrderRequest) -> Order:
         # Validate the normalized request before either SDK path.  The V2
@@ -1852,22 +1867,23 @@ class PolymarketClient(BaseClient):
                 from py_clob_client_v2 import OrderArgs, OrderType, PartialCreateOrderOptions, Side  # type: ignore
                 market = self._raw_market(request.market_id)
                 token_id = market.yes_token_id if request.side == "yes" else market.no_token_id
+                tif, expiration = self._order_terms(request)
                 order_args = {
                     "token_id": token_id,
                     "price": float(Decimal(request.price_units) / PRICE_SCALE),
                     "size": float(Decimal(request.count_units) / TOKEN_SCALE),
                     "side": Side.BUY if request.action == "buy" else Side.SELL,
                 }
-                if request.expiration_timestamp_seconds:
+                if expiration:
                     # V2 includes GTD expiry in the signed OrderArgs rather
                     # than in the post-order options.
-                    order_args["expiration"] = int(request.expiration_timestamp_seconds)
+                    order_args["expiration"] = expiration
                 response = self._sdk_call(
                     "polymarket_create_order",
                     lambda: method(
                         OrderArgs(**order_args),
                         options=PartialCreateOrderOptions(tick_size=str(Decimal(market.legacy_tick_size_units) / PRICE_SCALE)),
-                        order_type=getattr(OrderType, str(request.time_in_force or "GTC").upper()),
+                        order_type=getattr(OrderType, tif),
                         post_only=bool(request.post_only),
                     ),
                 )

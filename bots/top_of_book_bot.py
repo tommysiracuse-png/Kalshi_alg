@@ -3750,6 +3750,13 @@ class MarketActor:
         side_quote_allowed: bool,
         gate_reason: str = "ok",
     ) -> SideQuoteDecision:
+        if side_quote_allowed and market_target_units is not None:
+            normalized_target_units = self._normalize_polymarket_quote_price(market_target_units)
+            if normalized_target_units is None:
+                side_quote_allowed = False
+                gate_reason = "no_valid_price_grid_level"
+            else:
+                market_target_units = normalized_target_units
         fair_side_units = fair_value.fair_for_side(side)
         reducing_inventory = self.side_reduces_inventory_risk(side)
         inventory_penalty_units = self.estimate_inventory_penalty_units(side=side, context=context)
@@ -4205,6 +4212,33 @@ class MarketActor:
     # Quote lifecycle
     # -------------------------
 
+    def _normalize_polymarket_quote_price(
+        self,
+        price_units: Optional[int],
+        *,
+        log_snap: bool = False,
+    ) -> Optional[int]:
+        """Snap a Polymarket buy quote down to its valid price grid.
+
+        Polymarket books can occasionally contain a level finer than the
+        market's configured ``tickSize``. The quote engine may then carry
+        that level forward as a target even though the order endpoint rejects
+        it. Normal buy quotes are passive bids, so flooring preserves the
+        intended non-aggressive behavior. Kalshi keeps its existing path.
+        """
+        if price_units is None or str(getattr(self.market, "venue", "kalshi") or "kalshi").lower() != "polymarket":
+            return price_units
+        requested = int(price_units)
+        normalized = self.market.price_grid.floor_to_valid(requested)
+        if log_snap and normalized is not None and normalized != requested:
+            log_event(
+                "POLYMARKET_PRICE_GRID_SNAP",
+                old_price_dollars=format_price_dollars(requested),
+                new_price_dollars=format_price_dollars(normalized),
+                tick_units=self.market.price_grid.minimum_step_units,
+            )
+        return normalized
+
     def order_needs_expiration_refresh(self, state: ManagedOrderState) -> bool:
         if self.settings.resting_order_expiration_seconds <= 0:
             return False
@@ -4310,6 +4344,14 @@ class MarketActor:
                 cancel_reason = last_decision.reason or last_decision.mode or cancel_reason
 
             await self.cancel_side_quote(side, reason=cancel_reason, reset_quote_cycle=True)
+            return
+
+        desired_price_units = self._normalize_polymarket_quote_price(
+            desired_price_units,
+            log_snap=True,
+        )
+        if desired_price_units is None:
+            await self.cancel_side_quote(side, reason="no_valid_price_grid_level", reset_quote_cycle=True)
             return
 
         desired_remaining_units = self.desired_remaining_units(side, desired_price_units, state.quote_cycle_filled_units)

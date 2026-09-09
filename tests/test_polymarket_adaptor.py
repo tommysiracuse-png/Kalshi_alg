@@ -10,7 +10,7 @@ import pytest
 
 from adaptors.polymarket import PolymarketClient, PolymarketClientConfig
 from clients.http_client import HTTPClientError
-from clients.models import AccountPositionQuery, Market, MarketQuery
+from clients.models import AccountPositionQuery, CreateOrderRequest, Market, MarketQuery
 from fleet_runtime.worker import restore_cached_polymarket_book, restore_market_top_book, seed_risk_from_book
 from fleet_runtime.risk import RiskSample
 from polymarket_cache import BookTop
@@ -105,6 +105,51 @@ def test_polymarket_market_normalization_keeps_missing_open_interest_optional():
     assert missing is not None and missing.open_interest_units is None
     assert supplied is not None and supplied.open_interest_units == 1_234
     assert explicit_zero is not None and explicit_zero.open_interest_units == 0
+
+
+def _client_with_order_market() -> PolymarketClient:
+    client = PolymarketClient(PolymarketClientConfig())
+    client._market_cache["condition-order"] = Market(
+        "condition-order",
+        venue="polymarket",
+        yes_token_id="yes-token",
+        no_token_id="no-token",
+        legacy_tick_size_units=100,
+    )
+    return client
+
+
+def test_polymarket_expiring_orders_use_gtd():
+    client = _client_with_order_market()
+
+    payload = client._order_payload(CreateOrderRequest(
+        market_id="condition-order",
+        side="yes",
+        price_units=5_000,
+        count_units=100,
+        client_order_id="client-gtd",
+        expiration_timestamp_seconds=1_800_000_000,
+    ))
+
+    assert payload["orderType"] == "GTD"
+    assert payload["expiration"] == 1_800_000_000
+
+
+def test_polymarket_non_gtd_orders_always_send_zero_expiration():
+    client = _client_with_order_market()
+
+    payload = client._order_payload(CreateOrderRequest(
+        market_id="condition-order",
+        side="yes",
+        price_units=5_000,
+        count_units=100,
+        client_order_id="client-gtc",
+        expiration_timestamp_seconds=1_800_000_000,
+        time_in_force="GTC",
+    ))
+
+    assert payload["orderType"] == "GTC"
+    assert payload["expiration"] == 0
 
 
 def test_polymarket_hydrates_open_interest_in_batches_and_preserves_missing_values():

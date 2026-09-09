@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import replace
 
 from clients.models import (
     MarketQuote,
@@ -19,6 +20,7 @@ class FakeClient:
 
     def __init__(self):
         self.canceled = []
+        self.created = []
         self.amended = []
         self.closed = False
         self.resting = [
@@ -47,6 +49,18 @@ class FakeClient:
             "resting",
             price_units=request.new_price_units,
             remaining_count_units=request.new_total_fillable_count_units,
+        )
+
+    def create_order(self, request):
+        self.created.append(request)
+        return Order(
+            "created",
+            request.market_id,
+            request.side,
+            request.client_order_id,
+            "resting",
+            price_units=request.price_units,
+            remaining_count_units=request.count_units,
         )
 
     def get_market_quote(self, market_id):
@@ -204,3 +218,19 @@ def test_amend_preserves_buy_direction_when_side_reduces_inventory(monkeypatch):
     assert len(client.amended) == 1
     assert client.amended[0].side == "no"
     assert client.amended[0].action == "buy"
+
+
+def test_polymarket_off_grid_quote_is_snapped_before_create(monkeypatch):
+    async def run_without_thread_pool(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "to_thread", run_without_thread_pool)
+
+    bot, client = make_bot()
+    bot.market = replace(bot.market, venue="polymarket")
+    client.resting = []
+
+    asyncio.run(bot.ensure_side_quote("yes", 4_050))
+
+    assert len(client.created) == 1
+    assert client.created[0].price_units == 4_000
