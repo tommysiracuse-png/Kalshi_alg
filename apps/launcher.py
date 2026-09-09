@@ -683,7 +683,7 @@ class Launcher:
         self.screener.accept_snapshot(update, warnings=warnings)
         if self.shutdown_requested.is_set():
             return
-        await self.manager.apply_update(update)
+        await self._apply_manager_updates({self.venue: update})
         self._save_screener_snapshot()
 
     async def _seed_fixed_ticker(self, ticker: str, venue: str | None = None) -> None:
@@ -713,8 +713,48 @@ class Launcher:
             inventory_carried=carried,
         )
         self.screener.accept_snapshot(update, warnings=warnings)
-        await self.manager.apply_update(update)
+        await self._apply_manager_updates({self.venue: update})
         self._save_screener_snapshot()
+
+    async def _apply_manager_updates(self, updates: dict[str, ScreenerUpdate]) -> object:
+        """Apply a screener update while keeping worker liveness serviced.
+
+        ``ShardedBotManager.apply_update`` starts/reconciles workers before it
+        performs the broker admission call.  That call can legitimately take
+        longer than the worker-stale window.  Waiting for it without polling
+        the manager leaves heartbeat/control queues undrained, so healthy
+        workers look stale and are recycled while their actors are starting.
+        Keep the manager's monitor loop running until the update is complete.
+        """
+        apply_updates = getattr(self.manager, "apply_updates", None)
+        if callable(apply_updates):
+            update_task = asyncio.create_task(apply_updates(updates))
+        else:
+            if len(updates) != 1:
+                raise RuntimeError("single-venue manager cannot apply multiple venue updates")
+            update = next(iter(updates.values()))
+            update_task = asyncio.create_task(self.manager.apply_update(update))
+        try:
+            while not update_task.done():
+                if self.shutdown_requested.is_set():
+                    update_task.cancel()
+                    await asyncio.gather(update_task, return_exceptions=True)
+                    raise asyncio.CancelledError
+                try:
+                    await asyncio.wait_for(asyncio.shield(update_task), timeout=0.25)
+                except asyncio.TimeoutError:
+                    await self.manager.monitor_once()
+                    self._drain_manager_events()
+                    self.publish_status("stopping" if self.shutdown_requested.is_set() else "running")
+            result = await update_task
+            await self.manager.monitor_once()
+            self._drain_manager_events()
+            return result
+        except asyncio.CancelledError:
+            if not update_task.done():
+                update_task.cancel()
+                await asyncio.gather(update_task, return_exceptions=True)
+            raise
 
     async def _refresh_one(self, reason: str, venue: str | None = None, apply_update: bool = True) -> bool:
         selected_venue = str(venue or self.venue).lower()
@@ -766,6 +806,14 @@ class Launcher:
                     refresh_task.cancel()
                     raise asyncio.CancelledError
                 self.publish_status("stopping" if self.shutdown_requested.is_set() else "running")
+                # A single-venue refresh (and a mirror-triggered refresh)
+                # can outlast the worker stale window.  Keep draining worker
+                # heartbeats while the screener is doing synchronous venue I/O.
+                # Multi-venue refreshes do this in the outer coordinator loop
+                # because both venue scans are alive at the same time.
+                if apply_update:
+                    await self.manager.monitor_once()
+                    self._drain_manager_events()
                 try:
                     await asyncio.wait_for(asyncio.shield(refresh_task), timeout=0.5)
                 except asyncio.TimeoutError:
@@ -795,7 +843,7 @@ class Launcher:
                 )
                 return False
             if apply_update:
-                await self.manager.apply_updates({selected_venue: update})
+                await self._apply_manager_updates({selected_venue: update})
             else:
                 self._pending_updates[selected_venue] = update
             self.last_error = None
@@ -894,7 +942,7 @@ class Launcher:
                     updates_ok = updates_ok or bool(result)
                     update = self._pending_updates.pop(item, None)
                     if update is not None and not self.shutdown_requested.is_set():
-                        await self.manager.apply_updates({item: update})
+                        await self._apply_manager_updates({item: update})
                 if not self.shutdown_requested.is_set():
                     await self.manager.monitor_once()
                     self._drain_manager_events()

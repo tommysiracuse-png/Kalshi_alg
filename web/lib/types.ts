@@ -152,10 +152,11 @@ export type ClientMonitoring = {
 };
 export type Monitoring = {
   generatedAt: number; schemaVersion?: number; source: SourceState; warnings: string[];
-  manager: { running?: boolean; lifecycle?: string; startedAtMs?: number; runningForMs?: number; activeVenues?: string[]; configuredBots?: number; botsRunning?: number; portfolio?: { items?: Array<{ marketId: string; title?: string; positionUnits?: number | null; updatedAtMs?: number; stale?: boolean; available?: boolean }>; grossPositionUnits?: number; netPositionUnits?: number; unknownMarkets?: number; staleMarkets?: number }; pnl?: PnlTotals; apiActivity?: ApiActivity };
+  manager: { running?: boolean; lifecycle?: string; startedAtMs?: number; runningForMs?: number; activeVenues?: string[]; configuredBots?: number; botsRunning?: number; portfolio?: { items?: Array<{ marketId: string; title?: string; positionUnits?: number | null; updatedAtMs?: number; stale?: boolean; available?: boolean }>; grossPositionUnits?: number; netPositionUnits?: number; unknownMarkets?: number; staleMarkets?: number }; pnl?: PnlTotals; apiActivity?: ApiActivity; threadBudget?: Record<string, number | null> };
   venues?: Array<{ venue: string; active: boolean; botsRunning: number; configuredBots: number; apiActivity?: ApiActivity }>;
   clients: ClientMonitoring[];
-  workers?: Array<{ venue?: string; workerId: string; pid?: number; running: boolean; phase?: string; lastRecoveryError?: string | null; startedAtMs?: number | null; runningForMs?: number | null; assignedMarkets: number; marketIds?: string[]; botsRunning?: number; watchdog?: { mode?: string; counts?: Record<string, number> }; heartbeatAtMs?: number | null; stale: boolean; memoryRssBytes?: number | null; queueDepth?: number | null; eventLagMs?: number | null; apiActivity?: ApiActivity }>;
+  workers?: Array<{ venue?: string; workerId: string; pid?: number; running: boolean; phase?: string; lastRecoveryError?: string | null; recoveryReason?: string | null; startedAtMs?: number | null; runningForMs?: number | null; assignedMarkets: number; marketIds?: string[]; botsRunning?: number; startupPendingMarkets?: string[]; startupAttempts?: Record<string, number>; startupProgressAtMs?: number | null; startupElapsedMs?: number; lastStartupError?: string | null; workerError?: string | null; watchdog?: { mode?: string; counts?: Record<string, number> }; heartbeatAtMs?: number | null; stale: boolean; memoryRssBytes?: number | null; queueDepth?: number | null; eventLagMs?: number | null; apiActivity?: ApiActivity }>;
+  threadBudget?: Record<string, number | null>;
   broker?: { pid?: number | null; running?: boolean };
   capacity?: Record<string, unknown> | null;
   allocation?: Record<string, unknown> | null;

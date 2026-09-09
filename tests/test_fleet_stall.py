@@ -4,6 +4,7 @@ restart -> reconcile re-issue, slow-reconcile tolerance, shutdown fallback."""
 from __future__ import annotations
 
 import asyncio
+import multiprocessing as mp
 import os
 import queue
 import threading
@@ -18,8 +19,9 @@ from fleet_runtime.execution import (
     BrokerRequest,
     BrokerRpcClient,
     ExecutionBrokerProcess,
+    read_queue_lockfree,
 )
-from fleet_runtime.manager import ManagedWorker, ShardedBotManager
+from fleet_runtime.manager import ManagedWorker, ShardedBotManager, thread_budget_snapshot
 from fleet_runtime.worker import add_retry_delay_seconds
 import lip_launcher
 
@@ -539,6 +541,46 @@ def test_slow_reconcile_on_heartbeating_worker_is_not_recovered(tmp_path: Path):
         assert recovered == []
 
     asyncio.run(scenario())
+
+
+def test_heartbeating_worker_with_no_actor_startup_progress_is_recovered(tmp_path: Path):
+    async def scenario():
+        manager, recovered = reconcile_manager(tmp_path, heartbeat_age_ms=1_000, sent_age_ms=310_000)
+        managed = manager._workers["worker-00"]
+        now = int(time.time() * 1000)
+        managed.startup_target_tickers = ("MKT",)
+        managed.startup_pending_tickers = ("MKT",)
+        managed.startup_started_at_ms = now - 100_000
+        managed.startup_progress_at_ms = now - 100_000
+        await manager.monitor_once()
+        assert recovered == ["worker-00"]
+        assert managed.recovery_reason == "startup_no_progress"
+
+    asyncio.run(scenario())
+
+
+def test_startup_progress_prevents_no_progress_recovery(tmp_path: Path):
+    async def scenario():
+        manager, recovered = reconcile_manager(tmp_path, heartbeat_age_ms=1_000, sent_age_ms=310_000)
+        managed = manager._workers["worker-00"]
+        now = int(time.time() * 1000)
+        managed.startup_target_tickers = ("MKT",)
+        managed.startup_pending_tickers = ("MKT",)
+        managed.startup_started_at_ms = now - 100_000
+        managed.startup_progress_at_ms = now - 1_000
+        await manager.monitor_once()
+        assert recovered == []
+
+    asyncio.run(scenario())
+
+
+def test_startup_queues_use_direct_pipe_reads_and_budget_is_explicit():
+    channel = mp.SimpleQueue()
+    channel.put({"event": "heartbeat"})
+    assert read_queue_lockfree(channel, 0) == {"event": "heartbeat"}
+    channel.close()
+    budget = thread_budget_snapshot(worker_count=2, worker_io_threads=8, adaptor_threads=16)
+    assert budget["estimatedAdditional"] == 2 * (8 + 4 + 16) + 8
 
 
 def test_reconcile_timeout_with_silent_worker_is_recovered(tmp_path: Path):

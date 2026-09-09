@@ -259,6 +259,28 @@ class Launcher:
         with self.status_lock:
             return dict(self.latest_status)
 
+    async def _apply_manager_update(self, update: ScreenerUpdate) -> None:
+        """Keep worker heartbeats flowing while broker admission completes."""
+        update_task = asyncio.create_task(self.manager.apply_update(update))
+        try:
+            while not update_task.done():
+                if self.shutdown_requested.is_set():
+                    update_task.cancel()
+                    await asyncio.gather(update_task, return_exceptions=True)
+                    raise asyncio.CancelledError
+                try:
+                    await asyncio.wait_for(asyncio.shield(update_task), timeout=0.25)
+                except asyncio.TimeoutError:
+                    await self.manager.monitor_once()
+                    self.publish_status("stopping" if self.shutdown_requested.is_set() else "running")
+            await update_task
+            await self.manager.monitor_once()
+        except asyncio.CancelledError:
+            if not update_task.done():
+                update_task.cancel()
+                await asyncio.gather(update_task, return_exceptions=True)
+            raise
+
     async def _seed_from_csv(self) -> None:
         if not self.screen_path.exists():
             return
@@ -298,7 +320,7 @@ class Launcher:
         self.screener.accept_snapshot(update)
         if self.shutdown_requested.is_set():
             return
-        await self.manager.apply_update(update)
+        await self._apply_manager_update(update)
         self._save_screener_snapshot()
 
     async def _seed_fixed_ticker(self, ticker: str) -> None:
@@ -317,7 +339,7 @@ class Launcher:
             picks=(pick,), added=(ticker,), kept=(), changed=(), removed=(),
         )
         self.screener.accept_snapshot(update)
-        await self.manager.apply_update(update)
+        await self._apply_manager_update(update)
         self._save_screener_snapshot()
 
     async def refresh(self, reason: str) -> bool:
@@ -326,6 +348,7 @@ class Launcher:
         )
         while not refresh_task.done():
             self.publish_status("stopping" if self.shutdown_requested.is_set() else "running")
+            await self.manager.monitor_once()
             try:
                 await asyncio.wait_for(asyncio.shield(refresh_task), timeout=0.5)
             except asyncio.TimeoutError:
@@ -342,7 +365,7 @@ class Launcher:
                 else None
             )
             return False
-        await self.manager.apply_update(update)
+        await self._apply_manager_update(update)
         self._save_screener_snapshot()
         self.last_error = None
         self.next_refresh_at = (

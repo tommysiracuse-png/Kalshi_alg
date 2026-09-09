@@ -215,6 +215,14 @@ def default_session_configuration() -> Dict[str, Any]:
             "workerHeartbeatSeconds": 2.0,
             "workerStaleSeconds": 5.0,
             "startupTimeoutSeconds": 300.0,
+            # A worker uses one bounded pool for blocking venue calls.  Keep
+            # this below the process/thread budget even when several venues
+            # are running at once.
+            "workerIoThreads": 8,
+            # A live heartbeat is not sufficient proof that reconciliation is
+            # making progress.  Recycle a shard that cannot start any actor
+            # within this interval, while leaving progressing shards alone.
+            "startupProgressTimeoutSeconds": 90.0,
             # Worker-local risk evaluator (fleet_runtime/risk.py). The
             # defaults reproduce the previously hard-coded 7.5c / 20c mid-move
             # and 120 s staleness rules; the move window is time-bounded.
@@ -445,9 +453,15 @@ def validate_session_configuration(value: Mapping[str, Any]) -> Dict[str, Any]:
         "quoteFreshnessSeconds", "writeUtilizationLimit", "readUtilizationLimit",
         "cashReserveFraction", "seriesExposureFraction", "allocationOversubscription", "workerHeartbeatSeconds",
         "workerStaleSeconds", "startupTimeoutSeconds",
+        "startupProgressTimeoutSeconds",
+        "workerIoThreads",
         "riskWindowSeconds", "riskElevatedMoveCents", "riskExtremeMoveCents", "riskStaleSeconds",
     ):
-        fleet[key] = _require_number(fleet[key], f"fleetRuntime.{key}")
+        fleet[key] = _require_number(
+            fleet[key],
+            f"fleetRuntime.{key}",
+            integer=key == "workerIoThreads",
+        )
     if not 1.0 <= fleet["allocationOversubscription"] <= 10.0:
         raise ValueError("fleetRuntime.allocationOversubscription must be between 1.0 and 10.0")
     for key in ("riskWindowSeconds", "riskStaleSeconds"):
@@ -473,6 +487,10 @@ def validate_session_configuration(value: Mapping[str, Any]) -> Dict[str, Any]:
         raise ValueError("fleetRuntime.workerStaleSeconds must exceed workerHeartbeatSeconds")
     if fleet["startupTimeoutSeconds"] <= 0:
         raise ValueError("fleetRuntime.startupTimeoutSeconds must be > 0")
+    if not 1 <= fleet["workerIoThreads"] <= 32:
+        raise ValueError("fleetRuntime.workerIoThreads must be between 1 and 32")
+    if fleet["startupProgressTimeoutSeconds"] <= 0:
+        raise ValueError("fleetRuntime.startupProgressTimeoutSeconds must be > 0")
 
     from bots.top_of_book_bot import BotSettings
 

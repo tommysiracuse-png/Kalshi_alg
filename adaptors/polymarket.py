@@ -394,6 +394,13 @@ class PolymarketClient(BaseClient):
         self._market_stream_assets: tuple[str, ...] = ()
         self._seen_user_events: set[str] = set()
         self._screener_cancel = threading.Event()
+        # Catalog and book hydration used to create short-lived executors on
+        # every call.  Reuse one bounded pool so concurrent mirror/screener
+        # refreshes cannot create a thread burst in a worker process.
+        self._parallel_executor = ThreadPoolExecutor(
+            max_workers=max(1, min(32, max(config.catalog_parallelism, config.book_parallelism))),
+            thread_name_prefix="polymarket-io",
+        )
 
     def begin_screener_scan(self) -> None:
         self._screener_cancel.clear()
@@ -1009,29 +1016,29 @@ class PolymarketClient(BaseClient):
                 break
             offsets = [offset + page_size * index for index in range(workers)]
             page_rows: dict[int, list[Any]] = {}
-            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="polymarket-catalog") as pool:
-                futures = [
-                    (item, None) if item in prefetched else (item, pool.submit(fetch, item, page_size))
-                    for item in offsets
-                ]
-                for item, future in futures:
-                    if future is None:
-                        page_rows[item] = prefetched.pop(item)
-                        continue
-                    try:
-                        page_offset, rows = future.result()
-                    except Exception:
-                        api_errors += 1
-                        # Gamma rejects deep offset pages (currently offsets
-                        # above roughly 2,000). Switch to its cursor endpoint
-                        # instead of returning the warm, truncated catalog.
-                        error = future.exception()
-                        text = str(error).lower()
-                        status_code = getattr(error, "status_code", None)
-                        if status_code == 422 or "offset" in text:
-                            offset_limit_error = True
-                        continue
-                    page_rows[page_offset] = rows
+            pool = self._parallel_executor
+            futures = [
+                (item, None) if item in prefetched else (item, pool.submit(fetch, item, page_size))
+                for item in offsets
+            ]
+            for item, future in futures:
+                if future is None:
+                    page_rows[item] = prefetched.pop(item)
+                    continue
+                try:
+                    page_offset, rows = future.result()
+                except Exception:
+                    api_errors += 1
+                    # Gamma rejects deep offset pages (currently offsets
+                    # above roughly 2,000). Switch to its cursor endpoint
+                    # instead of returning the warm, truncated catalog.
+                    error = future.exception()
+                    text = str(error).lower()
+                    status_code = getattr(error, "status_code", None)
+                    if status_code == 422 or "offset" in text:
+                        offset_limit_error = True
+                    continue
+                page_rows[page_offset] = rows
             if offset_limit_error:
                 return self._list_markets_keyset_catalog(query)
             if api_errors and not page_rows:
@@ -1309,22 +1316,22 @@ class PolymarketClient(BaseClient):
                 raise
 
         failures: list[str] = []
-        with ThreadPoolExecutor(max_workers=max(1, int(self.config.book_parallelism)), thread_name_prefix="polymarket-books") as pool:
-            future_batches = {pool.submit(fetch_with_split, batch): batch for batch in batches}
-            for future in as_completed(future_batches):
-                batch = future_batches[future]
-                try:
-                    rows = future.result()
-                except Exception:
-                    failures.extend(batch)
+        pool = self._parallel_executor
+        future_batches = {pool.submit(fetch_with_split, batch): batch for batch in batches}
+        for future in as_completed(future_batches):
+            batch = future_batches[future]
+            try:
+                rows = future.result()
+            except Exception:
+                failures.extend(batch)
+                continue
+            for row in rows:
+                if not isinstance(row, Mapping):
                     continue
-                for row in rows:
-                    if not isinstance(row, Mapping):
-                        continue
-                    asset = str(row.get("asset_id") or row.get("assetId") or "")
-                    if asset in by_token:
-                        books[asset] = self._book_payload(row)
-                        self.book_cache.update_book(asset, row, timestamp_ms=_timestamp_ms(row.get("timestamp")) or 0)
+                asset = str(row.get("asset_id") or row.get("assetId") or "")
+                if asset in by_token:
+                    books[asset] = self._book_payload(row)
+                    self.book_cache.update_book(asset, row, timestamp_ms=_timestamp_ms(row.get("timestamp")) or 0)
 
         # Retry only failed tokens, with the same bounded executor. This path
         # is intentionally separate from the normal bulk requests so a bad
@@ -1345,10 +1352,9 @@ class PolymarketClient(BaseClient):
                     return token, self._book_payload(response)
                 except Exception:
                     return token, None
-            with ThreadPoolExecutor(max_workers=min(8, max(1, int(self.config.book_parallelism))), thread_name_prefix="polymarket-book-fallback") as pool:
-                for token, payload in pool.map(fetch_one, failures):
-                    if payload is not None:
-                        books[token] = payload
+            for token, payload in pool.map(fetch_one, failures):
+                if payload is not None:
+                    books[token] = payload
 
         hydrated: dict[str, Market] = {}
         for market in candidates:
@@ -2127,7 +2133,10 @@ class PolymarketClient(BaseClient):
             self._market_stream_task = None
         await super().close()
         await self._user_websocket.close()
-        for transport in (self.gamma_http, self.data_http):
-            closer = getattr(transport, "close", None)
-            if callable(closer):
-                closer()
+        try:
+            for transport in (self.gamma_http, self.data_http):
+                closer = getattr(transport, "close", None)
+                if callable(closer):
+                    closer()
+        finally:
+            self._parallel_executor.shutdown(wait=False, cancel_futures=True)

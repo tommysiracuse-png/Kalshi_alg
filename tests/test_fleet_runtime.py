@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from clients.models import (
     Fill,
     OrderBookDelta,
@@ -72,6 +74,18 @@ def test_advanced_capacity_admits_one_side_per_500_and_reserves_cash():
     )
     assert not downgraded.gate_open
     assert downgraded.reduction_only
+
+
+def test_fleet_startup_resource_settings_have_bounded_defaults_and_validation():
+    config = validate_session_configuration(default_session_configuration())
+    fleet = config["fleetRuntime"]
+    assert fleet["workerIoThreads"] == 8
+    assert fleet["startupProgressTimeoutSeconds"] == 90.0
+
+    invalid = default_session_configuration()
+    invalid["fleetRuntime"]["workerIoThreads"] = 0
+    with pytest.raises(ValueError, match="workerIoThreads"):
+        validate_session_configuration(invalid)
 
 
 def test_capital_allocation_is_one_side_first_and_enforces_series_limit():

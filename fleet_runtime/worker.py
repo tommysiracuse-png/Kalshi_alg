@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import json
 import logging
 import multiprocessing as mp
@@ -35,7 +36,7 @@ from clients.models import (
 from core.fleet_models import MarketHealth, ScreenerPick, WorkerControlAck, WorkerHeartbeat
 from core.session_config import bot_settings_payload
 from bots.top_of_book_bot import BotSettings, MarketActor, TelemetryStore, load_market_metadata
-from .execution import BrokerRequest, BrokerRpcClient
+from .execution import BrokerRequest, BrokerRpcClient, read_queue_lockfree
 from .risk import (
     DEFAULT_RISK_STALE_AFTER_MS,
     RISK_FLATTEN_LATCH_MS,
@@ -455,8 +456,21 @@ class FleetWorkerProcess(mp.Process):
         # prove a feed is alive).
         stream_connected = False
         fleet = self.session_configuration["fleetRuntime"]
+        worker_io_threads = max(1, int(fleet.get("workerIoThreads", 8)))
+        reconcile_concurrency = max(1, min(RECONCILE_CONCURRENCY, worker_io_threads))
         heartbeat_seconds = float(fleet["workerHeartbeatSeconds"])
         freshness_seconds = float(fleet["quoteFreshnessSeconds"])
+        startup_attempts: dict[str, int] = {}
+        startup_progress_at_ms = 0
+        startup_error = ""
+        worker_error = ""
+        io_executor = ThreadPoolExecutor(
+            max_workers=worker_io_threads,
+            thread_name_prefix=f"{self.worker_id}-io",
+        )
+        # All blocking actor/venue calls share one bounded pool.  asyncio's
+        # default executor otherwise grows independently in every worker.
+        asyncio.get_running_loop().set_default_executor(io_executor)
         # Logs one WARNING (into this worker's log) if any stored value had
         # to be replaced by a default.
         risk_thresholds = RiskThresholds.from_fleet_config(fleet, log=log)
@@ -480,6 +494,7 @@ class FleetWorkerProcess(mp.Process):
             )
 
         async def add_actor(pick: ScreenerPick) -> None:
+            nonlocal startup_progress_at_ms, startup_error, worker_error
             if pick.market_id in actors:
                 picks[pick.market_id] = pick
                 return
@@ -523,6 +538,12 @@ class FleetWorkerProcess(mp.Process):
             prime_market = getattr(direct, "prime_market", None)
             if callable(prime_market) and pick.ranking:
                 prime_market(pick.ranking)
+            log.info(
+                "ACTOR_START_ATTEMPT | ticker=%s attempt=%d venue=%s",
+                pick.market_id,
+                startup_attempts.get(pick.market_id, 0) + 1,
+                self.venue,
+            )
             metadata = await asyncio.to_thread(load_market_metadata, client, pick.market_id)
             telemetry = TelemetryStore(
                 str(shard_dir / "telemetry.sqlite3"),
@@ -547,6 +568,10 @@ class FleetWorkerProcess(mp.Process):
                 actors[pick.market_id] = actor
                 picks[pick.market_id] = pick
                 risk_windows[pick.market_id] = deque(maxlen=RISK_WINDOW_MAX_SAMPLES)
+            startup_progress_at_ms = int(time.time() * 1000)
+            startup_attempts.pop(pick.market_id, None)
+            startup_error = ""
+            log.info("ACTOR_START_OK | ticker=%s venue=%s", pick.market_id, self.venue)
             cached_restored = restore_cached_polymarket_book(actor, direct)
             restored = cached_restored
             if not restored and str(getattr(metadata, "venue", "")).lower() == "polymarket":
@@ -594,6 +619,7 @@ class FleetWorkerProcess(mp.Process):
                     log.warning("RECONCILE_STEP_FAILED | ticker=%s error=%s", ticker, exc)
 
         async def attempt_add(ticker: str, gate: asyncio.Semaphore) -> None:
+            nonlocal startup_error, worker_error
             item = pending_adds.get(ticker)
             if item is None:
                 return
@@ -602,7 +628,12 @@ class FleetWorkerProcess(mp.Process):
                     await add_actor(item.pick)
                 except Exception as exc:
                     item.attempts += 1
+                    startup_attempts[ticker] = item.attempts
                     item.error = str(exc)
+                    startup_error = item.error
+                    if "can't start new thread" in item.error.lower() or "cannot start new thread" in item.error.lower():
+                        worker_error = item.error
+                        log.exception("WORKER_RESOURCE_ERROR | ticker=%s error=%s", ticker, exc)
                     delay = add_retry_delay_seconds(item.attempts)
                     item.retry_at_ms = int(time.time() * 1000 + delay * 1000)
                     log.warning(
@@ -625,7 +656,7 @@ class FleetWorkerProcess(mp.Process):
             if not due:
                 return []
             had_actors = bool(actors)
-            gate = asyncio.Semaphore(RECONCILE_CONCURRENCY)
+            gate = asyncio.Semaphore(reconcile_concurrency)
             await asyncio.gather(*(attempt_add(ticker, gate) for ticker in due))
             added = [ticker for ticker in due if ticker in actors]
             if not added:
@@ -642,10 +673,23 @@ class FleetWorkerProcess(mp.Process):
             return added
 
         async def command_loop() -> None:
+            nonlocal startup_progress_at_ms, startup_error, worker_error
             nonlocal quoting_enabled, shutdown_frozen, stream_generation
             nonlocal allocations_known, broker_responsive_hint
             while not stop_requested.is_set():
-                command = await asyncio.to_thread(self.command_queue.get)
+                # Poll the sole command reader directly.  Queue.get through
+                # asyncio.to_thread consumed one executor thread before a
+                # reconcile could even enqueue its actor starts.
+                try:
+                    command = read_queue_lockfree(self.command_queue, 0)
+                except queue.Empty:
+                    await asyncio.sleep(0.05)
+                    continue
+                except Exception as exc:
+                    worker_error = str(exc)
+                    log.exception("WORKER_COMMAND_QUEUE_ERROR | error=%s", exc)
+                    await asyncio.sleep(1.0)
+                    continue
                 action = str(command.get("action") or "")
                 try:
                     if action == "reconcile":
@@ -666,7 +710,7 @@ class FleetWorkerProcess(mp.Process):
                                 for ticker in set(desired) & set(actors)
                                 if override_key(picks.get(ticker)) != override_key(desired[ticker])
                             )
-                            gate = asyncio.Semaphore(RECONCILE_CONCURRENCY)
+                            gate = asyncio.Semaphore(reconcile_concurrency)
 
                             async def _restart_actor(ticker: str) -> None:
                                 market_class, settings_overrides = override_key(desired[ticker])
@@ -706,6 +750,10 @@ class FleetWorkerProcess(mp.Process):
                             # signal, so a market in a long retry backoff must
                             # not stay bookless for the rest of it.
                             queue_pending_adds(pending_adds, desired, actors)
+                            startup_error = ""
+                            if desired:
+                                stamp = int(time.time() * 1000)
+                                startup_progress_at_ms = stamp
                             stream_generation += 1
                             if actors:
                                 subscriptions_ready.set()
@@ -745,6 +793,7 @@ class FleetWorkerProcess(mp.Process):
                     acknowledge(command, action)
                 except Exception as exc:
                     acknowledge(command, action, error=exc)
+                    worker_error = str(exc)
                     if action == "reconcile":
                         shutdown_frozen = True
                         quoting_enabled = False
@@ -931,6 +980,11 @@ class FleetWorkerProcess(mp.Process):
                 now,
                 self.venue,
                 direct.activity_snapshot(),
+                tuple(sorted(pending_adds)),
+                {ticker: int(item.attempts) for ticker, item in pending_adds.items()},
+                startup_progress_at_ms,
+                startup_error,
+                worker_error,
             )
 
         def heartbeat_fallback_thread() -> None:
@@ -954,6 +1008,7 @@ class FleetWorkerProcess(mp.Process):
                     log.exception("WORKER_HEARTBEAT_FALLBACK_ERROR")
 
         async def heartbeat_loop() -> None:
+            nonlocal worker_error
             nonlocal last_retention_ms
             heartbeat_count = 0
             last_heartbeat_log_ms = 0
@@ -982,6 +1037,11 @@ class FleetWorkerProcess(mp.Process):
                         len(pending_adds), max((item.book_age_ms or 0 for item in health.values()), default=0), now,
                         self.venue,
                         direct.activity_snapshot(),
+                        tuple(sorted(pending_adds)),
+                        {ticker: int(item.attempts) for ticker, item in pending_adds.items()},
+                        startup_progress_at_ms,
+                        startup_error,
+                        worker_error,
                     ))
                     with heartbeat_signal_lock:
                         heartbeat_signal["last_async_ms"] = now
@@ -1004,12 +1064,18 @@ class FleetWorkerProcess(mp.Process):
                     # minimal health payload so a quoting worker is not
                     # repeatedly recycled as stale.
                     log.exception("WORKER_HEARTBEAT_ERROR | error=%s", exc)
+                    worker_error = str(exc)
                     fallback_health = {ticker: market_health(actor, now, rich=False) for ticker, actor in actors.items()}
                     try:
                         self.heartbeat_queue.put(WorkerHeartbeat(
                             self.worker_id, tuple(sorted(actors)), fallback_health, _rss_bytes(),
                             len(pending_adds), 0, now, self.venue,
                             direct.activity_snapshot(),
+                            tuple(sorted(pending_adds)),
+                            {ticker: int(item.attempts) for ticker, item in pending_adds.items()},
+                            startup_progress_at_ms,
+                            startup_error,
+                            worker_error,
                         ))
                         with heartbeat_signal_lock:
                             heartbeat_signal["last_async_ms"] = now
@@ -1024,19 +1090,37 @@ class FleetWorkerProcess(mp.Process):
                         log.exception("WORKER_HEARTBEAT_FALLBACK_ERROR")
                 await asyncio.sleep(heartbeat_seconds)
 
+        async def supervised(name: str, factory) -> None:
+            nonlocal worker_error
+            while not stop_requested.is_set():
+                try:
+                    await factory()
+                    if not stop_requested.is_set():
+                        raise RuntimeError(f"{name} task exited unexpectedly")
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    worker_error = f"{name}: {exc}"
+                    log.exception("WORKER_TASK_ERROR | task=%s error=%s", name, exc)
+                    await asyncio.sleep(1.0)
+
         tasks = [
-            asyncio.create_task(command_loop()),
-            asyncio.create_task(add_loop()),
-            asyncio.create_task(stream_loop()),
-            asyncio.create_task(risk_loop()),
-            asyncio.create_task(heartbeat_loop()),
+            asyncio.create_task(supervised("command_loop", command_loop)),
+            asyncio.create_task(supervised("add_loop", add_loop)),
+            asyncio.create_task(supervised("stream_loop", stream_loop)),
+            asyncio.create_task(supervised("risk_loop", risk_loop)),
+            asyncio.create_task(supervised("heartbeat_loop", heartbeat_loop)),
         ]
         heartbeat_thread = threading.Thread(
             target=heartbeat_fallback_thread,
             name=f"{self.worker_id}-heartbeat",
             daemon=True,
         )
-        heartbeat_thread.start()
+        try:
+            heartbeat_thread.start()
+        except RuntimeError as exc:
+            worker_error = str(exc)
+            log.exception("WORKER_RESOURCE_ERROR | component=heartbeat_fallback error=%s", exc)
         try:
             await stop_requested.wait()
         finally:
@@ -1060,5 +1144,8 @@ class FleetWorkerProcess(mp.Process):
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
-            await direct.close()
-            client.close_dispatcher()
+            try:
+                await direct.close()
+                client.close_dispatcher()
+            finally:
+                io_executor.shutdown(wait=False, cancel_futures=True)

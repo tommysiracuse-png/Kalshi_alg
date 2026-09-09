@@ -13,6 +13,10 @@ import shutil
 import sys
 import time
 import uuid
+try:
+    import resource as _resource
+except ImportError:  # Windows has no POSIX resource module.
+    _resource = None  # type: ignore[assignment]
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterator, Mapping, Optional
@@ -142,6 +146,16 @@ class ManagedWorker:
     # A post-broker-restart re-issue that found this worker busy with another
     # control request; it is sent as soon as that request acknowledges.
     reconcile_owed: bool = False
+    # Startup progress is tracked separately from heartbeat liveness.  A
+    # worker may keep heartbeating while its command/reconcile path is wedged.
+    startup_target_tickers: tuple[str, ...] = ()
+    startup_pending_tickers: tuple[str, ...] = ()
+    startup_attempts: Mapping[str, int] = dataclasses.field(default_factory=dict)
+    startup_started_at_ms: int = 0
+    startup_progress_at_ms: int = 0
+    startup_error: str = ""
+    worker_error: str = ""
+    recovery_reason: str = ""
 
 
 @dataclass(frozen=True)
@@ -160,7 +174,64 @@ class BrokerAdminError(RuntimeError):
         self.detail = dict(detail or {})
 
 
-def validate_host_resources(*, strict: bool) -> list[str]:
+def thread_budget_snapshot(
+    *, worker_count: int, worker_io_threads: int, adaptor_threads: int = 0,
+) -> dict[str, int | None]:
+    """Estimate task capacity before spawning a multi-venue fleet.
+
+    The estimate intentionally includes only persistent runtime threads.  The
+    bounded worker I/O pool, RPC dispatcher, heartbeat fallback, and broker
+    dispatcher/executor are all long-lived; short-lived HTTP pools are capped
+    separately by their adaptor.
+    """
+    current = 0
+    limit: int | None = None
+    try:
+        with open("/sys/fs/cgroup/pids.current", "r", encoding="utf-8") as handle:
+            current = int(handle.read().strip())
+        with open("/sys/fs/cgroup/pids.max", "r", encoding="utf-8") as handle:
+            raw_limit = handle.read().strip()
+        if raw_limit != "max":
+            limit = int(raw_limit)
+    except (OSError, ValueError):
+        try:
+            with open("/proc/self/status", "r", encoding="utf-8") as handle:
+                values = {
+                    line.split(":", 1)[0]: line.split(":", 1)[1].strip()
+                    for line in handle if ":" in line
+                }
+            current = int(values.get("Threads", "0"))
+        except (OSError, ValueError):
+            current = 0
+    if limit is None and _resource is not None:
+        try:
+            soft_limit, _hard_limit = _resource.getrlimit(_resource.RLIMIT_NPROC)
+            if soft_limit != _resource.RLIM_INFINITY:
+                limit = int(soft_limit)
+        except (AttributeError, OSError, ValueError):
+            pass
+    # Per worker: bounded I/O pool + broker response dispatcher + heartbeat
+    # fallback + one request and one response Queue feeder.  The execution
+    # broker has four executor workers and one dispatcher; reserve three more
+    # controller/queue tasks.  Heartbeat/control/command channels use
+    # SimpleQueue and therefore do not add feeder threads.
+    estimated_additional = int(worker_count) * (
+        int(worker_io_threads) + 4 + max(0, int(adaptor_threads))
+    ) + 8
+    estimated_total = current + estimated_additional
+    return {
+        "current": current,
+        "limit": limit,
+        "estimatedAdditional": estimated_additional,
+        "estimatedTotal": estimated_total,
+        "headroom": max(0, limit - estimated_total) if limit is not None else None,
+    }
+
+
+def validate_host_resources(
+    *, strict: bool, worker_count: int = 0, worker_io_threads: int = 8,
+    adaptor_threads: int = 0,
+) -> list[str]:
     warnings: list[str] = []
     cpu_count = os.cpu_count() or 0
     if cpu_count < 8:
@@ -199,6 +270,18 @@ def validate_host_resources(*, strict: bool) -> list[str]:
     free = shutil.disk_usage(Path.cwd()).free
     if free < 100 * 1024**3:
         warnings.append(f"host has {free / 1024**3:.1f} GiB free; 100 GiB required")
+    budget = thread_budget_snapshot(
+        worker_count=worker_count,
+        worker_io_threads=worker_io_threads,
+        adaptor_threads=adaptor_threads,
+    )
+    limit = budget.get("limit")
+    if limit is not None and int(budget["estimatedTotal"] or 0) > int(limit):
+        warnings.append(
+            "fleet requires approximately "
+            f"{budget['estimatedAdditional']} additional tasks but only "
+            f"{max(0, int(limit) - int(budget['current'] or 0))} are available"
+        )
     if strict and warnings:
         raise RuntimeError("fleet host validation failed: " + "; ".join(warnings))
     return warnings
@@ -277,6 +360,7 @@ class ShardedBotManager:
         self._allocation: Optional[AllocationResult] = None
         self._capacity_error: str = ""
         self._host_warnings: list[str] = []
+        self._thread_budget: dict[str, int | None] = {}
         self._planning_only = bool(config.dry_run and not (config.api_key_id and config.private_key_path))
         # Broker liveness (see BROKER_* constants).  Tunables are instance
         # attributes so tests can shrink them.
@@ -308,6 +392,7 @@ class ShardedBotManager:
         self._broker_reported_at_ms = 0
         self._admission_pending = False
         self._admission_retry_at_ms = 0
+        self._admission_retry_task: Optional[asyncio.Task[Any]] = None
         # Per-ticker state from the last admission snapshot: position exposure
         # (cash units) and signed position, plus the exchange shard of every
         # desired market.  They feed the broker's live-cap ledger
@@ -393,6 +478,18 @@ class ShardedBotManager:
         now = int(time.time() * 1000)
         managed.control_sent_at_ms = now
         managed.control_deadline_ms = int(now + timeout_seconds * 1000)
+        if action == "reconcile":
+            picks = tuple(payload.get("picks") or ())
+            managed.startup_target_tickers = tuple(
+                str(getattr(item, "market_id", "")) for item in picks
+                if str(getattr(item, "market_id", ""))
+            )
+            managed.startup_started_at_ms = now if managed.startup_target_tickers else 0
+            managed.startup_progress_at_ms = now if managed.startup_target_tickers else 0
+            managed.startup_pending_tickers = managed.startup_target_tickers
+            managed.startup_attempts = {}
+            managed.startup_error = ""
+            managed.worker_error = ""
         managed.phase = "reconciling" if action == "reconcile" else "quiescing" if action == "freeze" else "stopping"
         managed.command_queue.put({"request_id": request_id, "action": action, **payload})
         return request_id
@@ -402,7 +499,7 @@ class ShardedBotManager:
             return
         while True:
             try:
-                ack = self._control_ack_queue.get_nowait()
+                ack = read_queue_lockfree(self._control_ack_queue, 0)
             except queue.Empty:
                 break
             if not isinstance(ack, WorkerControlAck):
@@ -422,11 +519,15 @@ class ShardedBotManager:
             managed.last_error = ack.error
             if ack.action == "reconcile":
                 if ack.ok:
-                    managed.phase = "resume_pending" if managed.recovering else "healthy"
+                    if managed.recovering:
+                        managed.phase = "resume_pending"
+                    else:
+                        managed.phase = "starting" if managed.startup_target_tickers else "healthy"
                 else:
                     managed.phase = "cleanup_pending"
                     managed.recovering = True
                     managed.recovery_retry_at_ms = 0
+                    managed.recovery_reason = "reconcile_failed"
             elif ack.action == "freeze":
                 managed.phase = "quiesced" if ack.ok else "quiesce_failed"
             if managed.reconcile_owed:
@@ -587,7 +688,7 @@ class ShardedBotManager:
             return changed
         while True:
             try:
-                message = self._broker_status_queue.get_nowait()
+                message = read_queue_lockfree(self._broker_status_queue, 0)
             except queue.Empty:
                 break
             if self._ingest_broker_status(message):
@@ -747,7 +848,15 @@ class ShardedBotManager:
 
     @staticmethod
     async def _join_process(process: Any, timeout: float) -> bool:
-        await asyncio.to_thread(process.join, timeout)
+        # ``Process.join`` was previously dispatched through the event-loop
+        # executor.  Besides consuming another thread during every recovery,
+        # that left a worker in the executor while the loop was shutting down
+        # on Python builds where the executor join is not promptly woken.
+        # ``is_alive`` performs a non-blocking waitpid check, so poll it from
+        # the event loop with a small cooperative sleep instead.
+        deadline = time.monotonic() + max(0.0, float(timeout))
+        while process.is_alive() and time.monotonic() < deadline:
+            await asyncio.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
         return not process.is_alive()
 
     @classmethod
@@ -774,14 +883,29 @@ class ShardedBotManager:
             return
         if self._shutdown_started:
             raise RuntimeError("fleet is shutting down")
-        self._host_warnings = validate_host_resources(strict=self.max_bots > 40 and not self.config.dry_run)
+        worker_io_threads = int(self.fleet_config.get("workerIoThreads", 8))
+        self._thread_budget = thread_budget_snapshot(
+            worker_count=self.worker_count,
+            worker_io_threads=worker_io_threads,
+            adaptor_threads=16 if self.venue == "polymarket" else 0,
+        )
+        self._host_warnings = validate_host_resources(
+            strict=self.max_bots > 40 and not self.config.dry_run,
+            worker_count=self.worker_count,
+            worker_io_threads=worker_io_threads,
+            adaptor_threads=16 if self.venue == "polymarket" else 0,
+        )
         if self._planning_only:
             self._started = True
             return
         self._request_queue = mp.Queue()
-        self._heartbeat_queue = mp.Queue()
-        self._control_ack_queue = mp.Queue()
-        self._broker_status_queue = mp.Queue()
+        # These channels are one-way and have a single consumer.  SimpleQueue
+        # writes directly to the pipe instead of starting one feeder thread
+        # per producer process, which is important when both venues start
+        # workers at the same time.
+        self._heartbeat_queue = mp.SimpleQueue()
+        self._control_ack_queue = mp.SimpleQueue()
+        self._broker_status_queue = mp.SimpleQueue()
         response_queues: dict[str, Any] = {"controller": mp.Queue()}
         for index in range(self.worker_count):
             response_queues[f"worker-{index:02d}"] = mp.Queue()
@@ -802,7 +926,7 @@ class ShardedBotManager:
         self._admin = _BrokerAdmin(self._request_queue, response_queues["controller"])
         for index in range(self.worker_count):
             worker_id = f"worker-{index:02d}"
-            command_queue = mp.Queue()
+            command_queue = mp.SimpleQueue()
             process = self._make_worker(worker_id, response_queues[worker_id], command_queue)
             process.start()
             self._workers[worker_id] = ManagedWorker(
@@ -1019,6 +1143,13 @@ class ShardedBotManager:
         if len(update.picks) > self.max_bots:
             raise ValueError(f"screener returned {len(update.picks)} markets; configured maximum is {self.max_bots}")
         await self._ensure_started()
+        # A newer screener generation supersedes any background retry for the
+        # previous allocation.  Do not let an old admission result reopen the
+        # quoting gate while this update is being reconciled.
+        if self._admission_retry_task is not None:
+            self._admission_retry_task.cancel()
+            await asyncio.gather(self._admission_retry_task, return_exceptions=True)
+            self._admission_retry_task = None
         desired = update.pick_by_market_id
         previous = dict(self._market_to_worker)
         assignments = assign_markets(
@@ -1132,20 +1263,12 @@ class ShardedBotManager:
             and self._broker_reported_at_ms >= self._broker_started_at_ms - 1_000
         )
 
-    async def _retry_admission(self) -> None:
-        if not self._admission_pending or not self._desired or self._shutdown_started:
-            return
-        now = int(time.time() * 1000)
-        if now < self._admission_retry_at_ms or not self._broker_usable():
-            return
-        if not self._broker_has_reported():
-            # A replacement broker still in its startup cleanup cannot answer
-            # admission_snapshot; waiting the full 90 s on it would freeze
-            # monitor_once (and every status publish) and delay the restart of
-            # a replacement that dies during startup by the same 90 s.
-            return
+    async def _run_admission_retry(self) -> None:
+        """Retry admission without occupying the manager monitor loop."""
         try:
             self._capacity, self._allocation = await self._admission(self._desired)
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             if isinstance(exc, TimeoutError):
                 self._note_broker_timeout()
@@ -1156,6 +1279,24 @@ class ShardedBotManager:
         self._admission_pending = False
         gate_open, _allocations = self._broadcast_quoting_gate()
         await self._emit("admission_recovered", "*", gate_open=gate_open)
+
+    async def _retry_admission(self) -> None:
+        if not self._admission_pending or not self._desired or self._shutdown_started:
+            return
+        if self._admission_retry_task is not None:
+            if not self._admission_retry_task.done():
+                return
+            self._admission_retry_task = None
+        now = int(time.time() * 1000)
+        if now < self._admission_retry_at_ms or not self._broker_usable():
+            return
+        if not self._broker_has_reported():
+            # A replacement broker still in its startup cleanup cannot answer
+            # admission_snapshot; waiting the full 90 s on it would freeze
+            # monitor_once (and every status publish) and delay the restart of
+            # a replacement that dies during startup by the same 90 s.
+            return
+        self._admission_retry_task = asyncio.create_task(self._run_admission_retry())
 
     async def stop_bot(self, market_id: str, *, reason: str = "reconcile", remove_desired: bool = True) -> None:
         if market_id not in self._desired:
@@ -1311,7 +1452,7 @@ class ShardedBotManager:
         # (BrokerRpcClient._read_response), so either build of the replacement
         # still gets its responses.
         release_queue_reader_lock(managed.response_queue)
-        command_queue = mp.Queue()
+        command_queue = mp.SimpleQueue()
         process = self._make_worker(worker_id, managed.response_queue, command_queue)
         process.start()
         managed.process = process
@@ -1398,13 +1539,40 @@ class ShardedBotManager:
                 break
             managed = self._workers.get(heartbeat.worker_id)
             if managed:
+                previous = managed.heartbeat
                 managed.heartbeat = heartbeat
                 managed.last_liveness_at_ms = max(managed.last_liveness_at_ms, heartbeat.generated_at_ms)
+                previous_actors = set(previous.assigned_tickers) if previous else set()
+                previous_pending = set(getattr(previous, "pending_tickers", ()) or ()) if previous else set()
+                current_actors = set(heartbeat.assigned_tickers)
+                current_pending = set(getattr(heartbeat, "pending_tickers", ()) or ())
+                managed.startup_pending_tickers = tuple(sorted(current_pending))
+                managed.startup_attempts = dict(getattr(heartbeat, "startup_attempts", {}) or {})
+                managed.startup_error = str(getattr(heartbeat, "startup_error", "") or "")
+                managed.worker_error = str(getattr(heartbeat, "worker_error", "") or "")
+                if (
+                    len(current_actors) > len(previous_actors)
+                    or len(current_pending) < len(previous_pending)
+                ):
+                    managed.startup_progress_at_ms = heartbeat.generated_at_ms
+                elif int(getattr(heartbeat, "startup_progress_at_ms", 0) or 0):
+                    managed.startup_progress_at_ms = max(
+                        managed.startup_progress_at_ms,
+                        int(heartbeat.startup_progress_at_ms),
+                    )
+                target = set(managed.startup_target_tickers)
+                if target and target.issubset(current_actors) and not current_pending:
+                    managed.startup_target_tickers = ()
+                    managed.startup_pending_tickers = ()
+                    managed.phase = "healthy" if managed.pending_action != "reconcile" else managed.phase
         self._drain_control_acks()
         current = int(time.time() * 1000)
         stale_ms = int(float(self.fleet_config["workerStaleSeconds"]) * 1000)
         hard_cap_ms = int(
             float(self.fleet_config["startupTimeoutSeconds"]) * RECONCILE_HARD_CAP_MULTIPLIER * 1000
+        )
+        startup_progress_timeout_ms = int(
+            float(self.fleet_config.get("startupProgressTimeoutSeconds", 90.0)) * 1000
         )
         broker_grace = bool(
             self._broker_restarted_at_ms
@@ -1446,7 +1614,22 @@ class ShardedBotManager:
                 and managed.control_sent_at_ms
                 and current - managed.control_sent_at_ms > hard_cap_ms
             )
-            if reconcile_grace and not dead:
+            target = set(managed.startup_target_tickers)
+            actor_tickers = set(managed.heartbeat.assigned_tickers if managed.heartbeat else ())
+            startup_pending = bool(
+                target
+                and (
+                    bool(managed.startup_pending_tickers)
+                    or not target.issubset(actor_tickers)
+                )
+            )
+            progress_at_ms = managed.startup_progress_at_ms or managed.startup_started_at_ms
+            startup_no_progress = bool(
+                startup_pending
+                and progress_at_ms
+                and current - progress_at_ms > startup_progress_timeout_ms
+            )
+            if reconcile_grace and not dead and not startup_no_progress:
                 continue
             if dead:
                 self._schedule_recovery(worker_id, self._recover_worker(worker_id, managed))
@@ -1459,11 +1642,20 @@ class ShardedBotManager:
             # ordinary stale-worker rule below remains the safety net; a
             # genuinely wedged first reconcile is still bounded by the hard
             # startup cap.
-            if first_heartbeat_grace:
+            if first_heartbeat_grace and not startup_no_progress:
                 continue
             if stale and broker_grace:
                 # The worker may be blocked on a broker that was just replaced;
                 # give it the restart grace before treating silence as death.
+                continue
+            if startup_no_progress and not broker_grace:
+                managed.recovery_reason = "startup_no_progress"
+                if managed.worker_error and (
+                    "can't start new thread" in managed.worker_error.lower()
+                    or "cannot start new thread" in managed.worker_error.lower()
+                ):
+                    managed.recovery_reason = "thread_resource_failure"
+                self._schedule_recovery(worker_id, self._recover_worker(worker_id, managed))
                 continue
             if stale:
                 self._schedule_recovery(worker_id, self._recover_worker(worker_id, managed))
@@ -1479,6 +1671,13 @@ class ShardedBotManager:
         # inside a real broker cleanup still yields back to the launcher.
         if self._recovery_tasks:
             await asyncio.sleep(0)
+        if self._admission_retry_task is not None:
+            # Let an already-ready retry (common in tests and during a fast
+            # broker recovery) publish its result without ever waiting for a
+            # slow venue call here.
+            await asyncio.sleep(0)
+            if self._admission_retry_task.done():
+                self._admission_retry_task = None
 
     async def stop_all(self, *, reason: str = "launcher_shutdown") -> None:
         """Stop workers and broker, cancelling and verifying bot orders.
@@ -1490,6 +1689,10 @@ class ShardedBotManager:
         starting new attempts.
         """
         self.begin_shutdown()
+        if self._admission_retry_task is not None:
+            self._admission_retry_task.cancel()
+            await asyncio.gather(self._admission_retry_task, return_exceptions=True)
+            self._admission_retry_task = None
         recovery_tasks = list(self._recovery_tasks.values())
         for task in recovery_tasks:
             task.cancel()
@@ -1749,11 +1952,21 @@ class ShardedBotManager:
                 "running": managed.process.is_alive(),
                 "phase": managed.phase,
                 "lastRecoveryError": managed.last_error or None,
+                "recoveryReason": managed.recovery_reason or None,
                 "startedAtMs": managed.started_at_ms or None,
                 "runningForMs": max(0, now - managed.started_at_ms) if managed.started_at_ms else None,
                 "assignedMarkets": len(assigned_tickers),
                 "marketIds": list(assigned_tickers),
                 "botsRunning": len(running_tickers),
+                "startupPendingMarkets": list(managed.startup_pending_tickers),
+                "startupAttempts": dict(managed.startup_attempts),
+                "startupProgressAtMs": managed.startup_progress_at_ms or None,
+                "startupElapsedMs": (
+                    max(0, now - managed.startup_started_at_ms)
+                    if managed.startup_started_at_ms and managed.startup_target_tickers else 0
+                ),
+                "lastStartupError": managed.startup_error or None,
+                "workerError": managed.worker_error or None,
                 "watchdog": {"mode": shard_watchdog, "counts": shard_modes},
                 "heartbeatAtMs": heartbeat.generated_at_ms if heartbeat else None,
                 "stale": worker_stale,
@@ -1920,6 +2133,7 @@ class ShardedBotManager:
             },
             "monitoring": {
                 "shutdownCleanup": dict(self._shutdown_cleanup), "hostWarnings": self._host_warnings,
+                "threadBudget": dict(self._thread_budget),
                 "botsRunning": bots_running,
                 "queueDepth": sum(int(item.get("queueDepth") or 0) for item in workers),
                 "portfolio": portfolio,
@@ -1930,4 +2144,5 @@ class ShardedBotManager:
             "portfolio": portfolio,
             "pnl": rounded_pnl,
             "apiActivity": api_activity,
+            "threadBudget": dict(self._thread_budget),
         }

@@ -93,6 +93,13 @@ class WorkerHeartbeat:
     generated_at_ms: int
     venue: str = "kalshi"
     api_activity: Mapping[str, object] = field(default_factory=dict)
+    # Startup fields are optional so heartbeats written by older workers and
+    # test fixtures remain readable while a rolling deployment is in flight.
+    pending_tickers: Tuple[str, ...] = ()
+    startup_attempts: Mapping[str, int] = field(default_factory=dict)
+    startup_progress_at_ms: int = 0
+    startup_error: str = ""
+    worker_error: str = ""
 
 
 @dataclass(frozen=True)
