@@ -71,6 +71,7 @@ type ParsedFilters = {
 const COLUMN_OPTIONS: Record<TableKind, Array<{ id: string; label: string; locked?: boolean }>> = {
   markets: [
     { id: "identity", label: "Name / Description / Link / Ticker", locked: true },
+    { id: "venue", label: "Venue" },
     { id: "side", label: "Side" },
     { id: "contracts", label: "Contracts" },
     { id: "averageCost", label: "Avg Cost" },
@@ -114,7 +115,7 @@ const EMPTY_METRICS_FILTERS: MetricsFilters = {
 };
 
 const DEFAULT_COLUMN_WIDTHS: Record<TableKind, Record<string, number>> = {
-  markets: { identity: 320 },
+  markets: { identity: 320, venue: 120 },
   fills: { contracts: 190, signedMarkout: 170, futureMidpoint: 170, netMarkout: 170 },
   orders: { orderId: 190, book: 170, latestState: 150 },
 };
@@ -873,6 +874,7 @@ function RunMarkets({ run, state, horizonMs, expandedMarkets, activity, columnPr
         return <div className="market-cell"><button type="button" className="row-toggle" aria-expanded={open} aria-label={`${open ? "Collapse" : "Expand"} ${market.ticker}`}>{open ? "−" : "+"}</button><span><strong>{market.marketUrl ? <a className="external-link" href={market.marketUrl} target="_blank" rel="noreferrer" onClick={event => event.stopPropagation()}>{market.description} ↗</a> : market.description}</strong><small className="mono">{market.ticker}</small></span></div>;
       },
     },
+    { id: "venue", header: "Venue", initialDirection: "asc", sortValue: market => market.venue ?? "unknown", render: market => <strong>{market.venue ?? "unknown"}</strong> },
     { id: "side", header: "Side", initialDirection: "asc", sortValue: market => market.side, render: market => <Side value={market.side} /> },
     { id: "contracts", header: "Contracts", initialDirection: "desc", sortValue: market => market.yesContractsUnits + market.noContractsUnits, render: market => <><span>YES {contractUnits(market.yesContractsUnits)}</span><small>NO {contractUnits(market.noContractsUnits)}</small></> },
     { id: "averageCost", header: "Avg cost", initialDirection: "desc", sortValue: marketAverageCost, render: market => <><span>YES {priceUnits(market.yesAverageCostPriceUnits)}</span><small>NO {priceUnits(market.noAverageCostPriceUnits)}</small></> },

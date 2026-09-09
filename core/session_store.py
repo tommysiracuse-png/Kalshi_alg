@@ -1195,6 +1195,41 @@ class SessionStore:
         return artifact
 
     @staticmethod
+    def _market_venue(
+        artifact: Path,
+        path: Path,
+        configuration: Optional[Mapping[str, Any]] = None,
+    ) -> str:
+        """Identify the venue owning a persisted market database.
+
+        Multi-venue runs store telemetry below ``<artifact>/<venue>/``.  Older
+        single-venue runs store it directly below the artifact, so use an
+        unambiguous run configuration as a compatibility fallback there.
+        """
+        try:
+            parts = Path(path).resolve().relative_to(Path(artifact).resolve()).parts
+        except ValueError:
+            parts = ()
+        if len(parts) >= 2 and parts[0].lower() in {"kalshi", "polymarket"} and parts[1] in {"markets", "shards"}:
+            return parts[0].lower()
+
+        config = configuration if isinstance(configuration, Mapping) else {}
+        configured = str(config.get("venue") or "").strip().lower()
+        if configured in {"kalshi", "polymarket"}:
+            return configured
+        venues = config.get("venues")
+        if isinstance(venues, Mapping):
+            enabled = [
+                str(name).strip().lower()
+                for name, value in venues.items()
+                if str(name).strip().lower() in {"kalshi", "polymarket"}
+                and isinstance(value, Mapping) and bool(value.get("enabled"))
+            ]
+            if len(enabled) == 1:
+                return enabled[0]
+        return "unknown"
+
+    @staticmethod
     def _table_exists(db: sqlite3.Connection, table: str) -> bool:
         return db.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
@@ -1363,6 +1398,7 @@ class SessionStore:
         ticker: str,
         fallback_title: str,
         fallback_url: Optional[str],
+        venue: str,
         legacy_metric: Mapping[str, Any],
     ) -> Dict[str, Any]:
         uri = f"file:{path}?mode=ro"
@@ -1442,6 +1478,7 @@ class SessionStore:
             "ticker": ticker,
             "description": description,
             "marketUrl": market_url,
+            "venue": venue,
             "side": side,
             "yesContractsUnits": yes_units,
             "noContractsUnits": no_units,
@@ -1547,6 +1584,7 @@ class SessionStore:
                         ticker=ticker,
                         fallback_title=titles.get(ticker, ticker),
                         fallback_url=links.get(ticker),
+                        venue=self._market_venue(artifact, path, run.get("configuration")),
                         legacy_metric=legacy.get(ticker) if isinstance(legacy.get(ticker), Mapping) else {},
                     )
                     items_by_ticker[ticker] = item
@@ -1620,6 +1658,7 @@ class SessionStore:
             ticker=ticker,
             fallback_title=titles.get(ticker, ticker),
             fallback_url=(market_links or {}).get(ticker),
+            venue=self._market_venue(artifact, path, run.get("configuration")),
             legacy_metric=legacy if isinstance(legacy, Mapping) else {},
         )
         current = now_ms()

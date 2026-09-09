@@ -93,7 +93,7 @@ export type MetricsHeartbeat = {
   } | null;
 };
 export type RunMarketMetrics = {
-  ticker: string; description: string; marketUrl?: string | null; side: "YES" | "NO" | "BOTH" | "—";
+  ticker: string; description: string; marketUrl?: string | null; venue?: string | null; side: "YES" | "NO" | "BOTH" | "—";
   yesContractsUnits: number; noContractsUnits: number; yesAverageCostPriceUnits?: number | null; noAverageCostPriceUnits?: number | null;
   totalCostUnits?: number | null; realizedPnlUnits?: number | null; realizedReturnBps?: number | null;
   markoutsByHorizon?: Record<string, MarkoutAggregate>;

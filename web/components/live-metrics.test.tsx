@@ -40,7 +40,7 @@ describe("LiveMetrics", () => {
     const markets: RunMarketsResponse = {
       generatedAt: 2_000_000, runId: "run-12345678", source, warnings: [],
       items: [{
-        ticker: "TEST-1", description: "Test market", marketUrl: "https://kalshi.com/markets/test/test-market/test-event", side: "BOTH",
+        ticker: "TEST-1", description: "Test market", marketUrl: "https://kalshi.com/markets/test/test-market/test-event", venue: "kalshi", side: "BOTH",
         yesContractsUnits: 100, noContractsUnits: 100, yesAverageCostPriceUnits: 4_000, noAverageCostPriceUnits: 5_000,
         totalCostUnits: 9_100, realizedPnlUnits: 900, realizedReturnBps: 989, fillCount: 2, orderCount: 2,
         markoutsByHorizon: { "30000": aggregate(890, 2, 445) },
@@ -81,6 +81,8 @@ describe("LiveMetrics", () => {
     fireEvent.click(screen.getByRole("button", { name: "Expand TEST-1" }));
     expect(await screen.findByText("Newest 1 of 125")).toBeInTheDocument();
     expect(screen.getByText("Newest 1 of 70")).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Venue" })).toBeInTheDocument();
+    expect(screen.getByText("kalshi")).toBeInTheDocument();
     expect(screen.getByRole("columnheader", { name: "Signed markout" })).toBeInTheDocument();
     expect(screen.getAllByRole("columnheader", { name: "30s net markout" })).toHaveLength(3);
     expect(screen.queryByRole("columnheader", { name: "Liquidation value" })).not.toBeInTheDocument();

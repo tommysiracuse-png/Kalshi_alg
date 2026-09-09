@@ -142,6 +142,27 @@ def test_market_and_fill_calculations_use_persisted_fill_time_marks(tmp_path: Pa
     assert opening_fill["fillPnlUnits"] == 450
 
 
+def test_market_metrics_include_venue_from_multi_venue_artifact(tmp_path: Path):
+    store = SessionStore(tmp_path / "sessions")
+    run = store.prepare_run()
+    path = Path(run["artifactPath"]) / "polymarket" / "markets" / "POLY-1" / "telemetry.sqlite3"
+    telemetry = TelemetryStore(str(path), enabled=True)
+    telemetry.record_market_metadata(
+        ticker="POLY-1", title="Polymarket test", series_ticker="", event_ticker="",
+    )
+    telemetry.start_order_revision(
+        revision_key="poly-order", action="create", side="yes", client_order_id="poly-client",
+        order_id="poly-order", placed_at_ms=now_ms(), size_units=100, price_units=4_000,
+        book_bid_units=3_900, book_ask_units=4_100, book_mid_units=4_000,
+    )
+    store.record_metrics(run["id"], {"markets": {"POLY-1": {"orders": 1}}}, sample=False)
+
+    response = store.run_markets(run["id"])
+    assert response["items"][0]["venue"] == "polymarket"
+    activity = store.run_market_activity(run["id"], "POLY-1", fill_limit=25, order_limit=25)
+    assert activity["market"]["venue"] == "polymarket"
+
+
 def test_open_fill_uses_latest_market_state_same_side_bid(tmp_path: Path):
     store = SessionStore(tmp_path / "sessions")
     run = store.prepare_run()
