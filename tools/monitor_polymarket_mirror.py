@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sqlite3
 import sys
 import time
+from collections import deque
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional
@@ -103,6 +105,87 @@ def _age_seconds(value: Any, now_ms: int) -> Optional[float]:
     if value in (None, ""):
         return None
     return max(0.0, (now_ms - _number(value)) / 1000.0)
+
+
+class _BookCoverageEstimator:
+    """Estimate time until the current mirror generation reaches 100% books."""
+
+    def __init__(self) -> None:
+        self.generation_id: Optional[str] = None
+        self.last_at_ms: Optional[int] = None
+        self.last_ready_markets: Optional[int] = None
+        self.rates_markets_per_second: deque[float] = deque(maxlen=8)
+
+    def estimate(self, status: Mapping[str, Any], *, now_ms: int) -> dict[str, Any]:
+        generation_id = str(status.get("generationId") or "") or None
+        if generation_id != self.generation_id:
+            self.generation_id = generation_id
+            self.last_at_ms = None
+            self.last_ready_markets = None
+            self.rates_markets_per_second.clear()
+
+        total = max(0, _integer(status.get("catalogCount")))
+        ready = max(0, min(total, _integer(status.get("bookReadyMarkets")))) if total else 0
+        if self.last_at_ms is not None and self.last_ready_markets is not None:
+            elapsed_seconds = (now_ms - self.last_at_ms) / 1000.0
+            progress = ready - self.last_ready_markets
+            if elapsed_seconds > 0 and progress > 0:
+                self.rates_markets_per_second.append(progress / elapsed_seconds)
+        self.last_at_ms = now_ms
+        self.last_ready_markets = ready
+
+        remaining = max(0, total - ready)
+        coverage = (ready / total) if total else None
+        is_complete = bool(total and ready >= total)
+        is_scanning = bool(status.get("running")) and not bool(status.get("complete"))
+        rate = (
+            sum(self.rates_markets_per_second) / len(self.rates_markets_per_second)
+            if self.rates_markets_per_second else None
+        )
+
+        # A one-shot invocation has no prior monitor sample. The mirror's
+        # catalog duration provides a useful fallback while a generation is
+        # actively syncing, but it is intentionally not used after a completed
+        # sync because cached books may have been present before this run.
+        rate_source = "observed_refreshes"
+        if rate is None and is_scanning:
+            duration_ms = _integer(status.get("catalogDurationMs"))
+            if duration_ms <= 0:
+                started_ms = status.get("catalogStartedAtMs") or status.get("startedAtMs")
+                duration_ms = max(0, now_ms - _integer(started_ms)) if started_ms else 0
+            if duration_ms > 0 and ready > 0:
+                rate = ready / (duration_ms / 1000.0)
+                rate_source = "mirror_elapsed"
+
+        eta_seconds: Optional[float]
+        if is_complete:
+            eta_seconds = 0.0
+            estimate_status = "complete"
+        elif rate is not None and rate > 0 and is_scanning:
+            eta_seconds = remaining / rate
+            estimate_status = "estimating"
+        elif not total:
+            eta_seconds = None
+            estimate_status = "unavailable"
+        elif not is_scanning:
+            eta_seconds = None
+            estimate_status = "not_scanning"
+        else:
+            eta_seconds = None
+            estimate_status = "no_progress"
+
+        return {
+            "generationId": generation_id,
+            "targetMarkets": total,
+            "readyMarkets": ready,
+            "remainingMarkets": remaining,
+            "coverage": coverage,
+            "rateMarketsPerSecond": rate,
+            "rateMarketsPerMinute": rate * 60.0 if rate is not None else None,
+            "etaSeconds": eta_seconds,
+            "status": estimate_status,
+            "rateSource": rate_source if rate is not None else None,
+        }
 
 
 def _operation_rows(activity: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -310,6 +393,10 @@ def _screener_summary(path: Path, *, now_ms: int, window_seconds: float) -> dict
 
 def collect_report(args: argparse.Namespace) -> dict[str, Any]:
     now_ms = int(time.time() * 1000)
+    coverage_estimator = getattr(args, "_coverage_estimator", None)
+    if not isinstance(coverage_estimator, _BookCoverageEstimator):
+        coverage_estimator = _BookCoverageEstimator()
+        setattr(args, "_coverage_estimator", coverage_estimator)
     errors: list[str] = []
     try:
         mirror_status = _read_json(args.mirror_status)
@@ -329,6 +416,7 @@ def collect_report(args: argparse.Namespace) -> dict[str, Any]:
     mirror_activity = mirror_status.get("apiActivity")
     if not isinstance(mirror_activity, Mapping):
         mirror_activity = {}
+    coverage_eta = coverage_estimator.estimate(mirror_status, now_ms=now_ms)
 
     try:
         database = _mirror_database_summary(
@@ -356,6 +444,7 @@ def collect_report(args: argparse.Namespace) -> dict[str, Any]:
         "mirror": {
             "status": mirror_status,
             "database": database,
+            "coverageEta": coverage_eta,
         },
         "launcher": {
             "lifecycle": launcher_status.get("launcher", {}).get("lifecycle") if isinstance(launcher_status.get("launcher"), Mapping) else None,
@@ -388,6 +477,22 @@ def _fmt_number(value: Any) -> str:
     if isinstance(value, float):
         return f"{value:,.2f}"
     return f"{_integer(value):,}"
+
+
+def _format_duration_seconds(value: Any) -> str:
+    if value is None:
+        return "unknown"
+    seconds = max(0, int(math.ceil(_number(value))))
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, remainder = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}m {remainder:02d}s"
+    hours, minutes = divmod(minutes, 60)
+    if hours < 24:
+        return f"{hours}h {minutes:02d}m"
+    days, hours = divmod(hours, 24)
+    return f"{days}d {hours:02d}h"
 
 
 def _print_operations(activity: Mapping[str, Any], limit: int) -> None:
@@ -433,6 +538,27 @@ def _print_text(report: Mapping[str, Any], operation_limit: int) -> None:
         f"coverage={_number(status.get('bookCoverage')):.1%} "
         f"latest-book-age={_fmt_number(status.get('bookLatestAgeMs'))} ms"
     )
+    coverage_eta = mirror.get("coverageEta", {})
+    if isinstance(coverage_eta, Mapping):
+        eta_status = str(coverage_eta.get("status") or "unavailable")
+        if eta_status == "complete":
+            eta_text = "complete"
+        elif eta_status == "estimating":
+            eta_text = (
+                f"{_format_duration_seconds(coverage_eta.get('etaSeconds'))} remaining "
+                f"at {_number(coverage_eta.get('rateMarketsPerMinute')):.1f} markets/min"
+            )
+        elif eta_status == "no_progress":
+            eta_text = "unknown (no book progress observed)"
+        elif eta_status == "not_scanning":
+            eta_text = "unknown (mirror is not actively scanning)"
+        else:
+            eta_text = "unknown"
+        print(
+            f"  estimated time to 100% book coverage={eta_text} "
+            f"({_fmt_number(coverage_eta.get('readyMarkets'))}/"
+            f"{_fmt_number(coverage_eta.get('targetMarkets'))} markets)"
+        )
     markets = database.get("markets", {})
     print(
         f"  active DB markets={_fmt_number(markets.get('activeMarkets'))} "

@@ -145,6 +145,9 @@ def market_to_screen_payload(market: Market) -> Dict[str, object]:
         "no_ask_size_fp": count(market.no_ask_size_units),
         "volume_24h_fp": count(market.volume_24h_units),
         "open_interest_fp": count(market.open_interest_units),
+        # Polymarket's worker uses this normalized field to avoid submitting
+        # a quote below the CLOB minimum when the Gamma row omitted it.
+        "min_order_size": count(market.min_order_size_units),
     }
 
 

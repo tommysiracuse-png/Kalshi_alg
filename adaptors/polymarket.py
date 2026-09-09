@@ -48,6 +48,10 @@ PRICE_SCALE = 10_000
 # The rest of the runtime uses fixed-point contract units (one contract is
 # 100 units), even though Polymarket's wire API accepts decimal token sizes.
 TOKEN_SCALE = 100
+# Polymarket CLOB market metadata exposes ``mos`` (minimum order size). Some
+# Gamma/catalog responses omit it, while the order endpoint still enforces the
+# venue default seen in live rejects: five whole contracts.
+POLYMARKET_DEFAULT_MIN_ORDER_SIZE_UNITS = 5 * TOKEN_SCALE
 # CLOB balance/allowance values are six-decimal pUSD base units.  Keep this
 # wire scale separate from the shared account-money scale used by Kalshi and
 # the UI.
@@ -133,6 +137,20 @@ def _optional_size_units(value: Any) -> Optional[int]:
         return int((parsed * TOKEN_SCALE).to_integral_value(rounding=ROUND_HALF_UP))
     except (ArithmeticError, TypeError, ValueError):
         return None
+
+
+def _minimum_order_size_units(payload: Mapping[str, Any]) -> int:
+    """Read Polymarket's per-market minimum, defaulting conservatively."""
+
+    for key in (
+        "mos", "minOrderSize", "orderMinSize", "minimumOrderSize",
+        "minimum_order_size", "min_order_size", "min_size",
+    ):
+        value = payload.get(key)
+        parsed = _optional_size_units(value)
+        if parsed is not None and parsed > 0:
+            return int(parsed)
+    return POLYMARKET_DEFAULT_MIN_ORDER_SIZE_UNITS
 
 
 def _money_units(value: Any) -> int:
@@ -795,7 +813,7 @@ class PolymarketClient(BaseClient):
             open_interest_units=_optional_size_units(open_interest),
             yes_token_id=yes_token,
             no_token_id=no_token,
-            min_order_size_units=_size_units(payload.get("minOrderSize") or payload.get("minimum_order_size") or 0),
+            min_order_size_units=_minimum_order_size_units(payload),
             market_rules="direct_token_books",
         )
         if yes_token:
@@ -1821,7 +1839,12 @@ class PolymarketClient(BaseClient):
             raise ValueError(
                 f"Polymarket price must align to the market tick size ({tick_units} units)"
             )
-        if int(request.count_units) <= 0 or (market.min_order_size_units and int(request.count_units) < market.min_order_size_units):
+        try:
+            minimum_order_size_units = max(0, int(market.min_order_size_units or 0))
+        except (TypeError, ValueError):
+            minimum_order_size_units = 0
+        minimum_order_size_units = minimum_order_size_units or POLYMARKET_DEFAULT_MIN_ORDER_SIZE_UNITS
+        if int(request.count_units) <= 0 or int(request.count_units) < minimum_order_size_units:
             raise ValueError("Polymarket order size is below the market minimum")
         tif, expiration = self._order_terms(request)
         if tif not in {"GTC", "GTD", "FOK", "FAK"}:

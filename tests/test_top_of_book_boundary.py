@@ -227,10 +227,24 @@ def test_polymarket_off_grid_quote_is_snapped_before_create(monkeypatch):
     monkeypatch.setattr(asyncio, "to_thread", run_without_thread_pool)
 
     bot, client = make_bot()
-    bot.market = replace(bot.market, venue="polymarket")
+    bot.settings = replace(bot.settings, yes_order_budget_cents=300)
+    bot.market = replace(bot.market, venue="polymarket", min_order_size_units=500)
     client.resting = []
 
     asyncio.run(bot.ensure_side_quote("yes", 4_050))
 
     assert len(client.created) == 1
     assert client.created[0].price_units == 4_000
+
+
+def test_polymarket_subminimum_sizes_are_not_submitted():
+    bot, _ = make_bot()
+    bot.market = replace(bot.market, venue="polymarket", min_order_size_units=500)
+
+    # A 100-cent budget at 42 cents buys only 2.38 contracts.  The actor must
+    # suppress it instead of rounding up and exceeding the configured budget.
+    assert bot.budget_based_order_size_units("yes", 4_200) == 0
+    assert bot.desired_remaining_units("yes", 4_200, 0) == 0
+
+    # A larger resulting size remains eligible.
+    assert bot.budget_based_order_size_units("yes", 1_400) == 500

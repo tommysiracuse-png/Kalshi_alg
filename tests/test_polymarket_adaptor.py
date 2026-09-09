@@ -103,8 +103,12 @@ def test_polymarket_market_normalization_keeps_missing_open_interest_optional():
     explicit_zero = client._normalize_market({**base, "conditionId": "condition-3", "openInterest": 0})
 
     assert missing is not None and missing.open_interest_units is None
+    assert missing is not None and missing.min_order_size_units == 500
     assert supplied is not None and supplied.open_interest_units == 1_234
     assert explicit_zero is not None and explicit_zero.open_interest_units == 0
+
+    market_with_mos = client._normalize_market({**base, "conditionId": "condition-4", "mos": "3.5"})
+    assert market_with_mos is not None and market_with_mos.min_order_size_units == 350
 
 
 def _client_with_order_market() -> PolymarketClient:
@@ -115,6 +119,7 @@ def _client_with_order_market() -> PolymarketClient:
         yes_token_id="yes-token",
         no_token_id="no-token",
         legacy_tick_size_units=100,
+        min_order_size_units=500,
     )
     return client
 
@@ -126,7 +131,7 @@ def test_polymarket_expiring_orders_use_gtd():
         market_id="condition-order",
         side="yes",
         price_units=5_000,
-        count_units=100,
+        count_units=500,
         client_order_id="client-gtd",
         expiration_timestamp_seconds=1_800_000_000,
     ))
@@ -142,7 +147,7 @@ def test_polymarket_non_gtd_orders_always_send_zero_expiration():
         market_id="condition-order",
         side="yes",
         price_units=5_000,
-        count_units=100,
+        count_units=500,
         client_order_id="client-gtc",
         expiration_timestamp_seconds=1_800_000_000,
         time_in_force="GTC",
@@ -150,6 +155,20 @@ def test_polymarket_non_gtd_orders_always_send_zero_expiration():
 
     assert payload["orderType"] == "GTC"
     assert payload["expiration"] == 0
+
+
+def test_polymarket_order_payload_rejects_subminimum_size_locally():
+    client = _client_with_order_market()
+
+    with pytest.raises(ValueError, match="below the market minimum"):
+        client._order_payload(CreateOrderRequest(
+            market_id="condition-order",
+            side="yes",
+            price_units=5_000,
+            count_units=400,
+            client_order_id="client-too-small",
+            expiration_timestamp_seconds=0,
+        ))
 
 
 def test_polymarket_hydrates_open_interest_in_batches_and_preserves_missing_values():

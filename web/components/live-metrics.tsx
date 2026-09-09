@@ -631,7 +631,7 @@ export function LiveMetrics({ initial, sessions, query, markoutHorizonMs = 30_00
   const loadRunMarkets = useCallback(async (runId: string) => {
     setRunMarkets(previous => ({ ...previous, [runId]: { ...previous[runId], loading: true, error: undefined } }));
     try {
-      const response = await fetchJson<RunMarketsResponse>(`/api/v1/runs/${encodeURIComponent(runId)}/markets`);
+      const response = await fetchJson<RunMarketsResponse>(`/api/v1/runs/${encodeURIComponent(runId)}/markets?limit=500`);
       setRunMarkets(previous => ({ ...previous, [runId]: { data: response, loading: false } }));
     } catch (error) {
       setRunMarkets(previous => ({ ...previous, [runId]: { ...previous[runId], loading: false, error: error instanceof Error ? error.message : "Could not load markets" } }));

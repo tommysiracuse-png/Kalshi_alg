@@ -89,6 +89,12 @@ PRICE_SCALE = 10_000         # 1.0000 dollars == 10,000 price units
 COUNT_SCALE = 100            # 1.00 contracts == 100 count units
 PRICE_UNITS_PER_CENT = 100   # $0.01 == 100 price units
 
+# Polymarket's CLOB rejects orders smaller than five contracts when the
+# market metadata does not provide a more specific minimum.  The adaptor
+# carries the per-market value when available; this fallback also protects
+# actors restored from older cached metadata.
+POLYMARKET_DEFAULT_MIN_ORDER_SIZE_UNITS = 5 * COUNT_SCALE
+
 ZERO_PRICE_UNITS = 0
 ONE_DOLLAR_PRICE_UNITS = PRICE_SCALE
 
@@ -936,6 +942,7 @@ class MarketMetadata:
     yes_ask_size_units: Optional[int] = None
     no_bid_size_units: Optional[int] = None
     no_ask_size_units: Optional[int] = None
+    min_order_size_units: Optional[int] = None
     market_rules: object = None
 
 
@@ -3736,8 +3743,10 @@ class MarketActor:
             return 0
 
         if self.market.fractional_trading_enabled and self.settings.allow_fractional_order_entry_when_supported:
-            return int(quantity_units)
-        return int((quantity_units // COUNT_SCALE) * COUNT_SCALE)
+            order_size_units = int(quantity_units)
+        else:
+            order_size_units = int((quantity_units // COUNT_SCALE) * COUNT_SCALE)
+        return order_size_units if self._order_size_meets_market_minimum(order_size_units) else 0
 
     def build_side_quote_decision(
         self,
@@ -4149,6 +4158,28 @@ class MarketActor:
     # Sizing
     # -------------------------
 
+    def minimum_order_size_units(self) -> int:
+        """Return the venue minimum for a new Polymarket order.
+
+        Polymarket metadata normally supplies this value as ``mos`` and the
+        adaptor normalizes it into ``MarketMetadata``. Older mirror rows can
+        still contain no value, so use the venue's conservative five-contract
+        fallback instead of allowing a provider-rejected order through.
+        """
+
+        if str(getattr(self.market, "venue", "kalshi") or "kalshi").lower() != "polymarket":
+            return 0
+        raw_value = getattr(self.market, "min_order_size_units", None)
+        try:
+            value = int(raw_value) if raw_value is not None else 0
+        except (TypeError, ValueError):
+            value = 0
+        return value if value > 0 else POLYMARKET_DEFAULT_MIN_ORDER_SIZE_UNITS
+
+    def _order_size_meets_market_minimum(self, size_units: int) -> bool:
+        minimum_units = self.minimum_order_size_units()
+        return minimum_units <= 0 or int(size_units) >= minimum_units
+
     def target_budget_cents_for_side(self, side: str) -> int:
         return self.settings.yes_order_budget_cents if side == "yes" else self.settings.no_order_budget_cents
 
@@ -4165,10 +4196,10 @@ class MarketActor:
             return 0
 
         if self.market.fractional_trading_enabled and self.settings.allow_fractional_order_entry_when_supported:
-            return int(quantity_units)
-
-        quantity_units = (quantity_units // COUNT_SCALE) * COUNT_SCALE
-        return int(quantity_units)
+            order_size_units = int(quantity_units)
+        else:
+            order_size_units = int((quantity_units // COUNT_SCALE) * COUNT_SCALE)
+        return order_size_units if self._order_size_meets_market_minimum(order_size_units) else 0
 
     def desired_cycle_total_fillable_units(self, side: str, price_units: int, quote_cycle_filled_units: int) -> int:
         decision = self.last_quote_decisions.get(side)
@@ -4176,7 +4207,7 @@ class MarketActor:
             target_size_units = int(decision.target_size_units)
         else:
             target_size_units = self.budget_based_order_size_units(side, price_units)
-        if target_size_units <= 0:
+        if target_size_units <= 0 or not self._order_size_meets_market_minimum(target_size_units):
             return 0
 
         if self.settings.refill_resting_size_after_partial_fill:
@@ -5748,5 +5779,6 @@ def load_market_metadata(
         yes_ask_size_units=market.yes_ask_size_units,
         no_bid_size_units=market.no_bid_size_units,
         no_ask_size_units=market.no_ask_size_units,
+        min_order_size_units=market.min_order_size_units,
         market_rules=api_client.rules_for_market(market),
     )

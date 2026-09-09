@@ -43,7 +43,7 @@ The JSON report contains these top-level sections:
 
 | Section | Contents |
 | --- | --- |
-| `mirror` | Status-file fields and aggregates read from the mirror database |
+| `mirror` | Status-file fields, database aggregates, and book-coverage ETA |
 | `launcher` | Launcher lifecycle and Polymarket bot counts |
 | `api` | REST/WebSocket usage, operation counters, rate-limit data, and OI hydration counters |
 | `screener` | Recent Polymarket incremental screening aggregates and the latest update |
@@ -62,8 +62,22 @@ The mirror section reports the status snapshot's:
 
 - catalog count and active generation;
 - book-ready market count and book coverage;
+- estimated time to reach 100% book coverage when progress can be measured;
 - newest-book age and current synchronization reason;
 - whether the mirror is running and screenable.
+
+The text report prints this as `estimated time to 100% book coverage`. The
+estimate uses observed increases in `bookReadyMarkets` between monitor
+refreshes. During a one-shot or before a second progress sample, it falls back
+to the current mirror catalog elapsed time while the catalog is actively
+syncing. It is shown as unknown when the mirror is not scanning or no forward
+book progress has been observed. The estimate resets when the mirror publishes
+a new generation.
+
+The JSON report exposes the same information under `mirror.coverageEta`,
+including the target, ready, and remaining market counts, estimated rate,
+ETA seconds, and an estimate status of `estimating`, `complete`,
+`no_progress`, `not_scanning`, or `unavailable`.
 
 The database section independently counts active markets in the published
 generation. This is useful when catalog synchronization is still publishing
