@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from adaptors.polymarket import PolymarketClient, PolymarketClientConfig
+from clients.http_client import HTTPClientError
 from clients.models import AccountPositionQuery, Market, MarketQuery
 from fleet_runtime.worker import restore_cached_polymarket_book, restore_market_top_book, seed_risk_from_book
 from fleet_runtime.risk import RiskSample
@@ -138,6 +139,11 @@ def test_polymarket_hydrates_open_interest_in_batches_and_preserves_missing_valu
         "marketsResolved": 2,
         "marketsMissing": 1,
         "apiErrors": 0,
+        "forbiddenResponses": 0,
+        "cloudflare403": 0,
+        "retries": 0,
+        "retryExhausted": 0,
+        "suppressedRequests": 0,
     }
 
 
@@ -157,6 +163,181 @@ def test_polymarket_open_interest_batch_failure_does_not_abort_catalog_enrichmen
     assert stats["marketsResolved"] == 0
     assert stats["marketsMissing"] == 1
     assert stats["apiErrors"] == 1
+
+
+def test_polymarket_open_interest_retries_cloudflare_403_and_resolves(monkeypatch, caplog):
+    client = PolymarketClient(PolymarketClientConfig(open_interest_retry_jitter_fraction=0))
+    calls = []
+    sleeps = []
+
+    class Data:
+        last_response_headers = {}
+
+        def get(self, path, *, params, operation):
+            calls.append((path, params, operation))
+            if len(calls) < 3:
+                raise HTTPClientError(
+                    method="GET",
+                    path="/oi",
+                    status_code=403,
+                    response_text="<html>Cloudflare Attention Required</html>",
+                    headers={
+                        "CF-Ray": f"ray-{len(calls)}",
+                        "CF-Cache-Status": "DYNAMIC",
+                        "Server": "cloudflare",
+                    },
+                )
+            return [{"market": "condition-1", "value": "12.34"}]
+
+    client.data_http = Data()
+    monkeypatch.setattr("adaptors.polymarket.time.sleep", sleeps.append)
+
+    with caplog.at_level("WARNING"):
+        hydrated, stats = client.hydrate_market_open_interest([Market("condition-1")])
+
+    assert len(calls) == 3
+    assert sleeps == [1.0, 2.0]
+    assert hydrated[0].open_interest_units == 1_234
+    assert stats["forbiddenResponses"] == 2
+    assert stats["cloudflare403"] == 2
+    assert stats["retries"] == 2
+    assert stats["retryExhausted"] == 0
+    assert stats["apiErrors"] == 0
+    assert "ray-2" in str(client._open_interest_diagnostics)
+    assert "Cloudflare Attention Required" not in caplog.text
+
+
+def test_polymarket_open_interest_exhausted_cloudflare_batch_stays_missing(monkeypatch, caplog):
+    client = PolymarketClient(PolymarketClientConfig(open_interest_retry_jitter_fraction=0))
+    sleeps = []
+
+    class Data:
+        last_response_headers = {}
+
+        def get(self, path, *, params, operation):
+            raise HTTPClientError(
+                method="GET",
+                path="/oi",
+                status_code=403,
+                response_text="<html>Cloudflare Attention Required</html>",
+                headers={"cf-ray": "ray-final", "server": "cloudflare"},
+            )
+
+    client.data_http = Data()
+    monkeypatch.setattr("adaptors.polymarket.time.sleep", sleeps.append)
+
+    with caplog.at_level("WARNING"):
+        hydrated, stats = client.hydrate_market_open_interest([Market("condition-1")])
+
+    assert hydrated[0].open_interest_units is None
+    assert sleeps == [1.0, 2.0, 4.0]
+    assert stats["forbiddenResponses"] == 4
+    assert stats["cloudflare403"] == 4
+    assert stats["retries"] == 3
+    assert stats["retryExhausted"] == 1
+    assert stats["apiErrors"] == 1
+    assert "ray-final" in str(client._open_interest_diagnostics)
+    assert "Cloudflare Attention Required" not in caplog.text
+    assert "exhausted=true" in caplog.text
+
+
+def test_polymarket_open_interest_cloudflare_cooldown_suppresses_later_batches(monkeypatch):
+    client = PolymarketClient(PolymarketClientConfig(open_interest_retry_jitter_fraction=0))
+    calls = 0
+
+    class Data:
+        last_response_headers = {}
+
+        def get(self, path, *, params, operation):
+            nonlocal calls
+            calls += 1
+            raise HTTPClientError(
+                method="GET",
+                path="/oi",
+                status_code=403,
+                response_text="forbidden",
+                headers={"cf-ray": "ray-blocked", "server": "cloudflare"},
+            )
+
+    client.data_http = Data()
+    monkeypatch.setattr("adaptors.polymarket.time.sleep", lambda _delay: None)
+
+    hydrated, stats = client.hydrate_market_open_interest([Market(str(index)) for index in range(101)])
+
+    assert len(hydrated) == 101
+    assert calls == 4
+    assert stats["retryExhausted"] == 1
+    assert stats["suppressedRequests"] == 1
+    assert stats["marketsResolved"] == 0
+
+
+def test_polymarket_open_interest_retry_after_is_capped(monkeypatch):
+    client = PolymarketClient(PolymarketClientConfig(open_interest_retry_jitter_fraction=0))
+    sleeps = []
+    attempts = 0
+
+    class Data:
+        last_response_headers = {}
+
+        def get(self, path, *, params, operation):
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise HTTPClientError(
+                    method="GET",
+                    path="/oi",
+                    status_code=403,
+                    response_text="forbidden",
+                    headers={"Retry-After": "999"},
+                )
+            return [{"market": "condition-1", "value": 0}]
+
+    client.data_http = Data()
+    monkeypatch.setattr("adaptors.polymarket.time.sleep", sleeps.append)
+
+    hydrated, stats = client.hydrate_market_open_interest([Market("condition-1")])
+
+    assert hydrated[0].open_interest_units == 0
+    assert sleeps == [10.0]
+    assert stats["retries"] == 1
+    assert stats["apiErrors"] == 0
+
+
+def test_polymarket_open_interest_does_not_retry_non_403_http_errors(monkeypatch):
+    client = PolymarketClient(PolymarketClientConfig(open_interest_retry_jitter_fraction=0))
+    sleeps = []
+
+    class Data:
+        last_response_headers = {}
+
+        def get(self, path, *, params, operation):
+            raise HTTPClientError(
+                method="GET",
+                path="/oi",
+                status_code=500,
+                response_text="server error",
+            )
+
+    client.data_http = Data()
+    monkeypatch.setattr("adaptors.polymarket.time.sleep", sleeps.append)
+
+    hydrated, stats = client.hydrate_market_open_interest([Market("condition-1")])
+
+    assert hydrated[0].open_interest_units is None
+    assert sleeps == []
+    assert stats["forbiddenResponses"] == 0
+    assert stats["retries"] == 0
+    assert stats["retryExhausted"] == 0
+    assert stats["apiErrors"] == 1
+
+
+def test_polymarket_open_interest_jitter_is_bounded(monkeypatch):
+    client = PolymarketClient(PolymarketClientConfig())
+    monkeypatch.setattr("adaptors.polymarket.random.uniform", lambda low, high: high)
+
+    assert client._open_interest_retry_delay(1, {}) == 1.25
+    assert client._open_interest_retry_delay(3, {}) == 5.0
+    assert client._open_interest_retry_delay(4, {"Retry-After": "999"}) == 10.0
 
 
 def test_polymarket_market_pagination_stops_on_a_cursor_cycle():

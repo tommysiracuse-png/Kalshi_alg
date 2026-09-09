@@ -371,6 +371,12 @@ def collect_report(args: argparse.Namespace) -> dict[str, Any]:
             "mirror": _api_summary(mirror_activity),
             "rateLimit": mirror_status.get("rateLimit") or launcher_activity.get("rateLimit") or {},
             "openInterest": mirror_status.get("openInterest") or {},
+            "openInterestDiagnostics": (
+                mirror_status.get("openInterestDiagnostics")
+                or mirror_activity.get("openInterestDiagnostics")
+                or launcher_activity.get("openInterestDiagnostics")
+                or {}
+            ),
         },
         "screener": screener,
     }
@@ -464,7 +470,21 @@ def _print_text(report: Mapping[str, Any], operation_limit: int) -> None:
             f"resolved={_fmt_number(open_interest.get('marketsResolved'))} "
             f"missing={_fmt_number(open_interest.get('marketsMissing'))} "
             f"batches={_fmt_number(open_interest.get('batches'))} "
-            f"API errors={_fmt_number(open_interest.get('apiErrors'))}"
+            f"API errors={_fmt_number(open_interest.get('apiErrors'))} "
+            f"403={_fmt_number(open_interest.get('forbiddenResponses'))} "
+            f"Cloudflare={_fmt_number(open_interest.get('cloudflare403'))} "
+            f"retries={_fmt_number(open_interest.get('retries'))} "
+            f"exhausted={_fmt_number(open_interest.get('retryExhausted'))} "
+            f"suppressed={_fmt_number(open_interest.get('suppressedRequests'))}"
+        )
+    diagnostics = api.get("openInterestDiagnostics", {})
+    last_cloudflare = diagnostics.get("lastCloudflare") if isinstance(diagnostics, Mapping) else None
+    if isinstance(last_cloudflare, Mapping):
+        print(
+            f"  latest Cloudflare response: ray={last_cloudflare.get('cfRay') or '-'} "
+            f"cache={last_cloudflare.get('cfCacheStatus') or '-'} "
+            f"batch={last_cloudflare.get('batch', '-')} "
+            f"attempt={last_cloudflare.get('attempt', '-')}"
         )
     rate_limit = api.get("rateLimit", {})
     buckets = rate_limit.get("buckets") if isinstance(rate_limit, Mapping) else None

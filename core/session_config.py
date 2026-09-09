@@ -567,6 +567,39 @@ def _validate_venues(section: Mapping[str, Any], global_max: int) -> Dict[str, A
                     number = _require_number(client_value[key], f"venues.polymarket.client.{key}")
                     if number <= 0 or (key == "readiness_threshold" and number > 1):
                         raise ValueError(f"venues.polymarket.client.{key} is out of range")
+            if "open_interest_retry_attempts" in client_value:
+                number = _require_number(
+                    client_value["open_interest_retry_attempts"],
+                    "venues.polymarket.client.open_interest_retry_attempts",
+                    integer=True,
+                )
+                if number < 1 or number > 10:
+                    raise ValueError("venues.polymarket.client.open_interest_retry_attempts is out of range")
+            for key in ("open_interest_retry_base_delay_seconds", "open_interest_retry_max_delay_seconds"):
+                if key in client_value and _require_number(client_value[key], f"venues.polymarket.client.{key}") <= 0:
+                    raise ValueError(f"venues.polymarket.client.{key} must be > 0")
+            if "open_interest_retry_jitter_fraction" in client_value:
+                number = _require_number(
+                    client_value["open_interest_retry_jitter_fraction"],
+                    "venues.polymarket.client.open_interest_retry_jitter_fraction",
+                )
+                if number < 0 or number > 1:
+                    raise ValueError("venues.polymarket.client.open_interest_retry_jitter_fraction must be between 0 and 1")
+            for key in (
+                "open_interest_403_cooldown_seconds",
+                "websocket_ping_interval_seconds",
+                "websocket_ping_timeout_seconds",
+            ):
+                if key in client_value and _require_number(client_value[key], f"venues.polymarket.client.{key}") <= 0:
+                    raise ValueError(f"venues.polymarket.client.{key} must be > 0")
+            if "websocket_max_message_bytes" in client_value:
+                number = _require_number(
+                    client_value["websocket_max_message_bytes"],
+                    "venues.polymarket.client.websocket_max_message_bytes",
+                    integer=True,
+                )
+                if number <= 0:
+                    raise ValueError("venues.polymarket.client.websocket_max_message_bytes must be > 0")
             for key in ("catalog_parallelism", "rest_concurrency", "book_batch_size"):
                 if key in client_value:
                     number = _require_number(client_value[key], f"venues.polymarket.client.{key}", integer=True)

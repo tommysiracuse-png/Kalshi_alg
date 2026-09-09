@@ -596,9 +596,10 @@ def test_carryover_reducing_quote_is_capped_at_the_position_and_stamped_reduce_o
     order = broker._execute(venue, _create("CARRY", "no", 5_000, 1_000))      # 10 contracts against a 3-contract long
     sent = venue.created[-1]
     assert sent.count_units == 300 and sent.reduce_only is True
-    assert order.remaining_count_units == 300 and broker._ledger.trimmed == 1
-    # It fills: flat, and the very next NO create is refused - the ticker cannot go short.
-    broker._execute(venue, request("order_update", {"event": _fill("CARRY", "no", order.order_id, filled=300, remaining=0, price=5_000, status="executed")}))
+    assert sent.time_in_force == "immediate_or_cancel" and sent.post_only is False
+    assert order.fill_count_units == 300 and order.remaining_count_units == 0 and broker._ledger.trimmed == 1
+    # IOC fills flatten the carryover immediately; the next NO create is
+    # refused because the ticker cannot go short.
     assert broker._ledger.signed_position_units("CARRY") == 0
     assert _parts(broker, "0")[2] == 0                                        # the offsetting fill added no exposure
     with pytest.raises(ShardExposureCapError) as refused:

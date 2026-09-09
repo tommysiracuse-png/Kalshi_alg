@@ -1070,6 +1070,21 @@ class KalshiApiClient(BaseClient):
         self._require_authentication()
         book_side, yes_price = _translate_order(request.side, request.action, request.price_units)
         tif = str(request.time_in_force or "good_till_canceled")
+        reduce_only = bool(request.reduce_only) if request.reduce_only is not None else False
+        if reduce_only:
+            # Kalshi only accepts reduce-only orders as IOC.  This is especially
+            # important for restart-carryover quotes: the execution broker may
+            # stamp a normal quote reduce-only after admission, while the
+            # request itself did not specify a TIF.  Do the normalization at
+            # the venue boundary as a final guard for every order path.
+            if tif != "immediate_or_cancel":
+                LOGGER.warning(
+                    "REDUCE_ONLY_TIF_NORMALIZED | ticker=%s requested_tif=%s",
+                    request.market_id,
+                    tif,
+                )
+            tif = "immediate_or_cancel"
+        is_ioc = tif == "immediate_or_cancel"
         body = {
             "ticker": request.market_id,
             "side": book_side,
@@ -1078,7 +1093,12 @@ class KalshiApiClient(BaseClient):
             "price": _format_price(yes_price),
             "time_in_force": tif,
             "self_trade_prevention_type": str(request.self_trade_prevention_type or self.config.self_trade_prevention_type),
-            "post_only": bool(self.config.post_only_quotes if request.post_only is None else request.post_only),
+            # post_only and IOC are mutually exclusive.  A reduce-only order
+            # is normalized to IOC above, so never send the quote's post-only
+            # setting along with it.
+            "post_only": False if is_ioc else bool(
+                self.config.post_only_quotes if request.post_only is None else request.post_only
+            ),
             "cancel_order_on_pause": bool(
                 self.config.cancel_quotes_if_exchange_pauses
                 if request.cancel_order_on_pause is None
@@ -1087,7 +1107,7 @@ class KalshiApiClient(BaseClient):
             "subaccount": self.config.subaccount_number,
         }
         if request.reduce_only is not None:
-            body["reduce_only"] = bool(request.reduce_only)
+            body["reduce_only"] = reduce_only
         if request.expiration_timestamp_seconds and tif != "immediate_or_cancel":
             body["expiration_time"] = int(request.expiration_timestamp_seconds)
         # Explicit shard when the venue told us one for this market; otherwise

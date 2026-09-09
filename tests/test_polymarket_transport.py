@@ -30,6 +30,14 @@ def test_polymarket_proxy_is_explicit_and_ambient_proxy_is_ignored(monkeypatch):
     assert direct.activity_snapshot()["proxyConfigured"] is False
 
 
+def test_polymarket_websocket_allows_large_initial_book_snapshot():
+    client = PolymarketClient(PolymarketClientConfig())
+
+    assert client.websocket_client.max_size == 8 * 1024 * 1024
+    assert client.websocket_client.ping_timeout_seconds == 60.0
+    assert client._user_websocket.max_size == 8 * 1024 * 1024
+
+
 def test_polymarket_proxy_can_be_sourced_from_venue_environment(monkeypatch):
     monkeypatch.setenv("POLYMARKET_PROXY_URL", "http://proxy.test:18080")
     sourced = PolymarketClient(PolymarketClientConfig())

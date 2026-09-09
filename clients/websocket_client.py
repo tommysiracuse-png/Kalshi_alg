@@ -24,12 +24,16 @@ class WebsocketClient:
         *,
         ping_interval_seconds: float = 20,
         ping_timeout_seconds: float = 20,
+        max_size: Optional[int] = 2 ** 20,
         proxy_url: Optional[str] = None,
         connect_factory: Optional[Any] = None,
     ) -> None:
         self.url = url
         self.ping_interval_seconds = ping_interval_seconds
         self.ping_timeout_seconds = ping_timeout_seconds
+        if max_size is not None and int(max_size) <= 0:
+            raise ValueError("max_size must be positive or None")
+        self.max_size = None if max_size is None else int(max_size)
         self.proxy_url = str(proxy_url or "").strip() or None
         if connect_factory is None and websockets is None:
             async def unavailable(*_args: Any, **_kwargs: Any) -> Any:
@@ -52,6 +56,7 @@ class WebsocketClient:
         kwargs = {
             "ping_interval": self.ping_interval_seconds,
             "ping_timeout": self.ping_timeout_seconds,
+            "max_size": self.max_size,
             "proxy": self.proxy_url,
         }
 

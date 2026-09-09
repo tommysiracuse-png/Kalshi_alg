@@ -110,7 +110,15 @@ available. For each REST operation the report shows:
 
 It also reports WebSocket messages, connections, reconnects, closes, and
 stream errors. The `polymarket_get_open_interest` row is the most useful check
-for the Data API hydration path.
+for the Data API hydration path. OI output also includes:
+
+- HTTP 403 and Cloudflare-response counts;
+- bounded retry and exhausted-retry counts; and
+- the latest Cloudflare Ray ID, cache status, batch, and attempt when available.
+
+Cloudflare response bodies are intentionally omitted from activity output. The
+structured HTTP error still remains available to the Polymarket adaptor for
+classification and retry decisions.
 
 ### Screener aggregates
 

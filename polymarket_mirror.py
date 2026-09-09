@@ -731,6 +731,11 @@ class PolymarketMirror:
             "marketsResolved": 0,
             "marketsMissing": 0,
             "apiErrors": 0,
+            "forbiddenResponses": 0,
+            "cloudflare403": 0,
+            "retries": 0,
+            "retryExhausted": 0,
+            "suppressedRequests": 0,
         }
         while len(markets) < target:
             cancel = getattr(client, "_screener_cancel", None)
@@ -808,6 +813,7 @@ class PolymarketMirror:
                     max_age_seconds=float(self.config.book_stale_after_seconds),
                     catalog_complete=False,
                 )
+            api_activity = client.activity_snapshot()
             status.update({
                 "running": True,
                 "reason": "partial_ready" if status.get("screenable") else "syncing_catalog",
@@ -821,7 +827,8 @@ class PolymarketMirror:
                 "bookAssetsReady": len(client.book_cache.snapshot()),
                 "restRecovery": True,
                 "openInterest": dict(open_interest_totals),
-                "apiActivity": client.activity_snapshot(),
+                "openInterestDiagnostics": api_activity.get("openInterestDiagnostics") or {},
+                "apiActivity": api_activity,
                 "websocketShards": max(1, int(self.config.ws_shards)),
             })
             if progress is not None:
@@ -847,6 +854,7 @@ class PolymarketMirror:
             catalog_count=len(markets),
             catalog_complete=catalog_finished,
         )
+        api_activity = client.activity_snapshot()
         final.update({
             "catalogDurationMs": int((time.perf_counter() - started) * 1000),
             "catalogPages": pages,
@@ -855,7 +863,8 @@ class PolymarketMirror:
             "bookAssetsReady": len(client.book_cache.snapshot()),
             "restRecovery": True,
             "openInterest": dict(open_interest_totals),
-            "apiActivity": client.activity_snapshot(),
+            "openInterestDiagnostics": api_activity.get("openInterestDiagnostics") or {},
+            "apiActivity": api_activity,
         })
         return generation, markets, final
 
@@ -877,6 +886,11 @@ class PolymarketMirror:
             "marketsResolved": 0,
             "marketsMissing": 0,
             "apiErrors": 0,
+            "forbiddenResponses": 0,
+            "cloudflare403": 0,
+            "retries": 0,
+            "retryExhausted": 0,
+            "suppressedRequests": 0,
         }
         hydrate_oi = getattr(client, "hydrate_market_open_interest", None)
         if markets and callable(hydrate_oi):
@@ -888,6 +902,7 @@ class PolymarketMirror:
                 open_interest_stats["marketsMissing"] = len(markets)
                 open_interest_stats["apiErrors"] = 1
         self.store.upsert_markets(markets, generation)
+        api_activity = client.activity_snapshot()
         if progress is not None:
             progress({
                 "schemaVersion": MIRROR_SCHEMA_VERSION,
@@ -899,6 +914,8 @@ class PolymarketMirror:
                 "catalogStartedAtMs": _now_ms(),
                 "catalogCount": len(markets),
                 "openInterest": dict(open_interest_stats),
+                "openInterestDiagnostics": api_activity.get("openInterestDiagnostics") or {},
+                "apiActivity": api_activity,
                 "websocketShards": max(1, int(self.config.ws_shards)),
             })
         client.hydrate_market_books(markets, allow_rest=True)
@@ -911,6 +928,9 @@ class PolymarketMirror:
             "catalogDurationMs": int((time.perf_counter() - started) * 1000),
             "openInterest": dict(open_interest_stats),
         })
+        api_activity = client.activity_snapshot()
+        status["openInterestDiagnostics"] = api_activity.get("openInterestDiagnostics") or {}
+        status["apiActivity"] = api_activity
         return generation, markets, status
 
     def run(self, stop: Any) -> None:

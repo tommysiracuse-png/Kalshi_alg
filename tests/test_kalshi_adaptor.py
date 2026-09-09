@@ -134,6 +134,31 @@ def test_market_position_and_order_payloads_are_normalized():
     assert body["count"] == "1.50"
 
 
+def test_reduce_only_create_is_normalized_to_ioc_and_not_post_only():
+    http = FakeHTTP()
+    http.responses = [{
+        "order": {
+            "order_id": "reduce-only-1",
+            "client_order_id": "wd:yes:1",
+            "fill_count": "0.00",
+            "remaining_count": "0.00",
+            "yes_price": "0.40",
+        }
+    }]
+    client = make_client(http=http)
+
+    client.create_order(CreateOrderRequest(
+        "MKT", "yes", 4_000, 100, "wd:yes:1", 1_800_000_000,
+        reduce_only=True, post_only=True,
+    ))
+
+    body = http.calls[0][2]["body"]
+    assert body["reduce_only"] is True
+    assert body["time_in_force"] == "immediate_or_cancel"
+    assert body["post_only"] is False
+    assert "expiration_time" not in body
+
+
 def test_market_derives_series_from_official_event_ticker_without_guessing_a_url():
     market = KalshiApiClient._market({
         "ticker": "KXDEEPSHARE-DEEP-26",

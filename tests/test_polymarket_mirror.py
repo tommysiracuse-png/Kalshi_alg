@@ -333,3 +333,7 @@ def test_mirror_persists_hydrated_open_interest_before_publishing_page(tmp_path)
     assert mirror.store.active_markets()[0].open_interest_units == 4_250
     assert status["openInterest"]["marketsResolved"] == 1
     assert status["openInterest"]["marketsMissing"] == 0
+    assert status["openInterest"]["forbiddenResponses"] == 0
+    assert status["openInterest"]["cloudflare403"] == 0
+    assert status["openInterest"]["retries"] == 0
+    assert status["openInterest"]["retryExhausted"] == 0

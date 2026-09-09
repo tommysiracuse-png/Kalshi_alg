@@ -501,7 +501,7 @@ class OrderAdmission:
     the remainder did not fit the shard's live cap; ``"carryover"`` - a
     restart carryover may never open the opposite side).  ``carryover`` is
     True for every create on a carryover ticker: the broker stamps those
-    venue reduce-only so the venue cancels anything the ledger did not see.
+    venue reduce-only and IOC so they can only flatten the position.
     """
 
     token: Optional[str] = None
@@ -572,7 +572,7 @@ class ShardExposureLedger:
     any create that does not reduce the position - so once the position is
     flat the bot stops quoting at the broker, whatever the controller last
     told the worker - and a create that does reduce it is capped at the
-    position's size and stamped venue reduce-only, so a quote larger than
+    position's size and stamped venue reduce-only/IOC, so a quote larger than
     the position (the bot lets a reducing quote cross through flat up to
     ``maximum_projected_contracts_per_line``) can flatten the ticker but
     never open the opposite side.  Both guards apply even while the cap is
@@ -977,7 +977,7 @@ class ShardExposureLedger:
         Restart carryover tickers (``reduce_only_tickers``), cap enabled or
         not: an order that does not reduce the position is refused
         (``carryover_flat``); one that does is capped at the position's size
-        (a ``carryover`` trim) and flagged for the venue reduce-only stamp,
+        (a ``carryover`` trim) and flagged for the venue reduce-only/IOC stamp,
         so the ticker can be flattened but never flipped.  Then the size that
         merely offsets the ticker's signed position is exempt from the cap and
         venue reduce-only orders never reserve.  When the non-exempt remainder
@@ -1484,8 +1484,8 @@ class ExecutionBrokerProcess(mp.Process):
         unless the ledger admitted it smaller (its count is replaced by the
         admitted size - logged as ``SHARD_CAP_TRIMMED`` - so the venue, the
         order registry and the ledger all carry the trimmed size) or the
-        ticker is a restart carryover (creates are stamped venue reduce-only,
-        so the venue itself cancels anything beyond the position it holds).
+        ticker is a restart carryover (creates are capped at the held position
+        and stamped venue reduce-only/IOC).
 
         A create reserves the notional beyond what offsets the ticker's
         signed position and excludes the order it will replace on its
@@ -1509,7 +1509,16 @@ class ExecutionBrokerProcess(mp.Process):
             if admission.trimmed:
                 changes["count_units"] = admission.count_units
             if admission.carryover and not bool(getattr(request, "reduce_only", False)):
+                # A carryover market is allowed to flatten an exchange
+                # position, but it must not open new exposure.  Kalshi's API
+                # requires every reduce-only order to be IOC; carryover quotes
+                # normally arrive here without an explicit TIF, so preserve
+                # that contract before handing the request to the adaptor.
                 changes["reduce_only"] = True
+                if hasattr(request, "time_in_force"):
+                    changes["time_in_force"] = "immediate_or_cancel"
+                if hasattr(request, "post_only"):
+                    changes["post_only"] = False
         else:
             existing = self._registry.get(registry_key)
             filled = max(0, int(getattr(existing, "fill_count_units", 0) or 0))

@@ -99,6 +99,24 @@ def test_http_client_raises_structured_error():
     assert "rate limited" in activity["operations"]["get"]["lastError"]["message"]
 
 
+def test_http_client_can_omit_verbose_error_bodies_from_activity():
+    session = FakeSession()
+    session.response = FakeResponse(status_code=403, text="<html>Cloudflare challenge body</html>")
+    client = HTTPClient(
+        "https://example.test",
+        session=session,
+        activity_error_body_limit=0,
+    )
+
+    with pytest.raises(HTTPClientError) as caught:
+        client.get("/oi")
+
+    assert "Cloudflare challenge body" in caught.value.response_text
+    activity = client.activity_snapshot()
+    assert "Cloudflare challenge body" not in str(activity)
+    assert activity["rest"]["lastError"]["statusCode"] == 403
+
+
 def test_http_activity_uses_logical_operations_without_request_data():
     client = HTTPClient("https://example.test", session=FakeSession())
     client.get("/markets/SECRET", headers={"Authorization": "secret"}, operation="get_market")
@@ -156,7 +174,7 @@ def test_websocket_subscribe_iterate_and_close():
             calls.append((url, kwargs))
             return context
 
-        client = WebsocketClient("wss://example.test/ws", connect_factory=connect)
+        client = WebsocketClient("wss://example.test/ws", max_size=123456, connect_factory=connect)
         await client.subscribe(["sub-1", "sub-2"], headers={"Authorization": "value"})
         received = [message async for message in client]
         await client.close()
@@ -164,6 +182,7 @@ def test_websocket_subscribe_iterate_and_close():
         assert connection.sent == ["sub-1", "sub-2"]
         assert received == ["first", "second"]
         assert calls[0][1]["additional_headers"] == {"Authorization": "value"}
+        assert calls[0][1]["max_size"] == 123456
         assert connection.closed and context.exited
         activity = client.activity_snapshot()["stream"]
         assert activity["connections"] == 1

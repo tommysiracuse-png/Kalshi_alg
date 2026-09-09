@@ -138,6 +138,8 @@ export type Market = { ticker: string; title: string; rank?: number; expectedEdg
 export type ApiActivity = {
   rest?: { total?: number; successes?: number; errors?: number; requestsLast60s?: number; averageLatencyMs?: number; lastActivityAtMs?: number; byMethod?: Record<string, number>; byOperation?: Record<string, number>; byStatus?: Record<string, number> };
   stream?: { connections?: number; reconnects?: number; connectionErrors?: number; streamErrors?: number; adapterErrors?: number; subscriptionsSent?: number; message?: number; event?: number; messagesLast60s?: number; sequenceResets?: number; lastActivityAtMs?: number; byEventType?: Record<string, number> };
+  openInterest?: { batches?: number; marketsRequested?: number; marketsResolved?: number; marketsMissing?: number; apiErrors?: number; forbiddenResponses?: number; cloudflare403?: number; retries?: number; retryExhausted?: number; suppressedRequests?: number };
+  openInterestDiagnostics?: { lastCloudflare?: { atMs?: number; statusCode?: number; batch?: number; attempt?: number; cfRay?: string; cfCacheStatus?: string; server?: string; retryAfter?: string } | null };
 };
 export type ClientMonitoring = {
   venue?: string; workerId?: string; marketId: string; title: string; pid?: number; lifecycle?: string; socketHealthy?: boolean; restartCount?: number;

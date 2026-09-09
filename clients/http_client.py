@@ -7,6 +7,7 @@ from typing import Any, Mapping, Optional
 from urllib.parse import urlsplit, urlunsplit
 
 import requests
+from requests.adapters import HTTPAdapter
 
 from .monitoring import ActivityMonitor
 
@@ -47,6 +48,9 @@ class HTTPClient:
         connect_timeout_seconds: Optional[float] = None,
         proxy_url: Optional[str] = None,
         trust_env: Optional[bool] = None,
+        activity_error_body_limit: Optional[int] = 500,
+        pool_connections: Optional[int] = None,
+        pool_maxsize: Optional[int] = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         # ``timeout_seconds`` bounds every socket read; ``connect_timeout_seconds``
@@ -57,8 +61,22 @@ class HTTPClient:
         self.connect_timeout_seconds = (
             None if connect_timeout_seconds is None else float(connect_timeout_seconds)
         )
+        created_session = session is None
         self.session = session or requests.Session()
+        if created_session and (pool_connections is not None or pool_maxsize is not None):
+            connections = max(1, int(pool_connections if pool_connections is not None else 10))
+            maxsize = max(1, int(pool_maxsize if pool_maxsize is not None else connections))
+            adapter = HTTPAdapter(
+                pool_connections=connections,
+                pool_maxsize=maxsize,
+                pool_block=False,
+            )
+            self.session.mount("http://", adapter)
+            self.session.mount("https://", adapter)
         self.proxy_url = str(proxy_url or "").strip() or None
+        if activity_error_body_limit is not None and int(activity_error_body_limit) < 0:
+            raise ValueError("activity_error_body_limit must be >= 0 or None")
+        self.activity_error_body_limit = activity_error_body_limit
         if trust_env is not None:
             self.session.trust_env = bool(trust_env)
         if self.proxy_url:
@@ -152,7 +170,22 @@ class HTTPClient:
             return self._decode(response, method=method, path=path)
         except Exception as exc:
             error = True
-            error_message = _redact_proxy_text(exc, self.proxy_url)
+            if isinstance(exc, HTTPClientError) and self.activity_error_body_limit is not None:
+                # Some providers return an HTML challenge page for an API
+                # error. Keep the structured exception (and its headers) for
+                # callers, but allow sensitive/verbose response bodies to be
+                # omitted from activity snapshots.
+                limit = int(self.activity_error_body_limit)
+                if limit == 0:
+                    error_message = f"{exc.method} {exc.path} failed {exc.status_code}"
+                else:
+                    error_message = (
+                        f"{exc.method} {exc.path} failed {exc.status_code}: "
+                        f"{exc.response_text[:limit]}"
+                    )
+                error_message = _redact_proxy_text(error_message, self.proxy_url)
+            else:
+                error_message = _redact_proxy_text(exc, self.proxy_url)
             if error_message != str(exc):
                 # Preserve the original exception type for transport
                 # classification while preventing credentials from reaching

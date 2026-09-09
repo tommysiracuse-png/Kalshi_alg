@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
 import logging
 import os
+import random
 import threading
 import time
 from dataclasses import dataclass, field, replace
@@ -232,6 +233,19 @@ class PolymarketClientConfig:
     public_only: bool = False
     rest_timeout_seconds: float = 15.0
     rest_connect_timeout_seconds: float = 10.0
+    open_interest_retry_attempts: int = 4
+    open_interest_retry_base_delay_seconds: float = 1.0
+    open_interest_retry_max_delay_seconds: float = 10.0
+    open_interest_retry_jitter_fraction: float = 0.25
+    # A persistent Cloudflare block should not make every catalog page spend
+    # four more attempts on the same endpoint.  After one batch exhausts its
+    # bounded retries, temporarily suppress later OI batches and let catalog
+    # and book synchronization continue.  The next sync retries after this
+    # cooldown expires.
+    open_interest_403_cooldown_seconds: float = 60.0
+    websocket_max_message_bytes: int = 8 * 1024 * 1024
+    websocket_ping_interval_seconds: float = 20.0
+    websocket_ping_timeout_seconds: float = 60.0
     catalog_path: str = ""
     book_cache_path: str = ""
     catalog_page_size: int = 1_000
@@ -263,6 +277,22 @@ class PolymarketClientConfig:
             raise ValueError("rest_timeout_seconds must be > 0")
         if self.rest_connect_timeout_seconds <= 0:
             raise ValueError("rest_connect_timeout_seconds must be > 0")
+        if self.open_interest_retry_attempts < 1 or self.open_interest_retry_attempts > 10:
+            raise ValueError("open_interest_retry_attempts must be between 1 and 10")
+        if self.open_interest_retry_base_delay_seconds <= 0:
+            raise ValueError("open_interest_retry_base_delay_seconds must be > 0")
+        if self.open_interest_retry_max_delay_seconds <= 0:
+            raise ValueError("open_interest_retry_max_delay_seconds must be > 0")
+        if self.open_interest_retry_max_delay_seconds < self.open_interest_retry_base_delay_seconds:
+            raise ValueError("open_interest_retry_max_delay_seconds must be >= the base delay")
+        if not 0 <= self.open_interest_retry_jitter_fraction <= 1:
+            raise ValueError("open_interest_retry_jitter_fraction must be between 0 and 1")
+        if self.open_interest_403_cooldown_seconds <= 0:
+            raise ValueError("open_interest_403_cooldown_seconds must be > 0")
+        if self.websocket_max_message_bytes <= 0:
+            raise ValueError("websocket_max_message_bytes must be > 0")
+        if self.websocket_ping_interval_seconds <= 0 or self.websocket_ping_timeout_seconds <= 0:
+            raise ValueError("Polymarket websocket ping intervals must be > 0")
         if self.catalog_page_size <= 0 or self.catalog_page_size > 10_000:
             raise ValueError("catalog_page_size must be between 1 and 10000")
         if self.catalog_parallelism <= 0 or self.catalog_parallelism > 32:
@@ -337,6 +367,8 @@ class PolymarketClient(BaseClient):
             connect_timeout_seconds=config.rest_connect_timeout_seconds,
             proxy_url=proxy_url,
             trust_env=False,
+            pool_connections=max(10, int(config.catalog_parallelism)),
+            pool_maxsize=max(10, int(config.catalog_parallelism)),
         )
         self.data_http = HTTPClient(
             config.data_base_url,
@@ -344,6 +376,9 @@ class PolymarketClient(BaseClient):
             connect_timeout_seconds=config.rest_connect_timeout_seconds,
             proxy_url=proxy_url,
             trust_env=False,
+            activity_error_body_limit=0,
+            pool_connections=max(10, int(config.catalog_parallelism)),
+            pool_maxsize=max(10, int(config.catalog_parallelism)),
         )
         super().__init__(
             http_client=http_client or HTTPClient(
@@ -352,13 +387,24 @@ class PolymarketClient(BaseClient):
                 connect_timeout_seconds=config.rest_connect_timeout_seconds,
                 proxy_url=proxy_url,
                 trust_env=False,
+                pool_connections=max(10, int(config.book_parallelism)),
+                pool_maxsize=max(10, int(config.book_parallelism)),
             ),
             websocket_client=websocket_client or WebsocketClient(
                 config.websocket_url,
+                ping_interval_seconds=config.websocket_ping_interval_seconds,
+                ping_timeout_seconds=config.websocket_ping_timeout_seconds,
+                max_size=config.websocket_max_message_bytes,
                 proxy_url=proxy_url,
             ),
         )
-        self._user_websocket = WebsocketClient(config.user_websocket_url, proxy_url=proxy_url)
+        self._user_websocket = WebsocketClient(
+            config.user_websocket_url,
+            ping_interval_seconds=config.websocket_ping_interval_seconds,
+            ping_timeout_seconds=config.websocket_ping_timeout_seconds,
+            max_size=config.websocket_max_message_bytes,
+            proxy_url=proxy_url,
+        )
         self._clob_client = clob_client
         self._active_api_creds: Optional[Any] = None
         self._api_credentials_recovery_attempted = False
@@ -381,13 +427,20 @@ class PolymarketClient(BaseClient):
         self._catalog_loaded_statuses: set[str] = set()
         self._catalog_refresh_lock = threading.Lock()
         self._catalog_metrics: dict[str, Any] = {}
-        self._open_interest_metrics: dict[str, int] = {
+        self._open_interest_metrics: dict[str, Any] = {
             "batches": 0,
             "marketsRequested": 0,
             "marketsResolved": 0,
             "marketsMissing": 0,
             "apiErrors": 0,
+            "forbiddenResponses": 0,
+            "cloudflare403": 0,
+            "retries": 0,
+            "retryExhausted": 0,
+            "suppressedRequests": 0,
         }
+        self._open_interest_diagnostics: dict[str, Any] = {"lastCloudflare": None}
+        self._open_interest_403_blocked_until = 0.0
         self._book_metrics: dict[str, Any] = {}
         self._market_stream_task: Optional[asyncio.Task[Any]] = None
         self._market_stream_started = False
@@ -531,6 +584,7 @@ class PolymarketClient(BaseClient):
         merged["rateLimit"] = self._rate_limiter.snapshot()
         merged["catalog"] = dict(self._catalog_metrics)
         merged["openInterest"] = dict(self._open_interest_metrics)
+        merged["openInterestDiagnostics"] = dict(self._open_interest_diagnostics)
         merged["book"] = dict(self._book_metrics)
         merged["bookReadiness"] = self.book_readiness()
         if self.mirror_store is not None:
@@ -771,6 +825,11 @@ class PolymarketClient(BaseClient):
             "marketsResolved": 0,
             "marketsMissing": 0,
             "apiErrors": 0,
+            "forbiddenResponses": 0,
+            "cloudflare403": 0,
+            "retries": 0,
+            "retryExhausted": 0,
+            "suppressedRequests": 0,
         }
         if not source:
             return [], stats
@@ -782,25 +841,97 @@ class PolymarketClient(BaseClient):
             if not batch:
                 continue
             stats["batches"] += 1
-            try:
-                response = self._http_call(
-                    self.data_http,
-                    "get",
-                    "/oi",
-                    # The live Data API treats repeated ``market`` keys as a
-                    # single value and only returns the last one. Its array
-                    # parameter must be encoded as a comma-separated list.
-                    params={"market": ",".join(batch)},
-                    operation="polymarket_get_open_interest",
-                )
-            except Exception as exc:
-                stats["apiErrors"] += 1
-                LOGGER.warning(
-                    "POLYMARKET_OPEN_INTEREST_ERROR | batch=%s size=%s error=%s",
-                    offset // OPEN_INTEREST_BATCH_SIZE,
-                    len(batch),
-                    _redact_proxy_text(exc, self.proxy_url),
-                )
+            batch_number = offset // OPEN_INTEREST_BATCH_SIZE
+            response = None
+            blocked_remaining = self._open_interest_403_blocked_until - time.monotonic()
+            if blocked_remaining > 0:
+                # Do not amplify a provider-wide Cloudflare block by issuing
+                # the same retry sequence for every catalog page.  Markets
+                # remain explicitly missing and the mirror can still publish
+                # books/catalog pages; a later sync retries after cooldown.
+                stats["suppressedRequests"] += 1
+                continue
+            for attempt in range(1, int(self.config.open_interest_retry_attempts) + 1):
+                try:
+                    response = self._http_call(
+                        self.data_http,
+                        "get",
+                        "/oi",
+                        # The live Data API treats repeated ``market`` keys as a
+                        # single value and only returns the last one. Its array
+                        # parameter must be encoded as a comma-separated list.
+                        params={"market": ",".join(batch)},
+                        operation="polymarket_get_open_interest",
+                    )
+                    self._open_interest_403_blocked_until = 0.0
+                    break
+                except HTTPClientError as exc:
+                    if exc.status_code != 403:
+                        stats["apiErrors"] += 1
+                        LOGGER.warning(
+                            "POLYMARKET_OPEN_INTEREST_ERROR | batch=%s size=%s "
+                            "status=%s attempt=%s/%s",
+                            batch_number,
+                            len(batch),
+                            exc.status_code,
+                            attempt,
+                            self.config.open_interest_retry_attempts,
+                        )
+                        break
+
+                    stats["forbiddenResponses"] += 1
+                    metadata, is_cloudflare = self._open_interest_cloudflare_metadata(
+                        exc,
+                        batch=batch_number,
+                        attempt=attempt,
+                    )
+                    if is_cloudflare:
+                        stats["cloudflare403"] += 1
+                        self._open_interest_diagnostics["lastCloudflare"] = metadata
+
+                    if attempt >= int(self.config.open_interest_retry_attempts):
+                        stats["apiErrors"] += 1
+                        stats["retryExhausted"] += 1
+                        self._open_interest_403_blocked_until = max(
+                            self._open_interest_403_blocked_until,
+                            time.monotonic() + float(self.config.open_interest_403_cooldown_seconds),
+                        )
+                        LOGGER.warning(
+                            "POLYMARKET_OPEN_INTEREST_ERROR | batch=%s size=%s "
+                            "status=403 attempt=%s/%s cfRay=%s exhausted=true",
+                            batch_number,
+                            len(batch),
+                            attempt,
+                            self.config.open_interest_retry_attempts,
+                            metadata.get("cfRay") or "-",
+                        )
+                        break
+
+                    delay = self._open_interest_retry_delay(attempt, exc.headers)
+                    stats["retries"] += 1
+                    LOGGER.warning(
+                        "POLYMARKET_OPEN_INTEREST_RETRY | batch=%s size=%s "
+                        "status=403 attempt=%s/%s cfRay=%s delayMs=%s",
+                        batch_number,
+                        len(batch),
+                        attempt,
+                        self.config.open_interest_retry_attempts,
+                        metadata.get("cfRay") or "-",
+                        int(round(delay * 1000)),
+                    )
+                    time.sleep(delay)
+                except Exception as exc:
+                    stats["apiErrors"] += 1
+                    LOGGER.warning(
+                        "POLYMARKET_OPEN_INTEREST_ERROR | batch=%s size=%s "
+                        "error=%s",
+                        batch_number,
+                        len(batch),
+                        _redact_proxy_text(exc, self.proxy_url),
+                    )
+                    break
+
+            if response is None:
                 continue
 
             if isinstance(response, Mapping):
@@ -835,6 +966,11 @@ class PolymarketClient(BaseClient):
         self._open_interest_metrics["marketsResolved"] += stats["marketsResolved"]
         self._open_interest_metrics["marketsMissing"] += stats["marketsMissing"]
         self._open_interest_metrics["apiErrors"] += stats["apiErrors"]
+        self._open_interest_metrics["forbiddenResponses"] += stats["forbiddenResponses"]
+        self._open_interest_metrics["cloudflare403"] += stats["cloudflare403"]
+        self._open_interest_metrics["retries"] += stats["retries"]
+        self._open_interest_metrics["retryExhausted"] += stats["retryExhausted"]
+        self._open_interest_metrics["suppressedRequests"] += stats["suppressedRequests"]
 
         hydrated = [
             replace(market, open_interest_units=resolved.get(str(market.market_id)))
@@ -843,6 +979,67 @@ class PolymarketClient(BaseClient):
         for market in hydrated:
             self._market_cache[market.market_id] = market
         return hydrated, stats
+
+    @staticmethod
+    def _open_interest_headers(headers: Optional[Mapping[str, Any]]) -> dict[str, str]:
+        return {
+            str(key).lower(): str(value)[:200]
+            for key, value in (headers or {}).items()
+            if value is not None
+        }
+
+    def _open_interest_cloudflare_metadata(
+        self,
+        exc: HTTPClientError,
+        *,
+        batch: int,
+        attempt: int,
+    ) -> tuple[dict[str, Any], bool]:
+        headers = self._open_interest_headers(getattr(exc, "headers", None))
+        body = str(getattr(exc, "response_text", "") or "").lower()
+        server = headers.get("server", "")
+        is_cloudflare = bool(
+            headers.get("cf-ray")
+            or headers.get("cf-mitigated")
+            or "cloudflare" in server.lower()
+            or "cloudflare" in body
+            or "attention required" in body
+        )
+        metadata = {
+            "atMs": int(time.time() * 1000),
+            "statusCode": int(exc.status_code),
+            "batch": int(batch),
+            "attempt": int(attempt),
+            "cfRay": headers.get("cf-ray"),
+            "cfCacheStatus": headers.get("cf-cache-status"),
+            "server": headers.get("server"),
+            "retryAfter": headers.get("retry-after"),
+        }
+        return metadata, is_cloudflare
+
+    def _open_interest_retry_delay(
+        self,
+        attempt: int,
+        headers: Optional[Mapping[str, Any]],
+    ) -> float:
+        base = min(
+            float(self.config.open_interest_retry_max_delay_seconds),
+            float(self.config.open_interest_retry_base_delay_seconds) * (2 ** max(0, attempt - 1)),
+        )
+        normalized = self._open_interest_headers(headers)
+        retry_after = 0.0
+        try:
+            retry_after = max(0.0, float(normalized.get("retry-after", 0) or 0))
+        except (TypeError, ValueError):
+            pass
+        delay = min(
+            float(self.config.open_interest_retry_max_delay_seconds),
+            max(base, retry_after),
+        )
+        jitter_fraction = float(self.config.open_interest_retry_jitter_fraction)
+        if jitter_fraction > 0:
+            delay += random.uniform(0.0, delay * jitter_fraction)
+        return min(float(self.config.open_interest_retry_max_delay_seconds), delay)
 
     def prime_market(self, payload: Mapping[str, Any]) -> Optional[Market]:
         """Seed the worker cache from a screener pick's normalized metadata.
