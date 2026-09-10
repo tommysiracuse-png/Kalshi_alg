@@ -15,6 +15,7 @@ import type {
 } from "@/lib/types";
 import { duration, moneyUnits, priceUnits, contractUnits } from "./live-portfolio";
 import { StatusBadge, Time } from "./status";
+import { useLiveHeartbeat } from "./use-live-heartbeat";
 
 const LIMITS = [25, 50, 100, 250, 500] as const;
 const MARKOUT_HORIZONS = [1_000, 5_000, 30_000, 120_000] as const;
@@ -550,7 +551,7 @@ function Limits({ fillLimit, orderLimit, onChange }: { fillLimit: number; orderL
 
 export function LiveMetrics({ initial, sessions, query, markoutHorizonMs = 30_000, filters = { sessionId: "", status: "", from: "", to: "" } }: { initial: MetricsResponse; sessions: SavedSession[]; query: string; markoutHorizonMs?: number; filters?: { sessionId: string; status: string; from: string; to: string } }) {
   const [data, setData] = useState(initial);
-  const [connected, setConnected] = useState(false);
+  const { connected, markHeartbeat, markStreamError } = useLiveHeartbeat();
   const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set());
   const [expandedRuns, setExpandedRuns] = useState<Set<string>>(new Set());
   const [expandedMarkets, setExpandedMarkets] = useState<Set<string>>(new Set());
@@ -660,13 +661,13 @@ export function LiveMetrics({ initial, sessions, query, markoutHorizonMs = 30_00
         return { ...response, runs: response.runs.map(run => ({ ...prior.get(run.id), ...run, artifactBytes: prior.get(run.id)?.artifactBytes })) };
       });
     } catch {
-      setConnected(false);
+      // Historical refresh failures do not prove that the live heartbeat is unavailable.
     }
   }, [query]);
 
   const applyHeartbeat = useCallback((heartbeat: MetricsHeartbeat) => {
     const active = heartbeat.activeRun;
-    setConnected(Boolean(heartbeat.source?.available && !heartbeat.source?.stale));
+    markHeartbeat(Boolean(heartbeat.source?.available && !heartbeat.source?.stale));
     if (active) {
       setData(previous => {
         const index = previous.runs.findIndex(run => run.id === active.id);
@@ -717,24 +718,27 @@ export function LiveMetrics({ initial, sessions, query, markoutHorizonMs = 30_00
     for (const key of expandedMarketsRef.current) {
       if (key.startsWith(`${active.id}:`)) void loadActivity(active.id, key.slice(active.id.length + 1));
     }
-  }, [loadActivity, loadRunMarkets, refreshMetrics]);
+  }, [loadActivity, loadRunMarkets, markHeartbeat, refreshMetrics]);
 
   useEffect(() => {
     const events = new EventSource("/api/backend/api/v1/events?topics=metrics_heartbeat");
     events.addEventListener("metrics_heartbeat", event => {
-      applyHeartbeat(JSON.parse((event as MessageEvent).data) as MetricsHeartbeat);
+      try {
+        applyHeartbeat(JSON.parse((event as MessageEvent).data) as MetricsHeartbeat);
+      } catch {
+        // Invalid payloads do not count as valid heartbeats.
+      }
     });
-    events.onopen = () => setConnected(true);
-    events.onerror = () => setConnected(false);
+    events.onerror = markStreamError;
     const fallback = window.setInterval(() => {
       if (events.readyState !== EventSource.OPEN) {
         void fetchJson<MetricsHeartbeat>("/api/v1/metrics/heartbeat")
           .then(applyHeartbeat)
-          .catch(() => setConnected(false));
+          .catch(markStreamError);
       }
     }, 5000);
     return () => { events.close(); window.clearInterval(fallback); };
-  }, [applyHeartbeat]);
+  }, [applyHeartbeat, markStreamError]);
 
   const grouped = useMemo(() => {
     const byId = new Map(sessions.map(session => [session.id, { session, runs: [] as HistoricalRun[] }]));

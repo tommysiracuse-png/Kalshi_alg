@@ -1,26 +1,36 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { Overview, SavedSession } from "@/lib/types";
 import { Money, StatusBadge, Time } from "./status";
 import { ControlPanel } from "./control-panel";
 import { OverviewSessionSelector } from "./overview-session-selector";
+import { useLiveHeartbeat } from "./use-live-heartbeat";
 
 export function LiveOverview({ initial, sessions, activeRun }: { initial: Overview; sessions: SavedSession[]; activeRun?: { id: string; sessionId: string; sessionName: string; status: string } | null }) {
   const [data, setData] = useState(initial);
-  const [connected, setConnected] = useState(false);
-  const failures = useRef(0);
+  const { connected, markHeartbeat, markStreamError } = useLiveHeartbeat();
   useEffect(() => {
     const events = new EventSource("/api/backend/api/v1/events?topics=overview");
-    events.addEventListener("overview", event => { setData(JSON.parse((event as MessageEvent).data)); setConnected(true); failures.current = 0; });
-    events.onerror = () => { setConnected(false); failures.current += 1; };
+    events.addEventListener("overview", event => {
+      try {
+        setData(JSON.parse((event as MessageEvent).data));
+        markHeartbeat();
+      } catch {
+        // Invalid payloads do not count as valid heartbeats.
+      }
+    });
+    events.onerror = markStreamError;
     const fallback = window.setInterval(async () => {
-      if (connected || failures.current < 2) return;
+      if (events.readyState === EventSource.OPEN) return;
       const response = await fetch("/api/backend/api/v1/overview", { cache: "no-store" });
-      if (response.ok) setData(await response.json());
+      if (response.ok) {
+        setData(await response.json());
+        markHeartbeat();
+      }
     }, 5000);
     return () => { events.close(); window.clearInterval(fallback); };
-  }, [connected]);
+  }, [markHeartbeat, markStreamError]);
   const launcher = data.fleet.launcher ?? {};
   const counts = data.fleet.counts ?? {};
   return <>

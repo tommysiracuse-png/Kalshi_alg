@@ -17,7 +17,7 @@ from clients.models import (
 )
 from fleet_models import IntentUrgency, QuoteIntent
 from fleet_runtime.assignment import assign_markets, derive_worker_count
-from fleet_runtime.broker import IntentQueue
+from fleet_runtime.broker import IntentQueue, TokenBucket
 import fleet_runtime.capacity as capacity_module
 from fleet_runtime.capacity import (
     AllocationRequest,
@@ -42,6 +42,7 @@ from fleet_runtime.worker import (
     quiet_market_sample,
     watchdog_exit_allowed,
 )
+from fleet_runtime.execution import RollingTokenSpend
 from session_config import default_session_configuration, validate_session_configuration
 from session_store import SessionStore
 from top_of_book_bot import TelemetryStore
@@ -90,6 +91,34 @@ def test_capacity_admits_complete_two_sided_markets_and_reserves_cash():
     assert downgraded.gate_open
     assert downgraded.capacity_limited
     assert downgraded.admitted_markets == 85
+
+
+def test_rolling_token_spend_tracks_actual_costs_and_partial_window():
+    current = [100.0]
+    tracker = RollingTokenSpend(clock=lambda: current[0])
+    tracker.record("read", 10)
+    tracker.record("write", 2)
+    snapshot = tracker.snapshot()
+    assert snapshot["partialWindow"] is True
+    assert snapshot["read"]["tokensLast60s"] == 10
+    assert snapshot["write"]["spendPerSecond"] == 2 / 60
+
+    current[0] = 161.0
+    expired = tracker.snapshot()
+    assert expired["partialWindow"] is False
+    assert expired["read"]["tokensLast60s"] == 0
+    assert expired["write"]["tokensLast60s"] == 0
+
+
+def test_rejected_token_request_is_not_recorded_as_spend():
+    bucket = TokenBucket(0, 10)
+    tracker = RollingTokenSpend(clock=lambda: 100.0)
+    assert bucket.consume(10) is True
+    assert bucket.consume(2) is False
+    # The broker records only after consume() succeeds.
+    tracker.record("write", 10)
+    snapshot = tracker.snapshot(now=100.0)
+    assert snapshot["write"]["tokensLast60s"] == 10
 
 
 def test_system_capacity_downscales_after_two_starvation_samples_and_recovers_with_hysteresis():

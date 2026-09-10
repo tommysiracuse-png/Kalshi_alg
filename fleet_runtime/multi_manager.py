@@ -341,6 +341,14 @@ class MultiVenueBotManager:
         }
         system_capacity = self._system_capacity_payload(self._system_capacity.snapshot())
         monitoring["systemCapacity"] = system_capacity
+        venue_capacity: dict[str, Any] = {}
+        for venue, item in venue_status.items():
+            capacity = dict(item.get("capacity") or {})
+            broker = item.get("broker") or {}
+            rate_limit = broker.get("rateLimit") if isinstance(broker, Mapping) else None
+            if isinstance(rate_limit, Mapping):
+                capacity["rateLimit"] = dict(rate_limit)
+            venue_capacity[venue] = capacity
         return {
             "venues": venue_status,
             "counts": {"configuredBots": configured, "activeBots": active},
@@ -351,9 +359,7 @@ class MultiVenueBotManager:
                 "slotsRemaining": max(0, self._system_capacity.effective_max_bots - admitted),
             },
             "systemCapacity": system_capacity,
-            "venueCapacity": {
-                venue: (item.get("capacity") or {}) for venue, item in venue_status.items()
-            },
+            "venueCapacity": venue_capacity,
             "bots": [bot for item in venue_status.values() for bot in item.get("bots", [])],
             "workers": [worker for item in venue_status.values() for worker in item.get("workers", [])],
             "clients": [client for item in venue_status.values() for client in item.get("clients", [])],

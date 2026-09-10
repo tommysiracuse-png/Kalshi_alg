@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Monitoring, ScreenerRun, ScreenerRunSummary } from "@/lib/types";
 import { formatDuration, LiveMonitoring, LiveScreener, ScreenerHistory } from "./live-monitoring";
@@ -101,6 +101,37 @@ describe("monitoring and screener pages", () => {
     await waitFor(() => expect(window.localStorage.getItem("kalshi.monitoring.columns.v1")).toContain("lastFill"));
   });
 
+  it("keeps the connection live through an automatic SSE reconnect while heartbeats are fresh", () => {
+    vi.useFakeTimers();
+    try {
+      const now = vi.spyOn(Date, "now").mockReturnValue(1_000);
+      let monitoringListener: ((event: MessageEvent) => void) | undefined;
+      let triggerError: (() => void) | undefined;
+      class MockEventSource {
+        static OPEN = 1;
+        readyState = MockEventSource.OPEN;
+        onerror: (() => void) | null = null;
+        constructor() { triggerError = () => this.onerror?.(); }
+        addEventListener(name: string, listener: EventListener) { if (name === "monitoring") monitoringListener = listener as (event: MessageEvent) => void; }
+        close() {}
+      }
+      vi.stubGlobal("EventSource", MockEventSource);
+      render(<LiveMonitoring initial={monitoring([])} />);
+
+      act(() => monitoringListener?.({ data: JSON.stringify(monitoring([])) } as MessageEvent));
+      expect(screen.getByText("Live", { exact: true })).toBeInTheDocument();
+
+      act(() => triggerError?.());
+      expect(screen.getByText("Live", { exact: true })).toBeInTheDocument();
+
+      now.mockReturnValue(12_001);
+      act(() => vi.advanceTimersByTime(1_000));
+      expect(screen.getByText("Reconnecting", { exact: true })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("renders system and venue capacity telemetry and updates it live", async () => {
     let monitoringListener: ((event: MessageEvent) => void) | undefined;
     class MockEventSource {
@@ -121,18 +152,34 @@ describe("monitoring and screener pages", () => {
         workersRetained: 19, workersScaledDown: 1,
       },
       venueCapacity: {
-        kalshi: { venueCapacityLimit: 255, venueQuoteSideCapacity: 510, admittedMarkets: 22, admittedQuoteSides: 44, writeRefillRate: 300, venueCapacityLimited: true, venueCapacityReason: "capacity" },
+        kalshi: {
+          venueCapacityLimit: 255, venueQuoteSideCapacity: 510, admittedMarkets: 22, admittedQuoteSides: 44, writeRefillRate: 300, venueCapacityLimited: true, venueCapacityReason: "capacity",
+          rateLimit: {
+            source: "kalshi_broker", updatedAtMs: 5_000, windowSeconds: 60, partialWindow: true,
+            read: { available: 470, capacity: 500, tokensLast60s: 180, spendPerSecond: 3, refillPerSecond: 10, headroomPerSecond: 7 },
+            write: { available: 80, capacity: 100, tokensLast60s: 120, spendPerSecond: 2, refillPerSecond: 5, headroomPerSecond: 3 },
+          },
+        },
         polymarket: { venue_capacity_limit: 475, normal_quote_side_capacity: 950, admitted_markets: 12, admitted_quote_sides: 24, write_refill_rate: 600, venue_capacity_limited: false },
       },
     };
     render(<LiveMonitoring initial={initial} />);
     expect(screen.getByRole("heading", { name: "Fleet capacity" })).toBeInTheDocument();
+    expect(screen.getAllByRole("tab").map(tab => tab.textContent)).toEqual(["Capacity", "System Limits", "Venue Limits"]);
+    expect(screen.getByRole("tab", { name: "Capacity" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getAllByText("worker-starvation limited").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("475").length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/2\.0 GB/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "System Limits" }));
+    expect(screen.getByRole("heading", { name: "Scaling diagnostics" })).toBeInTheDocument();
+    expect(screen.getByText("650 ms")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Venue Limits" }));
     expect(screen.getByText("Venue/API limited")).toBeInTheDocument();
     expect(screen.getByText("polymarket")).toBeInTheDocument();
     expect(screen.getByText("600")).toBeInTheDocument();
+    expect(screen.getByText("470 / 500")).toBeInTheDocument();
+    expect(screen.getByText("80 / 100")).toBeInTheDocument();
+    expect(screen.getByText("partial 60s window")).toBeInTheDocument();
 
     const updated = { ...initial, systemCapacity: { ...initial.systemCapacity, effectiveMaxBots: 450, reason: "memory", memoryPercent: 90, workersScaledDown: 2 } };
     monitoringListener?.({ data: JSON.stringify(updated) } as MessageEvent);

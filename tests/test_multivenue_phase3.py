@@ -105,3 +105,29 @@ def test_status_snapshot_aggregates_all_venue_monitoring():
     assert snapshot["monitoring"]["botsRunning"] == 5
     assert snapshot["monitoring"]["pnl"]["totalCents"] == 100
     assert snapshot["monitoring"]["apiActivity"]["rest"]["total"] == 18
+
+
+def test_status_snapshot_merges_kalshi_broker_rate_limit_into_venue_capacity():
+    class RateLimitManager(_FakeManager):
+        def status_snapshot(self):
+            return {
+                "counts": {"configuredBots": 0, "activeBots": 0},
+                "bots": [], "workers": [], "clients": [],
+                "capacity": {"venueCapacityLimit": 255},
+                "broker": {
+                    "rateLimit": {
+                        "source": "kalshi_broker",
+                        "partialWindow": True,
+                        "read": {"available": 10},
+                        "write": {"available": 20},
+                    },
+                },
+            }
+
+    manager = MultiVenueBotManager(
+        {"kalshi": RateLimitManager(), "polymarket": _FakeManager()}, global_max_bots=10,
+        venue_configs={"kalshi": {}, "polymarket": {}},
+    )
+    snapshot = manager.status_snapshot()
+    assert snapshot["venueCapacity"]["kalshi"]["venueCapacityLimit"] == 255
+    assert snapshot["venueCapacity"]["kalshi"]["rateLimit"]["read"]["available"] == 10

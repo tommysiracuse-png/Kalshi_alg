@@ -1073,7 +1073,7 @@ class FleetWorkerProcess(mp.Process):
                     if command_active and command_state["queued_at_ms"] else 0
                 )
                 command_wait_ms = int(command_state["wait_ms"])
-                current_event_loop_lag = int(event_loop_lag if event_lag is not None else event_loop_lag_ms)
+                current_event_loop_lag = int(event_lag if event_lag is not None else event_loop_lag_ms)
                 return WorkerHeartbeat(
                     self.worker_id,
                     tuple(sorted(actors)),

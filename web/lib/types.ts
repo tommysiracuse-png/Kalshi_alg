@@ -194,7 +194,24 @@ export type VenueCapacity = {
   capacity_market_limit?: number | null;
   capacity_limited?: boolean | null;
   omitted_reason?: string | null;
+  rateLimit?: RateLimitTelemetry | null;
   [key: string]: unknown;
+};
+export type RateLimitBucket = {
+  available?: number | null;
+  capacity?: number | null;
+  tokensLast60s?: number | null;
+  spendPerSecond?: number | null;
+  refillPerSecond?: number | null;
+  headroomPerSecond?: number | null;
+};
+export type RateLimitTelemetry = {
+  source?: string | null;
+  updatedAtMs?: number | null;
+  windowSeconds?: number | null;
+  partialWindow?: boolean | null;
+  read?: RateLimitBucket | null;
+  write?: RateLimitBucket | null;
 };
 export type ClientMonitoring = {
   venue?: string; workerId?: string; marketId: string; title: string; pid?: number; lifecycle?: string; socketHealthy?: boolean; restartCount?: number;

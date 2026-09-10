@@ -11,6 +11,7 @@ import re
 import threading
 import time
 import uuid
+from collections import deque
 from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from dataclasses import dataclass
@@ -118,6 +119,51 @@ def _transport_error_types() -> tuple[type, ...]:
 
 
 _TRANSPORT_ERROR_TYPES = _transport_error_types()
+
+
+class RollingTokenSpend:
+    """Bounded token-cost history used for broker rate-limit telemetry.
+
+    The broker records an event only after its scheduler admits the request
+    and the selected token bucket consumes the cost.  This deliberately does
+    not include rejected requests or broker-local operations.
+    """
+
+    def __init__(self, *, window_seconds: float = 60.0, clock: Callable[[], float] = time.monotonic) -> None:
+        self.window_seconds = max(1.0, float(window_seconds))
+        self._clock = clock
+        self.started_at = clock()
+        self._events: deque[tuple[float, str, float]] = deque()
+
+    def _trim(self, now: float) -> None:
+        cutoff = now - self.window_seconds
+        while self._events and self._events[0][0] < cutoff:
+            self._events.popleft()
+
+    def record(self, bucket: str, cost: float, *, now: Optional[float] = None) -> None:
+        timestamp = self._clock() if now is None else float(now)
+        self._trim(timestamp)
+        self._events.append((timestamp, str(bucket), float(cost)))
+
+    def snapshot(self, *, now: Optional[float] = None) -> dict[str, Any]:
+        timestamp = self._clock() if now is None else float(now)
+        self._trim(timestamp)
+        totals = {"read": 0.0, "write": 0.0}
+        for _event_at, bucket, cost in self._events:
+            if bucket in totals:
+                totals[bucket] += cost
+        elapsed = max(0.0, timestamp - self.started_at)
+        return {
+            "read": {
+                "tokensLast60s": totals["read"],
+                "spendPerSecond": totals["read"] / self.window_seconds,
+            },
+            "write": {
+                "tokensLast60s": totals["write"],
+                "spendPerSecond": totals["write"] / self.window_seconds,
+            },
+            "partialWindow": elapsed < self.window_seconds,
+        }
 
 
 def is_venue_transport_failure(exc: BaseException) -> bool:
@@ -2080,6 +2126,9 @@ class ExecutionBrokerProcess(mp.Process):
             enable_shared_write_rate_limiter=False,
         )
         client: BaseClient = build_client(self.venue, config)
+        token_spend = RollingTokenSpend()
+        latest_refill_rates = {"read": 0.0, "write": 0.0}
+        limits_received = False
         self.__dict__["_order_registry_state"] = OrderRegistry()
         self.__dict__["_shard_exposure_ledger"] = ShardExposureLedger()
         self.__dict__["_read_cache"] = {}
@@ -2127,6 +2176,38 @@ class ExecutionBrokerProcess(mp.Process):
             "lastOperation": None, "byOperation": {},
         }
         api_error_stats: dict[str, Any] = {"total": 0, "byOperation": {}, "last": None}
+
+        def rate_limit_telemetry(at_ms: Optional[int] = None, *, now: Optional[float] = None) -> Optional[dict[str, Any]]:
+            # Polymarket has a different transport/rate-limit contract. Keep
+            # this Kalshi-only until that venue supplies equivalent accounting.
+            if self.venue.lower() != "kalshi" or not limits_received:
+                return None
+            spend = token_spend.snapshot(now=now)
+            read_available = normal_read_bucket.snapshot() + reserved_read_bucket.snapshot()
+            write_available = normal_bucket.snapshot() + reserved_bucket.snapshot()
+            read_capacity = normal_read_bucket.capacity + reserved_read_bucket.capacity
+            write_capacity = normal_bucket.capacity + reserved_bucket.capacity
+
+            def bucket_payload(kind: str, available: float, capacity: float) -> dict[str, Any]:
+                spend_per_second = float(spend[kind]["spendPerSecond"])
+                refill_per_second = float(latest_refill_rates[kind])
+                return {
+                    "available": max(0.0, available),
+                    "capacity": max(0.0, capacity),
+                    "tokensLast60s": float(spend[kind]["tokensLast60s"]),
+                    "spendPerSecond": spend_per_second,
+                    "refillPerSecond": refill_per_second,
+                    "headroomPerSecond": refill_per_second - spend_per_second,
+                }
+
+            return {
+                "source": "kalshi_broker",
+                "updatedAtMs": int(at_ms if at_ms is not None else time.time() * 1000),
+                "windowSeconds": 60,
+                "partialWindow": bool(spend["partialWindow"]),
+                "read": bucket_payload("read", read_available, read_capacity),
+                "write": bucket_payload("write", write_available, write_capacity),
+            }
 
         def record_queue_wait(request: BrokerRequest) -> None:
             wait_ms = max(0, int(time.time() * 1000) - int(request.submitted_at_ms))
@@ -2246,8 +2327,9 @@ class ExecutionBrokerProcess(mp.Process):
                 if now - last_heartbeat >= self.heartbeat_seconds:
                     last_heartbeat = now
                     try:
-                        self.status_queue.put({
-                            "type": "heartbeat", "at_ms": int(time.time() * 1000),
+                        heartbeat_at_ms = int(time.time() * 1000)
+                        heartbeat = {
+                            "type": "heartbeat", "at_ms": heartbeat_at_ms,
                             "last_success_at_ms": last_success_at_ms,
                             "consecutive_timeouts": consecutive_timeouts,
                             "pending": len(pending), "in_flight": len(in_flight),
@@ -2270,7 +2352,11 @@ class ExecutionBrokerProcess(mp.Process):
                             "api_errors": api_error_stats,
                             "shard_exposure": self._ledger.snapshot(self._registry.snapshot()),
                             "api_activity": client.activity_snapshot(),
-                        })
+                        }
+                        rate_limit = rate_limit_telemetry(heartbeat_at_ms, now=now)
+                        if rate_limit is not None:
+                            heartbeat["rate_limit"] = rate_limit
+                        self.status_queue.put(heartbeat)
                     except Exception:
                         pass
                 if now - last_limits >= self.refresh_limits_seconds:
@@ -2289,10 +2375,18 @@ class ExecutionBrokerProcess(mp.Process):
                         reserved_bucket.reconfigure(reserved_rate, max(2.0, reserved_rate))
                         normal_read_bucket.reconfigure(normal_read_rate, max(10.0, normal_read_rate))
                         reserved_read_bucket.reconfigure(reserved_read_rate, max(10.0, reserved_read_rate))
-                        self.status_queue.put({
-                            "type": "capacity", "at_ms": int(time.time() * 1000), "limits": limits,
+                        latest_refill_rates["read"] = float(read_rate)
+                        latest_refill_rates["write"] = float(write_rate)
+                        limits_received = True
+                        capacity_at_ms = int(time.time() * 1000)
+                        capacity_message = {
+                            "type": "capacity", "at_ms": capacity_at_ms, "limits": limits,
                             "normal_write_rate": normal_rate, "reserved_write_rate": reserved_rate,
-                        })
+                        }
+                        rate_limit = rate_limit_telemetry(capacity_at_ms, now=now)
+                        if rate_limit is not None:
+                            capacity_message["rate_limit"] = rate_limit
+                        self.status_queue.put(capacity_message)
                         last_limits = now
                         repeated_429 = 0
                         note_success()
@@ -2351,6 +2445,8 @@ class ExecutionBrokerProcess(mp.Process):
                     heapq.heappush(pending, (urgency, _seq, request))
                     time.sleep(0.005)
                     continue
+                if not no_token_operation:
+                    token_spend.record("write" if write_operation else "read", cost)
                 try:
                     venue_called = False
                     if request.operation == "quiesce_all":

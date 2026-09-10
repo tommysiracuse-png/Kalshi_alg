@@ -406,6 +406,7 @@ class ShardedBotManager:
         self._broker_stats: dict[str, Any] = {}
         self._broker_api_activity: dict[str, Any] = {}
         self._broker_api_errors: dict[str, Any] = {}
+        self._broker_rate_limit: dict[str, Any] = {}
         self._broker_rpc_timeouts: list[int] = []
         self._broker_rpc_timeout_total = 0
         self._broker_restarted_at_ms = 0
@@ -695,6 +696,8 @@ class ShardedBotManager:
                 self._broker_stats["queueWaitMs"] = dict(message["queue_wait_ms"])
             if isinstance(message.get("api_errors"), Mapping):
                 self._broker_api_errors = dict(message["api_errors"])
+            if isinstance(message.get("rate_limit"), Mapping) and self.venue.lower() == "kalshi":
+                self._broker_rate_limit = dict(message["rate_limit"])
             activity = message.get("api_activity")
             if isinstance(activity, Mapping):
                 self._broker_api_activity = dict(activity)
@@ -718,6 +721,8 @@ class ShardedBotManager:
             self._broker_last_success_ms = max(self._broker_last_success_ms, at_ms)
             self._broker_consecutive_timeouts = 0
             self._note_broker_ready()
+            if isinstance(message.get("rate_limit"), Mapping) and self.venue.lower() == "kalshi":
+                self._broker_rate_limit = dict(message["rate_limit"])
             limits = message.get("limits")
             if limits is None:
                 return False
@@ -828,6 +833,7 @@ class ShardedBotManager:
         self._broker_stats = {}
         self._broker_api_activity = {}
         self._broker_api_errors = {}
+        self._broker_rate_limit = {}
         self._startup_account_snapshot = None
         self._broker_shard_exposure = {}
         self._broker_flat_reduce_only = frozenset()
@@ -2305,6 +2311,8 @@ class ShardedBotManager:
                 "omittedReason": capacity.get("omitted_reason", ""),
                 "admittedQuoteSides": int(capacity.get("admitted_quote_sides", 0)),
             })
+            if self._broker_rate_limit and self.venue.lower() == "kalshi":
+                capacity["rateLimit"] = dict(self._broker_rate_limit)
         allocation = asdict(self._allocation) if self._allocation else None
         gross_units = sum(
             abs(int(item["positionUnits"]))
@@ -2364,6 +2372,7 @@ class ShardedBotManager:
                 "queue": dict(self._broker_stats),
                 "apiActivity": dict(self._broker_api_activity),
                 "apiErrors": dict(self._broker_api_errors),
+                "rateLimit": dict(self._broker_rate_limit),
                 "exposureLimits": dict(self._last_exposure_limits),
                 "shardExposure": dict(self._broker_shard_exposure),
             },

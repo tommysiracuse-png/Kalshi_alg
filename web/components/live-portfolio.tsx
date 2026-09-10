@@ -13,6 +13,7 @@ import type {
 import { PortfolioHistoryChart, type PortfolioWindow } from "./portfolio-history-chart";
 import { PortfolioMarketsTable } from "./portfolio-markets-table";
 import { StatusBadge, Time } from "./status";
+import { useLiveHeartbeat } from "./use-live-heartbeat";
 
 export function moneyUnits(value?: number | null, signed = false) {
   if (value == null) return "Unavailable";
@@ -91,7 +92,7 @@ export function LivePortfolio({
   const [summaryData, setSummaryData] = useState(initialSummary);
   const [positionsData, setPositionsData] = useState(initialPositions);
   const [ordersData, setOrdersData] = useState(initialOrders);
-  const [connected, setConnected] = useState(false);
+  const { connected, markHeartbeat, markStreamError } = useLiveHeartbeat();
   const [clockMs, setClockMs] = useState(initialSummary.generatedAt);
   const [historyWindow, setHistoryWindow] = useState<PortfolioWindow>("24h");
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -142,8 +143,10 @@ export function LivePortfolio({
       setOrdersData(orders);
       setAnalyticsError(null);
       await Promise.all([...expandedRef.current].map(ticker => loadFills(ticker, "", true)));
+      return true;
     } catch (error) {
       setAnalyticsError(error instanceof Error ? error.message : "Could not refresh portfolio analytics");
+      return false;
     }
   }, [historyWindow, loadFills]);
 
@@ -167,18 +170,22 @@ export function LivePortfolio({
   useEffect(() => {
     const events = new EventSource("/api/backend/api/v1/events?topics=portfolio");
     events.addEventListener("portfolio", event => {
-      const payload = JSON.parse((event as MessageEvent).data) as AccountPortfolio;
-      setConnected(true);
-      const nextSnapshot = payload.generatedAtMs ?? payload.lastSuccessAtMs ?? 0;
-      if (nextSnapshot && nextSnapshot !== snapshotRef.current) void refreshAnalytics();
+      try {
+        const payload = JSON.parse((event as MessageEvent).data) as AccountPortfolio;
+        markHeartbeat();
+        const nextSnapshot = payload.generatedAtMs ?? payload.lastSuccessAtMs ?? 0;
+        if (nextSnapshot && nextSnapshot !== snapshotRef.current) void refreshAnalytics();
+      } catch {
+        // Invalid payloads do not count as valid heartbeats.
+      }
     });
-    events.onerror = () => setConnected(false);
+    events.onerror = markStreamError;
     const fallback = window.setInterval(() => {
-      if (events.readyState !== EventSource.OPEN) void refreshAnalytics();
+      if (events.readyState !== EventSource.OPEN) void refreshAnalytics().then(healthy => markHeartbeat(healthy));
     }, 5000);
     const clock = window.setInterval(() => setClockMs(Date.now()), 1000);
     return () => { events.close(); window.clearInterval(fallback); window.clearInterval(clock); };
-  }, [refreshAnalytics]);
+  }, [markHeartbeat, markStreamError, refreshAnalytics]);
 
   const visiblePositions = useMemo(() => positionsData.items.filter(position => {
     const ticker = `${position.ticker} ${position.title}`.toLowerCase();

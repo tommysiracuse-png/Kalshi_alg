@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
-import type { ApiActivity, ClientMonitoring, Monitoring, ScreenerRun, ScreenerRunSummary, SystemCapacity, VenueCapacity } from "@/lib/types";
+import type { ApiActivity, ClientMonitoring, Monitoring, RateLimitTelemetry, ScreenerRun, ScreenerRunSummary, SystemCapacity, VenueCapacity } from "@/lib/types";
 import { Money, StatusBadge, Time } from "./status";
+import { useLiveHeartbeat } from "./use-live-heartbeat";
 
 export function formatDuration(milliseconds?: number | null) {
   if (milliseconds == null) return "Unavailable";
@@ -115,6 +116,7 @@ function bytes(value?: number | null) {
 }
 
 type CapacityRecord = Record<string, unknown> | null | undefined;
+type CapacityTab = "capacity" | "system" | "venue";
 function capacityNumber(value: CapacityRecord, ...keys: string[]) {
   for (const key of keys) {
     const candidate = value?.[key];
@@ -142,6 +144,17 @@ function milliseconds(value?: number | null) {
 }
 function percentage(value?: number | null) {
   return value == null ? "Unavailable" : `${value.toFixed(1)}%`;
+}
+function rateNumber(value?: number | null) {
+  return value == null ? "Unavailable" : value.toLocaleString(undefined, { maximumFractionDigits: 1 });
+}
+function rateMetric(rateLimit: RateLimitTelemetry | null | undefined, side: "read" | "write", metric: string, includeCapacity = false) {
+  const bucket = rateLimit?.[side] as CapacityRecord;
+  const value = capacityNumber(bucket, metric);
+  if (value == null) return "Unavailable";
+  if (!includeCapacity) return rateNumber(value);
+  const capacity = capacityNumber(bucket, "capacity");
+  return capacity == null ? rateNumber(value) : `${rateNumber(value)} / ${rateNumber(capacity)}`;
 }
 function capacityReasonLabel(reason?: string | null) {
   const normalized = reason?.trim().toLowerCase();
@@ -350,26 +363,38 @@ export function ScreenerHistory({ initial, onLoadMore, clockMs }: { initial: Mon
 
 function useLiveMonitoring(initial: Monitoring) {
   const [data, setData] = useState(initial);
-  const [connected, setConnected] = useState(false);
+  const { connected, markHeartbeat, markStreamError } = useLiveHeartbeat();
   const [clockMs, setClockMs] = useState(initial.generatedAt);
   useEffect(() => {
     const events = new EventSource("/api/backend/api/v1/events?topics=monitoring");
-    events.addEventListener("monitoring", event => { setData(JSON.parse((event as MessageEvent).data)); setConnected(true); });
-    events.onerror = () => setConnected(false);
+    events.addEventListener("monitoring", event => {
+      try {
+        setData(JSON.parse((event as MessageEvent).data));
+        markHeartbeat();
+      } catch {
+        // A malformed event is not a valid heartbeat. The watchdog below will
+        // mark the connection unhealthy if valid events do not resume.
+      }
+    });
+    events.onerror = markStreamError;
     const fallback = window.setInterval(async () => {
       if (events.readyState === EventSource.OPEN) return;
       const response = await fetch("/api/backend/api/v1/monitoring", { cache: "no-store" });
-      if (response.ok) setData(await response.json());
+      if (response.ok) {
+        setData(await response.json());
+        markHeartbeat();
+      }
     }, 5000);
     const clock = window.setInterval(() => setClockMs(Date.now()), 1000);
     return () => { events.close(); window.clearInterval(fallback); window.clearInterval(clock); };
-  }, []);
+  }, [markHeartbeat, markStreamError]);
   return { data, connected, clockMs };
 }
 
 export function LiveMonitoring({ initial }: { initial: Monitoring }) {
   const { data, connected, clockMs } = useLiveMonitoring(initial);
   const manager = data.manager ?? {};
+  const [capacityTab, setCapacityTab] = useState<CapacityTab>("capacity");
   const [preferences, setPreferences] = useState<MonitoringPreferences>(() => {
     if (typeof window === "undefined") return defaultMonitoringPreferences();
     try { return sanitizeMonitoringPreferences(JSON.parse(window.localStorage.getItem(MONITORING_COLUMN_KEY) ?? "null")); } catch { return defaultMonitoringPreferences(); }
@@ -475,10 +500,20 @@ export function LiveMonitoring({ initial }: { initial: Monitoring }) {
         <article><span>Worker budget</span><strong>{formatCount(capacityNumber(systemCapacity, "activeWorkerBudget"))}</strong><p>{formatCount(capacityNumber(systemCapacity, "workersRetained"))} retained · {formatCount(capacityNumber(systemCapacity, "workersScaledDown"))} scaled down</p></article>
         <article><span>Capacity reason</span><strong className="small-value">{systemCapacityState}</strong><p>Healthy since <Time value={capacityNumber(systemCapacity, "healthySinceMs")} /></p></article>
       </section>
-      <div className="grid-two capacity-detail-grid">
-        <div><div className="panel-heading"><div><span className="eyebrow">SYSTEM LIMITS</span><h3>Scaling diagnostics</h3></div></div><dl className="details"><div><dt>Last reduced</dt><dd><Time value={capacityNumber(systemCapacity, "lastReducedAtMs")} /></dd></div><div><dt>Last recovered</dt><dd><Time value={capacityNumber(systemCapacity, "lastRecoveredAtMs")} /></dd></div><div><dt>Worker CPU</dt><dd>{percentage(capacityNumber(systemCapacity, "workerCpuPercent"))}</dd></div><div><dt>Queue wait</dt><dd>{milliseconds(capacityNumber(systemCapacity, "maxQueueWaitMs"))}</dd></div></dl></div>
-        <div><div className="panel-heading"><div><span className="eyebrow">VENUE LIMITS</span><h3>Venue capacity</h3></div><strong>{venueCapacityRows.length} venues</strong></div><div className="table-wrap capacity-table"><table><thead><tr><th>Venue</th><th>Markets</th><th>Quote sides</th><th>Write refill</th><th>State</th><th>Reason</th></tr></thead><tbody>{venueCapacityRows.map(([venue, capacity]) => { const marketLimit = capacityNumber(capacity, "venueCapacityLimit", "capacityMarketLimit", "venue_capacity_limit", "capacity_market_limit"); const admitted = capacityNumber(capacity, "admittedMarkets", "admitted_markets"); const quoteSides = capacityNumber(capacity, "venueQuoteSideCapacity", "normalQuoteSideCapacity", "venue_quote_side_capacity", "normal_quote_side_capacity"); const admittedQuoteSides = capacityNumber(capacity, "admittedQuoteSides", "admitted_quote_sides"); const refill = capacityNumber(capacity, "writeRefillRate", "write_refill_rate"); const limited = capacityBoolean(capacity, "venueCapacityLimited", "capacityLimited", "venue_capacity_limited", "capacity_limited"); const reason = capacityReasonLabel(capacityString(capacity, "venueCapacityReason", "omittedReason", "venue_capacity_reason", "omitted_reason")); return <tr key={venue}><td><strong>{venue}</strong></td><td>{formatCount(admitted)}<small> / {formatCount(marketLimit)}</small></td><td>{formatCount(admittedQuoteSides)}<small> / {formatCount(quoteSides)}</small></td><td>{formatCount(refill)}</td><td><StatusBadge value={limited ? "limited" : "ok"} /></td><td>{limited ? reason : "healthy"}</td></tr>; })}</tbody></table>{venueCapacityRows.length === 0 && <p className="empty">No venue capacity data is available.</p>}</div></div>
+      <div className="capacity-tabs" role="tablist" aria-label="Capacity sections">
+        {([ ["capacity", "Capacity"], ["system", "System Limits"], ["venue", "Venue Limits"] ] as const).map(([id, label]) => <button key={id} id={`capacity-tab-${id}`} type="button" role="tab" aria-selected={capacityTab === id} aria-controls={`capacity-panel-${id}`} className="capacity-tab" onClick={() => setCapacityTab(id)}>{label}</button>)}
       </div>
+      {capacityTab === "capacity" && <div id="capacity-panel-capacity" className="capacity-tab-panel" role="tabpanel" aria-labelledby="capacity-tab-capacity">
+        <div className="panel-heading"><div><span className="eyebrow">CAPACITY</span><h3>Current allocation</h3></div><strong>{formatCount(admittedMarkets)} admitted</strong></div>
+        <dl className="details"><div><dt>Effective system capacity</dt><dd>{formatCount(effectiveSystemCapacity)} / {formatCount(configuredSystemCapacity)}</dd></div><div><dt>Hard cap</dt><dd>{formatCount(capacityNumber(systemCapacity, "hardMaxBots"))}</dd></div><div><dt>Remaining slots</dt><dd>{formatCount(slotsRemaining)}</dd></div><div><dt>Current reason</dt><dd>{systemCapacityState}</dd></div></dl>
+      </div>}
+      {capacityTab === "system" && <div id="capacity-panel-system" className="capacity-tab-panel" role="tabpanel" aria-labelledby="capacity-tab-system">
+        <div className="panel-heading"><div><span className="eyebrow">SYSTEM LIMITS</span><h3>Scaling diagnostics</h3></div></div>
+        <dl className="details"><div><dt>Last reduced</dt><dd><Time value={capacityNumber(systemCapacity, "lastReducedAtMs")} /></dd></div><div><dt>Last recovered</dt><dd><Time value={capacityNumber(systemCapacity, "lastRecoveredAtMs")} /></dd></div><div><dt>Worker CPU</dt><dd>{percentage(capacityNumber(systemCapacity, "workerCpuPercent"))}</dd></div><div><dt>Queue wait</dt><dd>{milliseconds(capacityNumber(systemCapacity, "maxQueueWaitMs"))}</dd></div><div><dt>Event-loop lag</dt><dd>{milliseconds(capacityNumber(systemCapacity, "maxEventLoopLagMs"))}</dd></div><div><dt>Healthy since</dt><dd><Time value={capacityNumber(systemCapacity, "healthySinceMs")} /></dd></div></dl>
+      </div>}
+      {capacityTab === "venue" && <div id="capacity-panel-venue" className="capacity-tab-panel" role="tabpanel" aria-labelledby="capacity-tab-venue">
+        <div className="panel-heading"><div><span className="eyebrow">VENUE LIMITS</span><h3>Venue capacity</h3></div><strong>{venueCapacityRows.length} venues</strong></div><div className="table-wrap capacity-table"><table><thead><tr><th>Venue</th><th>Markets</th><th>Quote sides</th><th>Write refill</th><th>Read available</th><th>Write available</th><th>Read spend/s</th><th>Write spend/s</th><th>Read refill/s</th><th>Write refill/s</th><th>Read headroom/s</th><th>Write headroom/s</th><th>State</th><th>Reason</th></tr></thead><tbody>{venueCapacityRows.map(([venue, capacity]) => { const marketLimit = capacityNumber(capacity, "venueCapacityLimit", "capacityMarketLimit", "venue_capacity_limit", "capacity_market_limit"); const admitted = capacityNumber(capacity, "admittedMarkets", "admitted_markets"); const quoteSides = capacityNumber(capacity, "venueQuoteSideCapacity", "normalQuoteSideCapacity", "venue_quote_side_capacity", "normal_quote_side_capacity"); const admittedQuoteSides = capacityNumber(capacity, "admittedQuoteSides", "admitted_quote_sides"); const refill = capacityNumber(capacity, "writeRefillRate", "write_refill_rate"); const rateLimit = capacity.rateLimit; const limited = capacityBoolean(capacity, "venueCapacityLimited", "capacityLimited", "venue_capacity_limited", "capacity_limited"); const reason = capacityReasonLabel(capacityString(capacity, "venueCapacityReason", "omittedReason", "venue_capacity_reason", "omitted_reason")); return <tr key={venue}><td><strong>{venue}</strong></td><td>{formatCount(admitted)}<small> / {formatCount(marketLimit)}</small></td><td>{formatCount(admittedQuoteSides)}<small> / {formatCount(quoteSides)}</small></td><td>{formatCount(refill)}</td><td>{rateMetric(rateLimit, "read", "available", true)}</td><td>{rateMetric(rateLimit, "write", "available", true)}</td><td>{rateMetric(rateLimit, "read", "spendPerSecond")}</td><td>{rateMetric(rateLimit, "write", "spendPerSecond")}</td><td>{rateMetric(rateLimit, "read", "refillPerSecond")}</td><td>{rateMetric(rateLimit, "write", "refillPerSecond")}</td><td>{rateMetric(rateLimit, "read", "headroomPerSecond")}</td><td>{rateMetric(rateLimit, "write", "headroomPerSecond")}</td><td><StatusBadge value={limited ? "limited" : "ok"} /></td><td>{limited ? reason : "healthy"}{rateLimit?.partialWindow ? <small>partial 60s window</small> : null}</td></tr>; })}</tbody></table>{venueCapacityRows.length === 0 && <p className="empty">No venue capacity data is available.</p>}</div>
+      </div>}
     </section>
     <section className="metrics"><article><span>Active venues</span><strong>{activeVenues?.length ?? "Unavailable"}</strong><p>{activeVenues?.join(" · ") || "No venue data available"}</p></article><article><span>Active shards</span><strong>{shardHealth?.activeShards ?? "Unavailable"}<small> / {shardHealth?.totalShards ?? "Unavailable"}</small></strong><p>{shardHealth?.degradedShards ?? "—"} degraded · {shardHealth?.starvedShards ?? "—"} starved</p></article><article><span>Active actors</span><strong>{shardHealth?.activeActors ?? manager.botsRunning ?? "Unavailable"}</strong><p>{shardHealth?.recoveringShards ?? "—"} shards recovering</p></article><article><span>Resource consumption</span><strong>{shardHealth?.totalCpuPercent == null ? "Unavailable" : `${shardHealth.totalCpuPercent.toFixed(1)}%`}</strong><p>{bytes(shardHealth?.totalMemoryRssBytes)} memory</p></article><article><span>Last heartbeat</span><strong>{formatDuration(shardHealth?.oldestHeartbeatAgeMs)}</strong><p>oldest shard heartbeat age</p></article><article><span>Bots running</span><strong>{manager.botsRunning ?? "Unavailable"}<small> / {manager.configuredBots ?? "Unavailable"}</small></strong><p>Manager uptime {formatDuration(manager.startedAtMs ? clockMs - manager.startedAtMs : manager.runningForMs)}</p></article><article><span>Session P&amp;L</span><strong><Money cents={pnl?.totalCents} signed /></strong><p><Money cents={pnl?.realizedCents} signed /> realized · {pnl?.fills ?? "Unavailable"} fills{pnl?.complete === false ? " · partial" : ""}</p></article><article><span>Total API requests</span><strong>{manager.apiActivity?.rest?.total ?? "Unavailable"}</strong><p>{manager.apiActivity?.rest?.requestsLast60s ?? "Unavailable"} REST / min · {manager.apiActivity?.rest?.errors ?? "Unavailable"} errors</p></article></section>
     <section className="panel"><div className="panel-heading"><div><span className="eyebrow">API INFORMATION</span><h2>Venue transport activity</h2></div><strong>{venues.length} venues</strong></div><MonitoringTable kind="api" rows={venues} preferences={preferences.api} widths={widths.api} sort={sorts.api} rowKey={row => row.venue} sortValue={apiSort} renderCell={apiCell} empty="No per-venue API activity is available." onSort={id => selectSort("api", id)} onReorder={(source, target, position) => reorder("api", source, target, position)} onResize={(id, width) => resize("api", id, width)} /></section>
