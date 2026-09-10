@@ -59,6 +59,18 @@ def _rss_bytes() -> int:
     return int(value * 1024) if os.name != "darwin" else int(value)
 
 
+def resolve_event_loop_lag(
+    measured_event_loop_lag_ms: Optional[int],
+    fallback_event_loop_lag_ms: int,
+) -> int:
+    """Select the measured heartbeat lag without relying on an undefined alias."""
+    return int(
+        measured_event_loop_lag_ms
+        if measured_event_loop_lag_ms is not None
+        else fallback_event_loop_lag_ms
+    )
+
+
 # Markets reconciled concurrently. add_actor/remove_actor each make several
 # rate-limited REST round-trips; running a large screener refresh serially kept
 # the worker inside one reconcile for minutes, so its new actors were never
@@ -1040,7 +1052,7 @@ class FleetWorkerProcess(mp.Process):
             health: Mapping[str, MarketHealth],
             *,
             source: str,
-            event_lag: Optional[int] = None,
+            measured_event_loop_lag_ms: Optional[int] = None,
         ) -> WorkerHeartbeat:
             nonlocal heartbeat_sequence, fallback_heartbeat_count, last_fallback_at_ms
             nonlocal event_loop_lag_ms, cpu_percent, last_cpu_process_seconds
@@ -1073,7 +1085,10 @@ class FleetWorkerProcess(mp.Process):
                     if command_active and command_state["queued_at_ms"] else 0
                 )
                 command_wait_ms = int(command_state["wait_ms"])
-                current_event_loop_lag = int(event_lag if event_lag is not None else event_loop_lag_ms)
+                current_event_loop_lag = resolve_event_loop_lag(
+                    measured_event_loop_lag_ms,
+                    event_loop_lag_ms,
+                )
                 return WorkerHeartbeat(
                     self.worker_id,
                     tuple(sorted(actors)),
@@ -1177,7 +1192,10 @@ class FleetWorkerProcess(mp.Process):
                             risk_mode="startup", risk_age_ms=None, error=reason,
                         )
                     heartbeat = build_heartbeat(
-                        now, health, source="rich", event_lag=int(event_loop_delay)
+                        now,
+                        health,
+                        source="rich",
+                        measured_event_loop_lag_ms=int(event_loop_delay),
                     )
                     self.heartbeat_queue.put(heartbeat)
                     with heartbeat_signal_lock:

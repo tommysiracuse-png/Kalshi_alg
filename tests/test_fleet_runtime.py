@@ -40,6 +40,7 @@ from fleet_runtime.worker import (
     observe_stream_event,
     quiet_after_ms_for,
     quiet_market_sample,
+    resolve_event_loop_lag,
     watchdog_exit_allowed,
 )
 from fleet_runtime.execution import RollingTokenSpend
@@ -108,6 +109,11 @@ def test_rolling_token_spend_tracks_actual_costs_and_partial_window():
     assert expired["partialWindow"] is False
     assert expired["read"]["tokensLast60s"] == 0
     assert expired["write"]["tokensLast60s"] == 0
+
+
+def test_worker_heartbeat_uses_measured_event_loop_lag_without_undefined_name():
+    assert resolve_event_loop_lag(2_180, 0) == 2_180
+    assert resolve_event_loop_lag(None, 37) == 37
 
 
 def test_rejected_token_request_is_not_recorded_as_spend():
