@@ -147,6 +147,55 @@ export type ApiErrorRecord = {
 export type ApiErrors = {
   total?: number; byOperation?: Record<string, { count?: number; last?: ApiErrorRecord | null }>; last?: ApiErrorRecord | null;
 };
+export type SystemCapacity = {
+  configuredMaxBots?: number | null;
+  hardMaxBots?: number | null;
+  effectiveMaxBots?: number | null;
+  resourceCapacity?: number | null;
+  healthCapacity?: number | null;
+  reason?: string | null;
+  systemCapacityReason?: string | null;
+  cpuPercent?: number | null;
+  memoryPercent?: number | null;
+  workerCpuPercent?: number | null;
+  workerMemoryRssBytes?: number | null;
+  maxEventLoopLagMs?: number | null;
+  maxQueueWaitMs?: number | null;
+  starvedWorkers?: number | null;
+  totalWorkers?: number | null;
+  unhealthySamples?: number | null;
+  healthySinceMs?: number | null;
+  lastReducedAtMs?: number | null;
+  lastRecoveredAtMs?: number | null;
+  activeWorkerBudget?: number | null;
+  workersRetained?: number | null;
+  workersScaledDown?: number | null;
+  [key: string]: unknown;
+};
+export type VenueCapacity = {
+  venueCapacityLimit?: number | null;
+  venueQuoteSideCapacity?: number | null;
+  venueCapacityLimited?: boolean | null;
+  venueCapacityReason?: string | null;
+  writeRefillRate?: number | null;
+  admittedQuoteSides?: number | null;
+  admittedMarkets?: number | null;
+  capacityMarketLimit?: number | null;
+  capacityLimited?: boolean | null;
+  omittedReason?: string | null;
+  // Older manager snapshots expose the same values in snake_case.
+  venue_capacity_limit?: number | null;
+  venue_quote_side_capacity?: number | null;
+  venue_capacity_limited?: boolean | null;
+  venue_capacity_reason?: string | null;
+  write_refill_rate?: number | null;
+  admitted_quote_sides?: number | null;
+  admitted_markets?: number | null;
+  capacity_market_limit?: number | null;
+  capacity_limited?: boolean | null;
+  omitted_reason?: string | null;
+  [key: string]: unknown;
+};
 export type ClientMonitoring = {
   venue?: string; workerId?: string; marketId: string; title: string; pid?: number; lifecycle?: string; socketHealthy?: boolean; restartCount?: number;
   runtime?: { startedAtMs?: number; runningForMs?: number };
@@ -161,13 +210,15 @@ export type ClientMonitoring = {
 export type Monitoring = {
   generatedAt: number; schemaVersion?: number; source: SourceState; warnings: string[];
   manager: { running?: boolean; lifecycle?: string; startedAtMs?: number; runningForMs?: number; activeVenues?: string[]; configuredBots?: number; botsRunning?: number; portfolio?: { items?: Array<{ marketId: string; title?: string; positionUnits?: number | null; updatedAtMs?: number; stale?: boolean; available?: boolean }>; grossPositionUnits?: number; netPositionUnits?: number; unknownMarkets?: number; staleMarkets?: number }; pnl?: PnlTotals; apiActivity?: ApiActivity; threadBudget?: Record<string, number | null>; shardHealth?: ShardHealth };
-  venues?: Array<{ venue: string; active: boolean; botsRunning: number; configuredBots: number; apiActivity?: ApiActivity }>;
+  venues?: Array<{ venue: string; active: boolean; botsRunning: number; configuredBots: number; apiActivity?: ApiActivity; capacity?: VenueCapacity | null }>;
   clients: ClientMonitoring[];
   workers?: Array<{ venue?: string; workerId: string; pid?: number; running: boolean; phase?: string; lastRecoveryError?: string | null; recoveryReason?: string | null; startedAtMs?: number | null; runningForMs?: number | null; assignedMarkets: number; marketIds?: string[]; botsRunning?: number; startupPendingMarkets?: string[]; startupAttempts?: Record<string, number>; startupProgressAtMs?: number | null; startupElapsedMs?: number; lastStartupError?: string | null; workerError?: string | null; watchdog?: { mode?: string; counts?: Record<string, number> }; heartbeatAtMs?: number | null; heartbeatReceivedAtMs?: number | null; heartbeatAgeMs?: number | null; heartbeatSequence?: number | null; heartbeatSource?: string | null; heartbeatQueueLagMs?: number | null; stale: boolean; degraded?: boolean; starved?: boolean; recovering?: boolean; memoryRssBytes?: number | null; cpuPercent?: number | null; threadCount?: number | null; queueDepth?: number | null; commandQueueDepth?: number | null; commandOldestAgeMs?: number | null; commandWaitMs?: number | null; eventLagMs?: number | null; eventLoopLagMs?: number | null; fallbackHeartbeatCount?: number; lastFallbackAtMs?: number | null; warningCount?: number; errorCount?: number; lastWarning?: string | null; lastError?: string | null; recoveryCount?: number; lastRecoveryAtMs?: number | null; apiActivity?: ApiActivity; apiErrors?: ApiErrors }>;
   threadBudget?: Record<string, number | null>;
   broker?: { pid?: number | null; running?: boolean; queue?: { queueWaitMs?: Record<string, unknown> }; apiActivity?: ApiActivity; apiErrors?: ApiErrors };
   capacity?: Record<string, unknown> | null;
   allocation?: Record<string, unknown> | null;
+  systemCapacity?: SystemCapacity | null;
+  venueCapacity?: Record<string, VenueCapacity> | null;
   screener: {
     running?: boolean; currentReason?: string; currentStartedAtMs?: number; currentDurationMs?: number;
     lastStartedAtMs?: number; lastCompletedAtMs?: number; lastDurationMs?: number; lastSuccessAtMs?: number;

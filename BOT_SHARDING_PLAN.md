@@ -118,17 +118,18 @@ The broker will:
 - Apply exponential backoff to normal traffic without delaying emergency cancellation.
 - Reconcile every response and WebSocket order update against the broker’s authoritative order registry.
 
-Admission for 500 markets uses:
+Venue admission for complete two-sided markets uses:
 
 ```text
 normal_write_capacity =
     floor(write_refill_rate × 0.85 × 20 seconds / 10 tokens)
 ```
 
-At the current Advanced limit of 300 write tokens/second, this admits 510 normal quote sides. Therefore:
+At 300 write tokens/second, this admits 510 normal quote sides, which is 255 complete markets. A 510-complete-market target requires a verified 600 write-token/second venue budget. Therefore:
 
-- Allocate one quote side to each eligible market first.
-- Allocate second sides only from measured surplus capacity.
+- Admit only complete two-sided normal markets.
+- Keep venue API capacity separate from the host-wide 500-actor system cap.
+- Reduce the system cap in shard-sized increments when worker starvation or host pressure is detected.
 - Recompute every market’s desired quote at least every 20 seconds, even when no exchange write is necessary.
 - Cancel a quote when market data or its decision becomes older than 20 seconds.
 - If the API tier is unavailable or cannot admit the requested market count, enter fail-closed mode: cancel exposure-increasing orders, permit only inventory-reducing actions, and publish a capacity error.
@@ -141,8 +142,10 @@ Create a controller-level allocator before intents reach the broker:
 - Allocatable cash equals 80% of current available cash.
 - Include existing resting-order notional, positions, and pending execution intents in committed capital.
 - Give inventory-reducing sides first priority.
-- Give each eligible market one side in screener-rank order.
-- Use remaining capital and API capacity for second sides.
+- Give each eligible market both quote sides only when the venue and capital
+  gates can fund the complete market.
+- Keep incomplete normal markets out of the active allocation; reducing-side
+  carryovers remain eligible for risk management.
 - Enforce configured per-market budgets unchanged.
 - Limit one series to 10% of allocatable cash unless it is reducing existing inventory.
 - If every requested market cannot receive its minimum allocation, fail closed rather than partially presenting the run as a 500-market fleet.
@@ -330,7 +333,9 @@ Because the legacy runtime is being replaced, rollback is release-based rather t
 
 ## Assumptions and Defaults
 
-- “500 active” means 500 live market actors, with at least one quote side per market only when book, risk, capital, and API gates pass.
+- “500 active” means 500 live market actors, with two quote sides per normal
+  market only when book, risk, capital, venue bandwidth, and system capacity
+  gates pass.
 - Second-side coverage is opportunistic and subordinate to cancellation capacity.
 - The production account remains at least Advanced tier with 300-token read/write refill rates; lower observed capacity fails closed.
 - The quote freshness contract is 20 seconds.

@@ -355,8 +355,11 @@ class ShardedBotManager:
         configured_max = int(self.configuration["launcher"]["maxBots"])
         venue_max = getattr(config, "venue_max_bots", None)
         self.max_bots = min(configured_max, int(venue_max)) if venue_max is not None else configured_max
+        self._configured_manager_max_bots = self.max_bots
+        self._system_capacity_limit = self.max_bots
         self.shard_size = int(self.fleet_config["shardSize"])
         self.worker_count = derive_worker_count(self.max_bots, self.shard_size)
+        self._worker_slot_count = self.worker_count
         self.bots: dict[str, ManagedMarket] = {}
         self.events: "asyncio.Queue[BotManagerEvent]" = asyncio.Queue()
         self._desired: dict[str, ScreenerPick] = {}
@@ -450,6 +453,22 @@ class ShardedBotManager:
             "workersStopped": False, "brokerStopped": False,
             "remainingBotOrderIds": [], "warnings": [],
         }
+
+    def set_system_capacity_limit(self, limit: int) -> None:
+        """Set the fleet coordinator's current per-venue actor allowance.
+
+        This is intentionally separate from venue admission.  The coordinator
+        may lower this value for host pressure while the venue's API capacity
+        remains unchanged.
+        """
+
+        self._system_capacity_limit = max(0, int(limit))
+        target = min(self._configured_manager_max_bots, self._system_capacity_limit)
+        # A zero allowance is represented by an empty update; keep one worker
+        # as the valid assignment floor for compatibility with the worker
+        # lifecycle code when a later update restores capacity.
+        self.max_bots = max(1, target)
+        self.worker_count = derive_worker_count(self.max_bots, self.shard_size)
 
     @property
     def current_picks(self) -> dict[str, ScreenerPick]:
@@ -958,7 +977,7 @@ class ShardedBotManager:
         self._control_ack_queue = mp.SimpleQueue()
         self._broker_status_queue = mp.SimpleQueue()
         response_queues: dict[str, Any] = {"controller": mp.Queue()}
-        for index in range(self.worker_count):
+        for index in range(self._worker_slot_count):
             response_queues[f"worker-{index:02d}"] = mp.Queue()
         if self._client_config is None:
             self._client_config = build_client_config(
@@ -976,15 +995,37 @@ class ShardedBotManager:
         self._broker_started_at_ms = int(time.time() * 1000)
         self._admin = _BrokerAdmin(self._request_queue, response_queues["controller"])
         for index in range(self.worker_count):
-            worker_id = f"worker-{index:02d}"
-            command_queue = mp.SimpleQueue()
-            process = self._make_worker(worker_id, response_queues[worker_id], command_queue)
-            process.start()
-            self._workers[worker_id] = ManagedWorker(
-                worker_id, process, command_queue, response_queues[worker_id],
-                started_at_ms=int(time.time() * 1000),
-            )
+            self._spawn_worker(index)
         self._started = True
+
+    def _spawn_worker(self, index: int) -> None:
+        worker_id = f"worker-{int(index):02d}"
+        response_queue = self._response_queues[worker_id]
+        existing = self._workers.get(worker_id)
+        if existing is not None and existing.process.is_alive():
+            return
+        command_queue = mp.SimpleQueue()
+        process = self._make_worker(worker_id, response_queue, command_queue)
+        process.start()
+        self._workers[worker_id] = ManagedWorker(
+            worker_id, process, command_queue, response_queue,
+            started_at_ms=int(time.time() * 1000),
+        )
+
+    def _ensure_worker_processes(self) -> None:
+        """Add workers when the system cap grows after an earlier downscale."""
+
+        if self._planning_only:
+            return
+        for index in range(self.worker_count):
+            worker_id = f"worker-{index:02d}"
+            # Lightweight manager doubles used by shutdown/admission tests may
+            # install their own worker map without constructing multiprocessing
+            # response queues.  Do not replace those test/runtime-managed
+            # workers or manufacture a queue outside normal startup.
+            if worker_id not in self._response_queues:
+                continue
+            self._spawn_worker(index)
 
     async def _admission(self, picks: Mapping[str, ScreenerPick]) -> tuple[FleetCapacity, AllocationResult]:
         if self._planning_only:
@@ -1225,6 +1266,7 @@ class ShardedBotManager:
         if len(update.picks) > self.max_bots:
             raise ValueError(f"screener returned {len(update.picks)} markets; configured maximum is {self.max_bots}")
         await self._ensure_started()
+        self._ensure_worker_processes()
         # A newer screener generation supersedes any background retry for the
         # previous allocation.  Do not let an old admission result reopen the
         # quoting gate while this update is being reconciled.
@@ -1257,7 +1299,7 @@ class ShardedBotManager:
             self._send_control(
                 managed,
                 "reconcile",
-                picks=tuple(desired[ticker] for ticker in assignments[worker_id]),
+                picks=tuple(desired[ticker] for ticker in assignments.get(worker_id, ())),
                 generation_id=update.generation_id,
             )
         try:
@@ -1303,7 +1345,7 @@ class ShardedBotManager:
                         self._send_control(
                             managed,
                             "reconcile",
-                            picks=tuple(desired[ticker] for ticker in assignments[worker_id]),
+                            picks=tuple(desired[ticker] for ticker in assignments.get(worker_id, ())),
                             generation_id=update.generation_id,
                         )
                 await self._emit(
@@ -1323,7 +1365,7 @@ class ShardedBotManager:
                     self._send_control(
                         managed,
                         "reconcile",
-                        picks=tuple(desired[ticker] for ticker in assignments[worker_id]),
+                        picks=tuple(desired[ticker] for ticker in assignments.get(worker_id, ())),
                         generation_id=update.generation_id,
                     )
         gate_open = bool(
@@ -2240,10 +2282,23 @@ class ShardedBotManager:
             capacity.update({
                 "globalMaxBots": int(self.configuration["launcher"]["maxBots"]),
                 "venueMaxBots": int(venue_cfg.get("maxBots", self.max_bots)),
+                "systemMaxBots": int(self._system_capacity_limit),
                 "priority": int(venue_cfg.get("priority", 100)),
-                "globalSlotsRemaining": max(0, int(self.configuration["launcher"]["maxBots"]) - len(self._desired)),
+                "globalSlotsRemaining": max(0, int(self._system_capacity_limit) - len(self._desired)),
                 "capacityLimited": bool(capacity.get("capacity_limited", False)),
                 "capacityMarketLimit": int(capacity.get("capacity_market_limit", 0)),
+                "venueCapacityLimit": int(
+                    capacity.get("venue_capacity_limit", capacity.get("capacity_market_limit", 0))
+                ),
+                "venueQuoteSideCapacity": int(
+                    capacity.get("venue_quote_side_capacity", capacity.get("normal_quote_side_capacity", 0))
+                ),
+                "venueCapacityLimited": bool(
+                    capacity.get("venue_capacity_limited", capacity.get("capacity_limited", False))
+                ),
+                "venueCapacityReason": capacity.get(
+                    "venue_capacity_reason", capacity.get("omitted_reason", "")
+                ),
                 "requestedMarkets": int(capacity.get("requested_markets", 0)),
                 "admittedMarkets": int(capacity.get("admitted_markets", 0)),
                 "omittedMarkets": int(capacity.get("omitted_markets", 0)),

@@ -161,6 +161,12 @@ class FleetCapacity:
     venue_max_bots: Optional[int] = None
     priority: Optional[int] = None
     global_slots_remaining: Optional[int] = None
+    # Explicit venue-capacity aliases keep status consumers from confusing
+    # provider/API capacity with the fleet-wide system-capacity gate.
+    venue_capacity_limit: int = 0
+    venue_quote_side_capacity: int = 0
+    venue_capacity_limited: bool = False
+    venue_capacity_reason: str = ""
 
 
 @dataclass(frozen=True)

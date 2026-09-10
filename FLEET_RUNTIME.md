@@ -20,13 +20,15 @@ Only the execution broker may create, amend, decrease, or cancel an order. Worke
 
 ## Admission and fail-closed rules
 
-The write-side admission formula is:
+Venue write-side admission uses the account-reported venue limit:
 
 ```text
 floor(write_refill_rate * 0.85 * quote_freshness_seconds / 10)
 ```
 
-At 300 write tokens per second and a 20-second freshness deadline this yields 510 normal quote sides. Admission assigns one side to every eligible market in screener order before assigning second sides.
+At 300 write tokens per second and a 20-second freshness deadline this yields 510 normal quote sides, or 255 complete two-sided markets. A venue needs at least 600 write tokens per second to admit 510 complete markets. Normal-market admission never leaves a market with only one quote side.
+
+Venue admission is independent from the host-wide system gate. The launcher applies the lower of the venue's complete-market capacity, the configured venue maximum, and the fleet-wide system capacity. The fleet-wide cap is bounded by 500 actors and adapts downward in shard-sized increments when aggregate CPU, memory, queue lag, event-loop lag, or worker starvation crosses its configured soft limits. Capacity recovers one shard at a time after a sustained healthy interval.
 
 The controller reserves 20% of available cash and limits non-reducing exposure in one series to 10% of allocatable cash. Resting-order notional and reported position exposure count as committed capital. If all requested markets cannot receive a first side, the fleet is fail-closed rather than partially represented as fully admitted.
 

@@ -18,7 +18,13 @@ from clients.models import (
 from fleet_models import IntentUrgency, QuoteIntent
 from fleet_runtime.assignment import assign_markets, derive_worker_count
 from fleet_runtime.broker import IntentQueue
-from fleet_runtime.capacity import AllocationRequest, CapitalAllocator, calculate_fleet_capacity
+import fleet_runtime.capacity as capacity_module
+from fleet_runtime.capacity import (
+    AllocationRequest,
+    CapitalAllocator,
+    SystemCapacityController,
+    calculate_fleet_capacity,
+)
 from fleet_runtime.risk import (
     RISK_FLATTEN_LATCH_MS,
     RiskDecision,
@@ -56,24 +62,68 @@ def test_500_markets_fill_twenty_stable_bounded_shards():
     assert all(ticker in refreshed[worker] for ticker, worker in prior.items() if ticker != tickers[-1])
 
 
-def test_advanced_capacity_admits_one_side_per_500_and_reserves_cash():
+def test_capacity_admits_complete_two_sided_markets_and_reserves_cash():
     capacity = calculate_fleet_capacity(
-        api_tier="advanced", read_refill_rate=300, write_refill_rate=300,
-        requested_markets=500, cash_available_units=1_000_000,
+        api_tier="advanced", read_refill_rate=600, write_refill_rate=600,
+        requested_markets=510, cash_available_units=1_000_000,
     )
-    assert capacity.normal_quote_side_capacity == 510
-    assert capacity.admitted_markets == 500
-    assert capacity.admitted_quote_sides == 510
+    assert capacity.normal_quote_side_capacity == 1020
+    assert capacity.capacity_market_limit == 510
+    assert capacity.admitted_markets == 510
+    assert capacity.admitted_quote_sides == 1020
     assert capacity.cash_allocatable_units == 800_000
     assert capacity.reserved_cash_units == 200_000
     assert capacity.gate_open
+
+    lower_bandwidth = calculate_fleet_capacity(
+        api_tier="advanced", read_refill_rate=300, write_refill_rate=300,
+        requested_markets=500, cash_available_units=1_000_000,
+    )
+    assert lower_bandwidth.capacity_market_limit == 255
+    assert lower_bandwidth.admitted_markets == 255
+    assert lower_bandwidth.admitted_quote_sides == 510
 
     downgraded = calculate_fleet_capacity(
         api_tier="basic", read_refill_rate=200, write_refill_rate=100,
         requested_markets=500, cash_available_units=1_000_000,
     )
-    assert not downgraded.gate_open
-    assert downgraded.reduction_only
+    assert downgraded.gate_open
+    assert downgraded.capacity_limited
+    assert downgraded.admitted_markets == 85
+
+
+def test_system_capacity_downscales_after_two_starvation_samples_and_recovers_with_hysteresis():
+    controller = SystemCapacityController(
+        500,
+        shard_size=25,
+        settings={
+            "systemActorMemoryBudgetBytes": 1,
+            "systemReservedMemoryBytes": 0,
+            "systemRecoveryHealthySeconds": 60,
+        },
+    )
+    starved = [{"starved": True, "eventLoopLagMs": 900, "commandWaitMs": 2_000, "cpuPercent": 0}]
+    assert controller.evaluate(starved, now_ms=1_000).effective_max_bots == 500
+    reduced = controller.evaluate(starved, now_ms=2_000)
+    assert reduced.effective_max_bots == 475
+    assert reduced.reason == "worker_starvation"
+
+    healthy = controller.evaluate([], now_ms=3_000)
+    assert healthy.effective_max_bots == 475
+    recovered = controller.evaluate([], now_ms=64_000)
+    assert recovered.effective_max_bots == 500
+    assert recovered.last_recovered_at_ms == 64_000
+
+
+def test_system_capacity_allows_500_bots_on_a_sized_host(monkeypatch):
+    monkeypatch.setattr(
+        capacity_module,
+        "_host_memory_bytes",
+        lambda: (32 * 1024 * 1024 * 1024, 24 * 1024 * 1024 * 1024),
+    )
+    controller = SystemCapacityController(500)
+    assert controller.snapshot().effective_max_bots == 500
+    assert controller.snapshot().workers_retained == 20
 
 
 def test_fleet_startup_resource_settings_have_bounded_defaults_and_validation():

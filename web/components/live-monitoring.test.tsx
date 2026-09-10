@@ -57,6 +57,7 @@ describe("monitoring and screener pages", () => {
 
     render(<LiveMonitoring initial={initial} />);
     expect(screen.getByRole("heading", { name: "Monitoring" })).toBeInTheDocument();
+    expect(screen.getAllByText("unavailable").length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByRole("heading", { name: "Refresh activity" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Historical runs" })).not.toBeInTheDocument();
 
@@ -98,6 +99,45 @@ describe("monitoring and screener pages", () => {
     fireEvent.pointerDown(handle as Element, { clientX: 100 });
     fireEvent.pointerMove(window, { clientX: 150 }); fireEvent.pointerUp(window, { clientX: 150 });
     await waitFor(() => expect(window.localStorage.getItem("kalshi.monitoring.columns.v1")).toContain("lastFill"));
+  });
+
+  it("renders system and venue capacity telemetry and updates it live", async () => {
+    let monitoringListener: ((event: MessageEvent) => void) | undefined;
+    class MockEventSource {
+      static OPEN = 1; readyState = MockEventSource.OPEN; onerror: (() => void) | null = null;
+      addEventListener(name: string, listener: EventListener) { if (name === "monitoring") monitoringListener = listener as (event: MessageEvent) => void; }
+      close() {}
+    }
+    vi.stubGlobal("EventSource", MockEventSource);
+    const initial: Monitoring = {
+      ...monitoring([]),
+      allocation: { admittedMarkets: 22, slotsRemaining: 453 },
+      systemCapacity: {
+        configuredMaxBots: 500, hardMaxBots: 500, effectiveMaxBots: 475, resourceCapacity: 500, healthCapacity: 475,
+        reason: "worker_starvation", cpuPercent: 87.5, memoryPercent: 82.1, workerCpuPercent: 175,
+        workerMemoryRssBytes: 2 * 1024 ** 3, maxEventLoopLagMs: 650, maxQueueWaitMs: 1200,
+        starvedWorkers: 2, totalWorkers: 20, unhealthySamples: 2, healthySinceMs: null,
+        lastReducedAtMs: 10_000, lastRecoveredAtMs: null, activeWorkerBudget: 475,
+        workersRetained: 19, workersScaledDown: 1,
+      },
+      venueCapacity: {
+        kalshi: { venueCapacityLimit: 255, venueQuoteSideCapacity: 510, admittedMarkets: 22, admittedQuoteSides: 44, writeRefillRate: 300, venueCapacityLimited: true, venueCapacityReason: "capacity" },
+        polymarket: { venue_capacity_limit: 475, normal_quote_side_capacity: 950, admitted_markets: 12, admitted_quote_sides: 24, write_refill_rate: 600, venue_capacity_limited: false },
+      },
+    };
+    render(<LiveMonitoring initial={initial} />);
+    expect(screen.getByRole("heading", { name: "Fleet capacity" })).toBeInTheDocument();
+    expect(screen.getAllByText("worker-starvation limited").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText("475").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText(/2\.0 GB/)).toBeInTheDocument();
+    expect(screen.getByText("Venue/API limited")).toBeInTheDocument();
+    expect(screen.getByText("polymarket")).toBeInTheDocument();
+    expect(screen.getByText("600")).toBeInTheDocument();
+
+    const updated = { ...initial, systemCapacity: { ...initial.systemCapacity, effectiveMaxBots: 450, reason: "memory", memoryPercent: 90, workersScaledDown: 2 } };
+    monitoringListener?.({ data: JSON.stringify(updated) } as MessageEvent);
+    await waitFor(() => expect(screen.getByText("450")).toBeInTheDocument());
+    expect(screen.getAllByText("memory limited").length).toBeGreaterThanOrEqual(1);
   });
 });
 

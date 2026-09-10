@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import math
+import os
+import time
 from dataclasses import dataclass
-from typing import Iterable, Literal, Mapping, Optional
+from typing import Callable, Iterable, Literal, Mapping, Optional
 
 from core.fleet_models import FleetCapacity, QuoteSide
 
@@ -18,6 +20,249 @@ MAX_ALLOCATION_OVERSUBSCRIPTION = 10.0
 # re-admitted only when it has fallen below this fraction of allocatable, so a
 # shard hovering at the cap does not cancel and re-grant every refresh.
 LIVE_CAP_RELEASE_FRACTION = 0.8
+SYSTEM_HARD_MAX_BOTS = 500
+
+
+@dataclass(frozen=True)
+class SystemCapacity:
+    """Fleet-wide actor admission after host and worker-health gates."""
+
+    configured_max_bots: int
+    hard_max_bots: int
+    effective_max_bots: int
+    resource_capacity: int
+    health_capacity: int
+    reason: str = ""
+    cpu_percent: float = 0.0
+    memory_percent: float = 0.0
+    worker_cpu_percent: float = 0.0
+    worker_memory_rss_bytes: int = 0
+    max_event_loop_lag_ms: int = 0
+    max_queue_wait_ms: int = 0
+    starved_workers: int = 0
+    total_workers: int = 0
+    unhealthy_samples: int = 0
+    healthy_since_ms: int = 0
+    last_reduced_at_ms: int = 0
+    last_recovered_at_ms: int = 0
+    active_worker_budget: int = 0
+    workers_retained: int = 0
+    workers_scaled_down: int = 0
+
+
+def _host_memory_bytes() -> tuple[int, int]:
+    """Return total and available host memory without adding dependencies."""
+
+    try:
+        values: dict[str, int] = {}
+        with open("/proc/meminfo", "r", encoding="utf-8") as handle:
+            for line in handle:
+                if ":" not in line:
+                    continue
+                key, raw = line.split(":", 1)
+                parts = raw.strip().split()
+                if not parts:
+                    continue
+                values[key] = int(parts[0]) * (1024 if len(parts) > 1 and parts[1].lower() == "kb" else 1)
+        return int(values.get("MemTotal", 0)), int(values.get("MemAvailable", 0))
+    except (OSError, ValueError):
+        return 0, 0
+
+
+class SystemCapacityController:
+    """Adaptive fleet-wide capacity with bounded downscale and recovery.
+
+    Venue admission remains outside this controller.  This class only decides
+    how many actors the host can safely run across all venues.
+    """
+
+    def __init__(
+        self,
+        configured_max_bots: int,
+        *,
+        shard_size: int = 25,
+        settings: Optional[Mapping[str, object]] = None,
+        clock_ms: Optional[Callable[[], int]] = None,
+    ) -> None:
+        values = dict(settings or {})
+        self.configured_max_bots = max(1, int(configured_max_bots))
+        self.hard_max_bots = min(
+            SYSTEM_HARD_MAX_BOTS,
+            max(1, int(values.get("systemMaxBots", SYSTEM_HARD_MAX_BOTS))),
+        )
+        self.shard_size = max(1, int(shard_size))
+        self.cpu_soft_limit_percent = float(values.get("systemCpuSoftLimitPercent", 85.0))
+        self.memory_soft_limit_percent = float(values.get("systemMemorySoftLimitPercent", 85.0))
+        self.event_loop_lag_limit_ms = int(values.get("systemEventLoopLagSoftLimitMs", 500))
+        self.queue_wait_limit_ms = int(values.get("systemQueueWaitSoftLimitMs", 1000))
+        self.starvation_rate_limit = float(values.get("systemStarvationRateLimit", 0.10))
+        self.capacity_step_bots = max(1, int(values.get("systemCapacityStepBots", self.shard_size)))
+        self.recovery_healthy_seconds = float(values.get("systemRecoveryHealthySeconds", 60.0))
+        self.actor_memory_budget_bytes = max(
+            1, int(values.get("systemActorMemoryBudgetBytes", 32 * 1024 * 1024))
+        )
+        self.reserved_memory_bytes = max(
+            0, int(values.get("systemReservedMemoryBytes", 2 * 1024 * 1024 * 1024))
+        )
+        self._clock_ms = clock_ms or (lambda: int(time.time() * 1000))
+        self._effective_max_bots = min(self.configured_max_bots, self.hard_max_bots)
+        self._unhealthy_samples = 0
+        self._healthy_since_ms = 0
+        self._last_reduced_at_ms = 0
+        self._last_recovered_at_ms = 0
+        self._last_snapshot = self._make_snapshot(
+            resource_capacity=self._effective_max_bots,
+            health_capacity=self._effective_max_bots,
+        )
+        # Apply static host capacity before the first screener update so a
+        # large fleet cannot briefly launch above the memory budget while the
+        # first monitoring tick is still pending.
+        self.evaluate(())
+
+    @property
+    def effective_max_bots(self) -> int:
+        return self._effective_max_bots
+
+    @staticmethod
+    def _row_number(row: Mapping[str, object], *keys: str) -> float:
+        for key in keys:
+            value = row.get(key)
+            if isinstance(value, (int, float)):
+                return float(value)
+        return 0.0
+
+    def _resource_capacity(self) -> tuple[int, float, float]:
+        total_memory, _available_memory = _host_memory_bytes()
+        memory_percent = 0.0
+        if total_memory > 0:
+            memory_percent = max(0.0, min(100.0, (total_memory - _available_memory) * 100.0 / total_memory))
+            budget = int(total_memory * self.memory_soft_limit_percent / 100.0) - self.reserved_memory_bytes
+            memory_capacity = max(0, budget // self.actor_memory_budget_bytes)
+        else:
+            memory_capacity = self.configured_max_bots
+        return min(self.configured_max_bots, self.hard_max_bots, memory_capacity), 0.0, memory_percent
+
+    def _make_snapshot(
+        self,
+        *,
+        resource_capacity: int,
+        health_capacity: int,
+        reason: str = "",
+        cpu_percent: float = 0.0,
+        memory_percent: float = 0.0,
+        worker_cpu_percent: float = 0.0,
+        worker_memory_rss_bytes: int = 0,
+        max_event_loop_lag_ms: int = 0,
+        max_queue_wait_ms: int = 0,
+        starved_workers: int = 0,
+        total_workers: int = 0,
+    ) -> SystemCapacity:
+        workers_retained = max(1, math.ceil(self._effective_max_bots / self.shard_size))
+        configured_workers = max(1, math.ceil(min(self.configured_max_bots, self.hard_max_bots) / self.shard_size))
+        return SystemCapacity(
+            configured_max_bots=self.configured_max_bots,
+            hard_max_bots=self.hard_max_bots,
+            effective_max_bots=self._effective_max_bots,
+            resource_capacity=max(0, int(resource_capacity)),
+            health_capacity=max(0, int(health_capacity)),
+            reason=reason,
+            cpu_percent=round(cpu_percent, 3),
+            memory_percent=round(memory_percent, 3),
+            worker_cpu_percent=round(worker_cpu_percent, 3),
+            worker_memory_rss_bytes=int(worker_memory_rss_bytes),
+            max_event_loop_lag_ms=int(max_event_loop_lag_ms),
+            max_queue_wait_ms=int(max_queue_wait_ms),
+            starved_workers=int(starved_workers),
+            total_workers=int(total_workers),
+            unhealthy_samples=self._unhealthy_samples,
+            healthy_since_ms=self._healthy_since_ms,
+            last_reduced_at_ms=self._last_reduced_at_ms,
+            last_recovered_at_ms=self._last_recovered_at_ms,
+            active_worker_budget=self._effective_max_bots,
+            workers_retained=workers_retained,
+            workers_scaled_down=max(0, configured_workers - workers_retained),
+        )
+
+    def evaluate(
+        self,
+        worker_rows: Iterable[Mapping[str, object]] = (),
+        *,
+        now_ms: Optional[int] = None,
+    ) -> SystemCapacity:
+        now = int(now_ms if now_ms is not None else self._clock_ms())
+        rows = tuple(worker_rows)
+        resource_capacity, _unused_cpu, memory_percent = self._resource_capacity()
+        cpu_count = max(1, int(os.cpu_count() or 1))
+        worker_cpu_percent = sum(self._row_number(row, "cpuPercent", "cpu_percent") for row in rows)
+        cpu_percent = worker_cpu_percent / cpu_count
+        worker_memory_rss_bytes = int(sum(self._row_number(row, "memoryRssBytes", "memory_rss_bytes") for row in rows))
+        starved_workers = sum(1 for row in rows if bool(row.get("starved")))
+        total_workers = len(rows)
+        starved_ratio = starved_workers / total_workers if total_workers else 0.0
+        max_loop_lag = max((self._row_number(row, "eventLoopLagMs", "event_loop_lag_ms") for row in rows), default=0.0)
+        max_queue_wait = max((self._row_number(row, "commandWaitMs", "command_wait_ms", "commandOldestAgeMs") for row in rows), default=0.0)
+        recent_recovery = any(
+            now - int(self._row_number(row, "lastRecoveryAtMs", "last_recovery_at_ms")) <= 60_000
+            for row in rows
+            if self._row_number(row, "lastRecoveryAtMs", "last_recovery_at_ms") > 0
+        )
+        unhealthy_reasons: list[str] = []
+        if cpu_percent >= self.cpu_soft_limit_percent:
+            unhealthy_reasons.append("cpu")
+        if memory_percent >= self.memory_soft_limit_percent:
+            unhealthy_reasons.append("memory")
+        if starved_workers and starved_ratio >= self.starvation_rate_limit:
+            unhealthy_reasons.append("worker_starvation")
+        if max_loop_lag >= self.event_loop_lag_limit_ms:
+            unhealthy_reasons.append("event_loop_lag")
+        if max_queue_wait >= self.queue_wait_limit_ms:
+            unhealthy_reasons.append("queue_wait")
+        if recent_recovery:
+            unhealthy_reasons.append("worker_recovery")
+
+        if unhealthy_reasons:
+            self._unhealthy_samples += 1
+            self._healthy_since_ms = 0
+            health_capacity = max(0, self._effective_max_bots - self.capacity_step_bots)
+            if self._unhealthy_samples >= 2:
+                target = min(resource_capacity, health_capacity)
+                if target < self._effective_max_bots:
+                    self._effective_max_bots = max(target, self._effective_max_bots - self.capacity_step_bots)
+                    self._last_reduced_at_ms = now
+            reason = unhealthy_reasons[0]
+        else:
+            self._unhealthy_samples = 0
+            if not self._healthy_since_ms:
+                self._healthy_since_ms = now
+            baseline = min(self.configured_max_bots, self.hard_max_bots, resource_capacity)
+            if self._effective_max_bots > baseline:
+                self._effective_max_bots = baseline
+                self._last_reduced_at_ms = now
+            elif (
+                self._effective_max_bots < baseline
+                and now - self._healthy_since_ms >= int(self.recovery_healthy_seconds * 1000)
+            ):
+                self._effective_max_bots = min(baseline, self._effective_max_bots + self.capacity_step_bots)
+                self._last_recovered_at_ms = now
+            health_capacity = self._effective_max_bots
+            reason = "resource_memory" if resource_capacity < min(self.configured_max_bots, self.hard_max_bots) else ""
+        self._last_snapshot = self._make_snapshot(
+            resource_capacity=resource_capacity,
+            health_capacity=health_capacity,
+            reason=reason,
+            cpu_percent=cpu_percent,
+            memory_percent=memory_percent,
+            worker_cpu_percent=worker_cpu_percent,
+            worker_memory_rss_bytes=worker_memory_rss_bytes,
+            max_event_loop_lag_ms=int(max_loop_lag),
+            max_queue_wait_ms=int(max_queue_wait),
+            starved_workers=starved_workers,
+            total_workers=total_workers,
+        )
+        return self._last_snapshot
+
+    def snapshot(self) -> SystemCapacity:
+        return self._last_snapshot
 
 
 def calculate_fleet_capacity(
@@ -93,6 +338,10 @@ def calculate_fleet_capacity(
         capacity_limited=bool(gate_open and not capacity_ok),
         omitted_markets=max(0, requested_markets - admitted_markets),
         omitted_reason=("capacity" if gate_open and not capacity_ok else "; ".join(errors)),
+        venue_capacity_limit=capacity_market_limit,
+        venue_quote_side_capacity=normal_sides,
+        venue_capacity_limited=bool(gate_open and not capacity_ok),
+        venue_capacity_reason=("capacity" if gate_open and not capacity_ok else "; ".join(errors)),
     )
 
 

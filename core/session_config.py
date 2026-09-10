@@ -223,6 +223,21 @@ def default_session_configuration() -> Dict[str, Any]:
             # making progress.  Recycle a shard that cannot start any actor
             # within this interval, while leaving progressing shards alone.
             "startupProgressTimeoutSeconds": 90.0,
+            # Fleet-wide adaptive admission.  Venue API/capital capacity is
+            # evaluated separately by each venue manager; these settings only
+            # protect the shared host and worker fleet.
+            "systemMaxBots": MAX_CONCURRENT_BOTS,
+            "systemCpuSoftLimitPercent": 85.0,
+            "systemMemorySoftLimitPercent": 85.0,
+            "systemEventLoopLagSoftLimitMs": 500,
+            "systemQueueWaitSoftLimitMs": 1000,
+            "systemStarvationRateLimit": 0.10,
+            "systemCapacityStepBots": DEFAULT_SHARD_SIZE,
+            "systemRecoveryHealthySeconds": 60.0,
+            # Conservative projected actor budget used only for the initial
+            # host-capacity estimate; live RSS remains the runtime signal.
+            "systemActorMemoryBudgetBytes": 32 * 1024 * 1024,
+            "systemReservedMemoryBytes": 2 * 1024 * 1024 * 1024,
             # Polymarket startup fallbacks share a small account-read gate so
             # a failed generation cannot burst one positions/orders request
             # per market through the venue.
@@ -460,6 +475,16 @@ def validate_session_configuration(value: Mapping[str, Any]) -> Dict[str, Any]:
         "workerStaleSeconds", "startupTimeoutSeconds",
         "startupProgressTimeoutSeconds",
         "workerIoThreads",
+        "systemMaxBots",
+        "systemCpuSoftLimitPercent",
+        "systemMemorySoftLimitPercent",
+        "systemEventLoopLagSoftLimitMs",
+        "systemQueueWaitSoftLimitMs",
+        "systemStarvationRateLimit",
+        "systemCapacityStepBots",
+        "systemRecoveryHealthySeconds",
+        "systemActorMemoryBudgetBytes",
+        "systemReservedMemoryBytes",
         "polymarketStartupAccountReadConcurrency",
         "startupAccountSnapshotMaxAgeSeconds",
         "riskWindowSeconds", "riskElevatedMoveCents", "riskExtremeMoveCents", "riskStaleSeconds",
@@ -467,7 +492,11 @@ def validate_session_configuration(value: Mapping[str, Any]) -> Dict[str, Any]:
         fleet[key] = _require_number(
             fleet[key],
             f"fleetRuntime.{key}",
-            integer=key == "workerIoThreads",
+            integer=key in {
+                "workerIoThreads", "systemMaxBots", "systemEventLoopLagSoftLimitMs",
+                "systemQueueWaitSoftLimitMs", "systemCapacityStepBots",
+                "systemActorMemoryBudgetBytes", "systemReservedMemoryBytes",
+            },
         )
     if not 1.0 <= fleet["allocationOversubscription"] <= 10.0:
         raise ValueError("fleetRuntime.allocationOversubscription must be between 1.0 and 10.0")
@@ -498,6 +527,26 @@ def validate_session_configuration(value: Mapping[str, Any]) -> Dict[str, Any]:
         raise ValueError("fleetRuntime.workerIoThreads must be between 1 and 32")
     if fleet["startupProgressTimeoutSeconds"] <= 0:
         raise ValueError("fleetRuntime.startupProgressTimeoutSeconds must be > 0")
+    if not 1 <= fleet["systemMaxBots"] <= MAX_CONCURRENT_BOTS:
+        raise ValueError(f"fleetRuntime.systemMaxBots must be between 1 and {MAX_CONCURRENT_BOTS}")
+    if not 0 < fleet["systemCpuSoftLimitPercent"] <= 100:
+        raise ValueError("fleetRuntime.systemCpuSoftLimitPercent must be between 0 and 100")
+    if not 0 < fleet["systemMemorySoftLimitPercent"] <= 100:
+        raise ValueError("fleetRuntime.systemMemorySoftLimitPercent must be between 0 and 100")
+    if fleet["systemEventLoopLagSoftLimitMs"] <= 0:
+        raise ValueError("fleetRuntime.systemEventLoopLagSoftLimitMs must be > 0")
+    if fleet["systemQueueWaitSoftLimitMs"] <= 0:
+        raise ValueError("fleetRuntime.systemQueueWaitSoftLimitMs must be > 0")
+    if not 0 < fleet["systemStarvationRateLimit"] <= 1:
+        raise ValueError("fleetRuntime.systemStarvationRateLimit must be between 0 and 1")
+    if not 1 <= fleet["systemCapacityStepBots"] <= DEFAULT_SHARD_SIZE:
+        raise ValueError(f"fleetRuntime.systemCapacityStepBots must be between 1 and {DEFAULT_SHARD_SIZE}")
+    if fleet["systemRecoveryHealthySeconds"] <= 0:
+        raise ValueError("fleetRuntime.systemRecoveryHealthySeconds must be > 0")
+    if fleet["systemActorMemoryBudgetBytes"] <= 0 or fleet["systemReservedMemoryBytes"] < 0:
+        raise ValueError("fleetRuntime system memory budgets are invalid")
+    if fleet["systemMaxBots"] > fleet["shardSize"] * MAX_WORKERS:
+        raise ValueError("fleetRuntime.systemMaxBots does not fit the configured worker capacity")
     if not 1 <= fleet["polymarketStartupAccountReadConcurrency"] <= 8:
         raise ValueError("fleetRuntime.polymarketStartupAccountReadConcurrency must be between 1 and 8")
     if fleet["startupAccountSnapshotMaxAgeSeconds"] <= 0:

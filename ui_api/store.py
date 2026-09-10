@@ -2013,6 +2013,8 @@ class OperationsStore:
             "workers": data.get("workers") or [],
             "broker": data.get("broker") or {},
             "capacity": data.get("capacity"),
+            "systemCapacity": data.get("systemCapacity"),
+            "venueCapacity": data.get("venueCapacity") or data.get("capacity"),
             "allocation": data.get("allocation"),
             "clients": clients,
             "screener": screener,

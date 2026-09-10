@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
-import type { ApiActivity, ClientMonitoring, Monitoring, ScreenerRun, ScreenerRunSummary } from "@/lib/types";
+import type { ApiActivity, ClientMonitoring, Monitoring, ScreenerRun, ScreenerRunSummary, SystemCapacity, VenueCapacity } from "@/lib/types";
 import { Money, StatusBadge, Time } from "./status";
 
 export function formatDuration(milliseconds?: number | null) {
@@ -112,6 +112,63 @@ function bytes(value?: number | null) {
   const labels = ["B", "KB", "MB", "GB"]; let size = value; let index = 0;
   while (size >= 1024 && index < labels.length - 1) { size /= 1024; index += 1; }
   return `${size.toFixed(index ? 1 : 0)} ${labels[index]}`;
+}
+
+type CapacityRecord = Record<string, unknown> | null | undefined;
+function capacityNumber(value: CapacityRecord, ...keys: string[]) {
+  for (const key of keys) {
+    const candidate = value?.[key];
+    if (typeof candidate === "number" && Number.isFinite(candidate)) return candidate;
+  }
+  return undefined;
+}
+function capacityBoolean(value: CapacityRecord, ...keys: string[]) {
+  for (const key of keys) {
+    const candidate = value?.[key];
+    if (typeof candidate === "boolean") return candidate;
+  }
+  return undefined;
+}
+function capacityString(value: CapacityRecord, ...keys: string[]) {
+  for (const key of keys) {
+    const candidate = value?.[key];
+    if (typeof candidate === "string" && candidate.trim()) return candidate;
+  }
+  return undefined;
+}
+function milliseconds(value?: number | null) {
+  if (value == null) return "Unavailable";
+  return value < 1000 ? `${Math.round(value)} ms` : `${(value / 1000).toFixed(1)} s`;
+}
+function percentage(value?: number | null) {
+  return value == null ? "Unavailable" : `${value.toFixed(1)}%`;
+}
+function capacityReasonLabel(reason?: string | null) {
+  const normalized = reason?.trim().toLowerCase();
+  if (!normalized) return "healthy";
+  const labels: Record<string, string> = {
+    cpu: "CPU limited",
+    memory: "memory limited",
+    resource_cpu: "CPU limited",
+    resource_memory: "memory limited",
+    worker_starvation: "worker-starvation limited",
+    event_loop_lag: "event-loop-lag limited",
+    queue_wait: "queue-wait limited",
+    worker_recovery: "worker-recovery limited",
+    global_capacity: "global capacity limited",
+    capacity: "Venue/API limited",
+  };
+  return labels[normalized] ?? normalized.replaceAll("_", " ");
+}
+function capacityState(capacity: SystemCapacity | null | undefined, clockMs: number) {
+  if (!capacity) return "unavailable";
+  const reason = capacityReasonLabel(capacityString(capacity, "systemCapacityReason", "reason"));
+  if (reason !== "healthy") return reason;
+  const effective = capacityNumber(capacity, "effectiveMaxBots");
+  const configured = capacityNumber(capacity, "configuredMaxBots");
+  const healthySince = capacityNumber(capacity, "healthySinceMs");
+  if (effective != null && configured != null && effective < configured && healthySince != null && clockMs - healthySince < 60_000) return "recovery cooldown";
+  return "healthy";
 }
 
 function MonitoringColumnChooser({ preferences, onToggle, onMove }: { preferences: MonitoringPreferences; onToggle: (kind: MonitoringTableKind, id: string) => void; onMove: (kind: MonitoringTableKind, id: string, direction: -1 | 1) => void }) {
@@ -334,6 +391,18 @@ export function LiveMonitoring({ initial }: { initial: Monitoring }) {
   const shardHealth = manager.shardHealth;
   const venues = data.venues ?? [];
   const workers = data.workers ?? [];
+  const systemCapacity = data.systemCapacity ?? null;
+  const allocation = data.allocation as CapacityRecord;
+  const effectiveSystemCapacity = capacityNumber(systemCapacity, "effectiveMaxBots");
+  const configuredSystemCapacity = capacityNumber(systemCapacity, "configuredMaxBots");
+  const admittedMarkets = capacityNumber(allocation, "admittedMarkets") ?? manager.botsRunning;
+  const slotsRemaining = capacityNumber(allocation, "slotsRemaining") ?? (effectiveSystemCapacity != null && admittedMarkets != null ? Math.max(0, effectiveSystemCapacity - admittedMarkets) : undefined);
+  const systemCapacityState = capacityState(systemCapacity, clockMs);
+  const rawVenueCapacity = data.venueCapacity ?? (data.capacity as Record<string, VenueCapacity> | null | undefined);
+  const capacityEntries = Object.entries(rawVenueCapacity ?? {}).filter(([, value]) => value && typeof value === "object") as Array<[string, VenueCapacity]>;
+  const venueCapacityRows = capacityEntries.length
+    ? capacityEntries
+    : venues.filter(venue => venue.capacity).map((venue): [string, VenueCapacity] => [venue.venue, venue.capacity as VenueCapacity]);
   const apiCell = useCallback((row: NonNullable<Monitoring["venues"]>[number], id: string): ReactNode => {
     const rest = row.apiActivity?.rest; const stream = row.apiActivity?.stream;
     switch (id) {
@@ -394,6 +463,23 @@ export function LiveMonitoring({ initial }: { initial: Monitoring }) {
   return <>
     <header className="page-header"><div><span className="eyebrow">LIVE TELEMETRY</span><h1>Monitoring</h1><p>Aggregate venue, shard, transport, and market activity.</p></div><div className="metrics-header-actions"><MonitoringColumnChooser preferences={preferences} onToggle={toggle} onMove={move} /><div className="header-status"><StatusBadge value={manager.lifecycle} /><span className={connected ? "positive" : "negative"}>{connected ? "Live" : "Reconnecting"}</span></div></div></header>
     {(data.source.stale || data.warnings.length > 0) && <section className="warning-panel"><strong>Monitoring data may be stale</strong><ul>{data.warnings.map(item => <li key={item}>{item}</li>)}</ul></section>}
+    <section className="panel capacity-panel" aria-label="Fleet capacity">
+      <div className="panel-heading"><div><span className="eyebrow">CAPACITY</span><h2>Fleet capacity</h2></div><span><StatusBadge value={systemCapacityState === "healthy" ? "ok" : systemCapacityState === "unavailable" ? "unknown" : "limited"} /> <small>{systemCapacityState}</small></span></div>
+      <section className="metrics capacity-summary" aria-label="System capacity summary">
+        <article><span>Effective bot capacity</span><strong>{formatCount(effectiveSystemCapacity)}<small> / {formatCount(configuredSystemCapacity)}</small></strong><p>Hard cap {formatCount(capacityNumber(systemCapacity, "hardMaxBots"))} · {formatCount(slotsRemaining)} slots remaining</p></article>
+        <article><span>Admitted markets</span><strong>{formatCount(admittedMarkets)}</strong><p>Current fleet allocation</p></article>
+        <article><span>Resource capacity</span><strong>{formatCount(capacityNumber(systemCapacity, "resourceCapacity"))}</strong><p>Health capacity {formatCount(capacityNumber(systemCapacity, "healthCapacity"))}</p></article>
+        <article><span>CPU / memory</span><strong>{percentage(capacityNumber(systemCapacity, "cpuPercent"))}</strong><p>{percentage(capacityNumber(systemCapacity, "memoryPercent"))} host memory · {bytes(capacityNumber(systemCapacity, "workerMemoryRssBytes"))} workers</p></article>
+        <article><span>Starved workers</span><strong>{formatCount(capacityNumber(systemCapacity, "starvedWorkers"))}<small> / {formatCount(capacityNumber(systemCapacity, "totalWorkers"))}</small></strong><p>{formatCount(capacityNumber(systemCapacity, "unhealthySamples"))} unhealthy samples</p></article>
+        <article><span>Queue / event-loop pressure</span><strong>{milliseconds(capacityNumber(systemCapacity, "maxQueueWaitMs"))}</strong><p>{milliseconds(capacityNumber(systemCapacity, "maxEventLoopLagMs"))} event-loop lag</p></article>
+        <article><span>Worker budget</span><strong>{formatCount(capacityNumber(systemCapacity, "activeWorkerBudget"))}</strong><p>{formatCount(capacityNumber(systemCapacity, "workersRetained"))} retained · {formatCount(capacityNumber(systemCapacity, "workersScaledDown"))} scaled down</p></article>
+        <article><span>Capacity reason</span><strong className="small-value">{systemCapacityState}</strong><p>Healthy since <Time value={capacityNumber(systemCapacity, "healthySinceMs")} /></p></article>
+      </section>
+      <div className="grid-two capacity-detail-grid">
+        <div><div className="panel-heading"><div><span className="eyebrow">SYSTEM LIMITS</span><h3>Scaling diagnostics</h3></div></div><dl className="details"><div><dt>Last reduced</dt><dd><Time value={capacityNumber(systemCapacity, "lastReducedAtMs")} /></dd></div><div><dt>Last recovered</dt><dd><Time value={capacityNumber(systemCapacity, "lastRecoveredAtMs")} /></dd></div><div><dt>Worker CPU</dt><dd>{percentage(capacityNumber(systemCapacity, "workerCpuPercent"))}</dd></div><div><dt>Queue wait</dt><dd>{milliseconds(capacityNumber(systemCapacity, "maxQueueWaitMs"))}</dd></div></dl></div>
+        <div><div className="panel-heading"><div><span className="eyebrow">VENUE LIMITS</span><h3>Venue capacity</h3></div><strong>{venueCapacityRows.length} venues</strong></div><div className="table-wrap capacity-table"><table><thead><tr><th>Venue</th><th>Markets</th><th>Quote sides</th><th>Write refill</th><th>State</th><th>Reason</th></tr></thead><tbody>{venueCapacityRows.map(([venue, capacity]) => { const marketLimit = capacityNumber(capacity, "venueCapacityLimit", "capacityMarketLimit", "venue_capacity_limit", "capacity_market_limit"); const admitted = capacityNumber(capacity, "admittedMarkets", "admitted_markets"); const quoteSides = capacityNumber(capacity, "venueQuoteSideCapacity", "normalQuoteSideCapacity", "venue_quote_side_capacity", "normal_quote_side_capacity"); const admittedQuoteSides = capacityNumber(capacity, "admittedQuoteSides", "admitted_quote_sides"); const refill = capacityNumber(capacity, "writeRefillRate", "write_refill_rate"); const limited = capacityBoolean(capacity, "venueCapacityLimited", "capacityLimited", "venue_capacity_limited", "capacity_limited"); const reason = capacityReasonLabel(capacityString(capacity, "venueCapacityReason", "omittedReason", "venue_capacity_reason", "omitted_reason")); return <tr key={venue}><td><strong>{venue}</strong></td><td>{formatCount(admitted)}<small> / {formatCount(marketLimit)}</small></td><td>{formatCount(admittedQuoteSides)}<small> / {formatCount(quoteSides)}</small></td><td>{formatCount(refill)}</td><td><StatusBadge value={limited ? "limited" : "ok"} /></td><td>{limited ? reason : "healthy"}</td></tr>; })}</tbody></table>{venueCapacityRows.length === 0 && <p className="empty">No venue capacity data is available.</p>}</div></div>
+      </div>
+    </section>
     <section className="metrics"><article><span>Active venues</span><strong>{activeVenues?.length ?? "Unavailable"}</strong><p>{activeVenues?.join(" · ") || "No venue data available"}</p></article><article><span>Active shards</span><strong>{shardHealth?.activeShards ?? "Unavailable"}<small> / {shardHealth?.totalShards ?? "Unavailable"}</small></strong><p>{shardHealth?.degradedShards ?? "—"} degraded · {shardHealth?.starvedShards ?? "—"} starved</p></article><article><span>Active actors</span><strong>{shardHealth?.activeActors ?? manager.botsRunning ?? "Unavailable"}</strong><p>{shardHealth?.recoveringShards ?? "—"} shards recovering</p></article><article><span>Resource consumption</span><strong>{shardHealth?.totalCpuPercent == null ? "Unavailable" : `${shardHealth.totalCpuPercent.toFixed(1)}%`}</strong><p>{bytes(shardHealth?.totalMemoryRssBytes)} memory</p></article><article><span>Last heartbeat</span><strong>{formatDuration(shardHealth?.oldestHeartbeatAgeMs)}</strong><p>oldest shard heartbeat age</p></article><article><span>Bots running</span><strong>{manager.botsRunning ?? "Unavailable"}<small> / {manager.configuredBots ?? "Unavailable"}</small></strong><p>Manager uptime {formatDuration(manager.startedAtMs ? clockMs - manager.startedAtMs : manager.runningForMs)}</p></article><article><span>Session P&amp;L</span><strong><Money cents={pnl?.totalCents} signed /></strong><p><Money cents={pnl?.realizedCents} signed /> realized · {pnl?.fills ?? "Unavailable"} fills{pnl?.complete === false ? " · partial" : ""}</p></article><article><span>Total API requests</span><strong>{manager.apiActivity?.rest?.total ?? "Unavailable"}</strong><p>{manager.apiActivity?.rest?.requestsLast60s ?? "Unavailable"} REST / min · {manager.apiActivity?.rest?.errors ?? "Unavailable"} errors</p></article></section>
     <section className="panel"><div className="panel-heading"><div><span className="eyebrow">API INFORMATION</span><h2>Venue transport activity</h2></div><strong>{venues.length} venues</strong></div><MonitoringTable kind="api" rows={venues} preferences={preferences.api} widths={widths.api} sort={sorts.api} rowKey={row => row.venue} sortValue={apiSort} renderCell={apiCell} empty="No per-venue API activity is available." onSort={id => selectSort("api", id)} onReorder={(source, target, position) => reorder("api", source, target, position)} onResize={(id, width) => resize("api", id, width)} /></section>
     <section className="panel"><div className="panel-heading"><div><span className="eyebrow">SHARDS</span><h2>Shard health</h2></div><strong>{workers.length} shards</strong></div><MonitoringTable kind="shards" rows={workers} preferences={preferences.shards} widths={widths.shards} sort={sorts.shards} rowKey={row => `${row.venue}:${row.workerId}`} sortValue={shardSort} renderCell={shardCell} empty="No shards are currently reporting." onSort={id => selectSort("shards", id)} onReorder={(source, target, position) => reorder("shards", source, target, position)} onResize={(id, width) => resize("shards", id, width)} /></section>

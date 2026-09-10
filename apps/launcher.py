@@ -462,6 +462,8 @@ class Launcher:
             "workers": manager_status.get("workers", []),
             "broker": manager_status.get("broker", {}),
             "capacity": manager_status.get("capacity"),
+            "systemCapacity": manager_status.get("systemCapacity"),
+            "venueCapacity": manager_status.get("venueCapacity") or manager_status.get("capacity"),
             "allocation": manager_status.get("allocation"),
             "manager": manager_monitoring,
             "clients": manager_status.get("clients", []),

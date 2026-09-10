@@ -31,6 +31,8 @@ def fixture_store(root: Path) -> OperationsStore:
         "launcher": {"lifecycle": "running", "heartbeatAt": 9999999999999},
         "bots": [], "counts": {},
         "manager": {"running": True, "botsRunning": 1, "pnl": {"totalCents": 12.5}},
+        "systemCapacity": {"configuredMaxBots": 500, "effectiveMaxBots": 475, "reason": "worker_starvation"},
+        "venueCapacity": {"kalshi": {"venueCapacityLimit": 255, "admittedQuoteSides": 2}},
         "venueMonitoring": [{"venue": "kalshi", "active": True, "botsRunning": 1, "configuredBots": 1, "apiActivity": {"rest": {"total": 9}}}],
         "clients": [{
             "marketId": "TEST-1", "title": "Test market",
@@ -84,6 +86,8 @@ async def test_monitoring_contract_and_client_detail():
         assert snapshot.status_code == 200
         assert snapshot.json()["manager"]["botsRunning"] == 1
         assert snapshot.json()["venues"][0]["apiActivity"]["rest"]["total"] == 9
+        assert snapshot.json()["systemCapacity"]["effectiveMaxBots"] == 475
+        assert snapshot.json()["venueCapacity"]["kalshi"]["venueCapacityLimit"] == 255
         assert snapshot.json()["screener"]["generationId"] == 3
         assert detail.json()["client"]["apiActivity"]["rest"]["total"] == 4
 
