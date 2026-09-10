@@ -18,6 +18,7 @@ import time
 import uuid
 from collections import deque
 from dataclasses import dataclass
+from dataclasses import replace
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional
@@ -69,6 +70,24 @@ def resolve_event_loop_lag(
         if measured_event_loop_lag_ms is not None
         else fallback_event_loop_lag_ms
     )
+
+
+def offer_latest_heartbeat(handoff: queue.Queue[Any], heartbeat: Any) -> bool:
+    """Put the newest heartbeat in a bounded handoff, replacing stale data."""
+    try:
+        handoff.put_nowait(heartbeat)
+        return False
+    except queue.Full:
+        pass
+    try:
+        handoff.get_nowait()
+    except queue.Empty:
+        pass
+    try:
+        handoff.put_nowait(heartbeat)
+    except queue.Full:
+        return False
+    return True
 
 
 # Markets reconciled concurrently. add_actor/remove_actor each make several
@@ -460,8 +479,21 @@ class FleetWorkerProcess(mp.Process):
         subscriptions_ready = asyncio.Event()
         add_wakeup = asyncio.Event()
         heartbeat_thread_stop = threading.Event()
+        # The async loop only replaces the newest heartbeat in this local
+        # one-slot handoff.  The existing fallback thread performs the
+        # potentially blocking multiprocessing-queue write.
+        heartbeat_handoff: queue.Queue[WorkerHeartbeat] = queue.Queue(maxsize=1)
         heartbeat_signal = {"last_async_ms": 0}
         heartbeat_signal_lock = threading.Lock()
+        heartbeat_state_lock = threading.Lock()
+        heartbeat_state: dict[str, Any] = {
+            "assigned_tickers": (),
+            "pending_tickers": (),
+            "startup_attempts": {},
+            "startup_progress_at_ms": 0,
+            "startup_error": "",
+            "worker_error": "",
+        }
         heartbeat_sequence = 0
         fallback_heartbeat_count = 0
         last_fallback_at_ms = 0
@@ -477,6 +509,18 @@ class FleetWorkerProcess(mp.Process):
         recovery_count = 0
         last_recovery_at_ms = 0
         last_recovery_reason = ""
+        cached_rich_health: dict[str, MarketHealth] = {}
+        cached_diagnostic_revisions: dict[str, tuple[Any, ...]] = {}
+        cached_diagnostic_at_ms: dict[str, int] = {}
+        cached_api_activity: Mapping[str, object] = {}
+        cached_api_errors: Mapping[str, object] = {}
+        diagnostics_duration_ms = 0
+        telemetry_flush_ms = 0
+        heartbeat_build_ms = 0
+        heartbeat_publish_wait_ms = 0
+        heartbeat_coalesced_count = 0
+        last_rich_diagnostics_at_ms = 0
+        diagnostics_state_lock = threading.Lock()
         reconcile_lock = asyncio.Lock()
         stream_generation = 0
         # True between the first event of a (re)connected shard stream and
@@ -520,6 +564,56 @@ class FleetWorkerProcess(mp.Process):
         # Quiet-market re-sampling cadence is tied to the stale threshold
         # (see quiet_after_ms_for), not the move window.
         quiet_after_ms = quiet_after_ms_for(risk_thresholds.stale_after_ms)
+
+        def update_heartbeat_state() -> None:
+            """Publish a thread-safe liveness snapshot for the fallback thread."""
+            with actors_lock:
+                assigned_tickers = tuple(sorted(actors))
+            with heartbeat_state_lock:
+                heartbeat_state.update(
+                    {
+                        "assigned_tickers": assigned_tickers,
+                        "pending_tickers": tuple(sorted(pending_adds)),
+                        "startup_attempts": {
+                            ticker: int(item.attempts) for ticker, item in pending_adds.items()
+                        },
+                        "startup_progress_at_ms": int(startup_progress_at_ms),
+                        "startup_error": str(startup_error or ""),
+                        "worker_error": str(worker_error or ""),
+                    }
+                )
+
+        def heartbeat_state_snapshot() -> dict[str, Any]:
+            with heartbeat_state_lock:
+                return {
+                    "assigned_tickers": tuple(heartbeat_state["assigned_tickers"]),
+                    "pending_tickers": tuple(heartbeat_state["pending_tickers"]),
+                    "startup_attempts": dict(heartbeat_state["startup_attempts"]),
+                    "startup_progress_at_ms": int(heartbeat_state["startup_progress_at_ms"]),
+                    "startup_error": str(heartbeat_state["startup_error"] or ""),
+                    "worker_error": str(heartbeat_state["worker_error"] or ""),
+                }
+
+        def cached_diagnostics_snapshot(
+            *, include_health: bool = True,
+        ) -> tuple[dict[str, MarketHealth], Mapping[str, object], Mapping[str, object], int, int, int, int]:
+            with diagnostics_state_lock:
+                return (
+                    dict(cached_rich_health) if include_health else {},
+                    dict(cached_api_activity),
+                    dict(cached_api_errors),
+                    int(diagnostics_duration_ms),
+                    int(telemetry_flush_ms),
+                    int(last_rich_diagnostics_at_ms),
+                    int(heartbeat_publish_wait_ms),
+                )
+
+        def enqueue_heartbeat(heartbeat: WorkerHeartbeat) -> None:
+            """Replace an older unsent heartbeat without blocking the loop."""
+            nonlocal heartbeat_coalesced_count
+            if offer_latest_heartbeat(heartbeat_handoff, heartbeat):
+                with diagnostics_state_lock:
+                    heartbeat_coalesced_count += 1
 
         def override_key(pick: ScreenerPick | None) -> tuple[str, tuple[tuple[str, Any], ...]]:
             if pick is None:
@@ -1047,17 +1141,80 @@ class FleetWorkerProcess(mp.Process):
                 error=str(getattr(actor, "model_refresh_error", "") or ""),
             )
 
+        def merge_cached_market_health(
+            lightweight: MarketHealth,
+            cached_rich: Optional[MarketHealth],
+        ) -> MarketHealth:
+            """Keep liveness fields current while reusing rich diagnostics."""
+            if cached_rich is None:
+                return lightweight
+            return replace(
+                cached_rich,
+                book_available=lightweight.book_available,
+                book_age_ms=lightweight.book_age_ms,
+                decision_age_ms=lightweight.decision_age_ms,
+                risk_mode=lightweight.risk_mode,
+                risk_age_ms=lightweight.risk_age_ms,
+                resting_order_count=lightweight.resting_order_count,
+                position_units=lightweight.position_units,
+                error=lightweight.error,
+                started_at_ms=lightweight.started_at_ms,
+                fill_count=lightweight.fill_count,
+                risk_reason=lightweight.risk_reason,
+                last_quote_at_ms=lightweight.last_quote_at_ms,
+                last_order_create_at_ms=lightweight.last_order_create_at_ms,
+                last_fill_at_ms=lightweight.last_fill_at_ms,
+                price_units=lightweight.price_units,
+                price_source=lightweight.price_source,
+                price_at_ms=lightweight.price_at_ms,
+            )
+
+        def market_diagnostics_revision(actor: MarketActor) -> tuple[Any, ...]:
+            """Return a bounded fingerprint for rich-health cache invalidation."""
+            ticker_state = getattr(actor, "ticker_state", None)
+            markout_counts = tuple(
+                (str(key), int((value or {}).get("count", 0) or 0))
+                for key, value in getattr(actor, "session_markouts_by_horizon", {}).items()
+            )
+            order_activity = tuple(
+                (
+                    str(action),
+                    tuple(sorted((str(name), int(value)) for name, value in counters.items())),
+                )
+                for action, counters in getattr(actor, "order_activity", {}).items()
+            )
+            return (
+                int(getattr(actor, "session_fill_count", 0) or 0),
+                int(getattr(actor, "last_fill_timestamp_ms", 0) or 0),
+                int(getattr(actor, "last_orderbook_event_timestamp_ms", 0) or 0),
+                int(getattr(actor, "last_quote_decision_at_ms", 0) or 0),
+                int(getattr(ticker_state, "ts_ms", 0) or 0),
+                len(getattr(actor, "session_fill_timestamps_ms", ()) or ()),
+                markout_counts,
+                order_activity,
+            )
+
         def build_heartbeat(
             now: int,
             health: Mapping[str, MarketHealth],
             *,
             source: str,
             measured_event_loop_lag_ms: Optional[int] = None,
+            state: Optional[Mapping[str, Any]] = None,
         ) -> WorkerHeartbeat:
+            nonlocal heartbeat_build_ms
             nonlocal heartbeat_sequence, fallback_heartbeat_count, last_fallback_at_ms
             nonlocal event_loop_lag_ms, cpu_percent, last_cpu_process_seconds
             nonlocal last_cpu_sample_monotonic, warning_count, error_count
             nonlocal last_warning_seen, last_error_seen
+            build_started = time.perf_counter()
+            heartbeat_state_values = dict(state or heartbeat_state_snapshot())
+            assigned_tickers = tuple(heartbeat_state_values.get("assigned_tickers") or ())
+            pending_tickers = tuple(heartbeat_state_values.get("pending_tickers") or ())
+            startup_attempts_snapshot = dict(heartbeat_state_values.get("startup_attempts") or {})
+            current_startup_progress_at_ms = int(heartbeat_state_values.get("startup_progress_at_ms") or 0)
+            current_startup_error = str(heartbeat_state_values.get("startup_error") or "")
+            current_worker_error = str(heartbeat_state_values.get("worker_error") or "")
             with heartbeat_signal_lock:
                 heartbeat_sequence += 1
                 if source == "fallback":
@@ -1073,12 +1230,12 @@ class FleetWorkerProcess(mp.Process):
                     )
                     last_cpu_process_seconds = current_process_seconds
                     last_cpu_sample_monotonic = current_monotonic
-                if worker_error and worker_error != last_error_seen:
+                if current_worker_error and current_worker_error != last_error_seen:
                     error_count += 1
-                    last_error_seen = worker_error
-                if startup_error and startup_error != last_warning_seen:
+                    last_error_seen = current_worker_error
+                if current_startup_error and current_startup_error != last_warning_seen:
                     warning_count += 1
-                    last_warning_seen = startup_error
+                    last_warning_seen = current_startup_error
                 command_active = bool(command_state["active"])
                 command_age_ms = (
                     max(0, now - int(command_state["queued_at_ms"]))
@@ -1089,79 +1246,134 @@ class FleetWorkerProcess(mp.Process):
                     measured_event_loop_lag_ms,
                     event_loop_lag_ms,
                 )
-                return WorkerHeartbeat(
+                if source == "rich":
+                    event_loop_lag_ms = current_event_loop_lag
+                current_heartbeat_sequence = int(heartbeat_sequence)
+                current_cpu_percent = float(cpu_percent)
+                current_fallback_count = int(fallback_heartbeat_count)
+                current_last_fallback_at_ms = int(last_fallback_at_ms)
+                current_warning_count = int(warning_count)
+                current_error_count = int(error_count)
+                current_last_warning = str(last_warning_seen or "")
+                current_last_error = str(last_error_seen or "")
+                current_recovery_count = int(recovery_count)
+                current_last_recovery_at_ms = int(last_recovery_at_ms)
+                current_last_recovery_reason = str(last_recovery_reason or "")
+            (
+                _rich_cache,
+                api_activity,
+                api_errors,
+                current_diagnostics_ms,
+                current_telemetry_flush_ms,
+                current_rich_at_ms,
+                current_publish_wait_ms,
+            ) = cached_diagnostics_snapshot(include_health=False)
+            with diagnostics_state_lock:
+                current_build_ms = int(heartbeat_build_ms)
+                current_coalesced_count = int(heartbeat_coalesced_count)
+            heartbeat = WorkerHeartbeat(
                     self.worker_id,
-                    tuple(sorted(actors)),
+                    assigned_tickers,
                     health,
                     _rss_bytes(),
-                    len(pending_adds),
+                    len(pending_tickers),
                     max((item.book_age_ms or 0 for item in health.values()), default=0),
                     now,
                     self.venue,
-                    direct.activity_snapshot(),
-                    tuple(sorted(pending_adds)),
-                    {ticker: int(item.attempts) for ticker, item in pending_adds.items()},
-                    startup_progress_at_ms,
-                    startup_error,
-                    worker_error,
-                    api_errors=client.api_errors_snapshot(),
-                    heartbeat_sequence=heartbeat_sequence,
+                    api_activity,
+                    pending_tickers,
+                    startup_attempts_snapshot,
+                    current_startup_progress_at_ms,
+                    current_startup_error,
+                    current_worker_error,
+                    api_errors=api_errors,
+                    heartbeat_sequence=current_heartbeat_sequence,
                     heartbeat_source=source,
                     published_at_ms=now,
                     event_loop_lag_ms=current_event_loop_lag,
-                    cpu_percent=cpu_percent,
+                    cpu_percent=current_cpu_percent,
                     thread_count=threading.active_count(),
                     command_queue_depth=int(command_active),
                     command_oldest_age_ms=command_age_ms,
                     command_wait_ms=command_wait_ms,
-                    fallback_heartbeat_count=fallback_heartbeat_count,
-                    last_fallback_at_ms=last_fallback_at_ms,
-                    warning_count=warning_count,
-                    error_count=error_count,
-                    last_warning=startup_error,
-                    last_error=worker_error,
-                    recovery_count=recovery_count,
-                    last_recovery_at_ms=last_recovery_at_ms,
-                    last_recovery_reason=last_recovery_reason,
+                    fallback_heartbeat_count=current_fallback_count,
+                    last_fallback_at_ms=current_last_fallback_at_ms,
+                    warning_count=current_warning_count,
+                    error_count=current_error_count,
+                    last_warning=current_last_warning,
+                    last_error=current_last_error,
+                    recovery_count=current_recovery_count,
+                    last_recovery_at_ms=current_last_recovery_at_ms,
+                    last_recovery_reason=current_last_recovery_reason,
+                    heartbeat_build_ms=current_build_ms,
+                    diagnostics_duration_ms=current_diagnostics_ms,
+                    telemetry_flush_ms=current_telemetry_flush_ms,
+                    heartbeat_publish_wait_ms=current_publish_wait_ms,
+                    heartbeat_coalesced_count=current_coalesced_count,
+                    last_rich_diagnostics_at_ms=current_rich_at_ms,
                 )
+            with diagnostics_state_lock:
+                heartbeat_build_ms = max(
+                    0, int((time.perf_counter() - build_started) * 1000)
+                )
+                current_build_ms = int(heartbeat_build_ms)
+            return replace(heartbeat, heartbeat_build_ms=current_build_ms)
 
         def lightweight_heartbeat(now: int) -> WorkerHeartbeat:
-            """Build a watchdog-only heartbeat without touching SQLite.
-
-            The async heartbeat also includes P&L/markout and telemetry flushes.
-            Those are useful observability fields but can become expensive while
-            a busy shard is quoting.  A small thread-side heartbeat keeps the
-            manager's liveness and risk state current until the rich heartbeat
-            gets another scheduling turn.
-            """
+            """Build a watchdog-only heartbeat without touching SQLite."""
             with actors_lock:
                 actor_items = list(actors.items())
-            health = {ticker: market_health(actor, now, rich=False) for ticker, actor in actor_items}
-            return build_heartbeat(now, health, source="fallback")
+            rich_cache, *_ = cached_diagnostics_snapshot()
+            health = {
+                ticker: merge_cached_market_health(
+                    market_health(actor, now, rich=False), rich_cache.get(ticker)
+                )
+                for ticker, actor in actor_items
+            }
+            return build_heartbeat(
+                now,
+                health,
+                source="fallback",
+                state=heartbeat_state_snapshot(),
+            )
 
         def heartbeat_fallback_thread() -> None:
+            nonlocal heartbeat_publish_wait_ms
             # Let the async task publish its initial heartbeat first.  If the
             # event loop later becomes busy, this thread publishes before the
             # manager's stale threshold; a third-of-budget wake interval gives
             # it a fallback sample before it can recycle a healthy worker.
             stale_budget_seconds = float(fleet.get("workerStaleSeconds", 5.0))
             interval = max(0.25, min(heartbeat_seconds, stale_budget_seconds / 3.0))
-            while not heartbeat_thread_stop.wait(interval):
-                now = int(time.time() * 1000)
-                with heartbeat_signal_lock:
-                    last_async_ms = int(heartbeat_signal["last_async_ms"])
-                if last_async_ms and now - last_async_ms <= int(stale_budget_seconds * 500):
-                    continue
+            while not heartbeat_thread_stop.is_set():
                 try:
-                    heartbeat = lightweight_heartbeat(now)
+                    heartbeat = heartbeat_handoff.get(timeout=interval)
+                    fallback = False
+                except queue.Empty:
+                    now = int(time.time() * 1000)
+                    with heartbeat_signal_lock:
+                        last_async_ms = int(heartbeat_signal["last_async_ms"])
+                    if last_async_ms and now - last_async_ms <= int(stale_budget_seconds * 500):
+                        continue
+                    try:
+                        heartbeat = lightweight_heartbeat(now)
+                        fallback = True
+                    except Exception:
+                        log.exception("WORKER_HEARTBEAT_FALLBACK_ERROR")
+                        continue
+                try:
+                    publish_started = time.perf_counter()
                     self.heartbeat_queue.put(heartbeat)
-                    log.info("WORKER_HEARTBEAT_FALLBACK_SENT | actors=%d", len(heartbeat.market_health))
+                    publish_wait_ms = max(0, int((time.perf_counter() - publish_started) * 1000))
+                    with diagnostics_state_lock:
+                        heartbeat_publish_wait_ms = publish_wait_ms
+                    if fallback:
+                        log.info("WORKER_HEARTBEAT_FALLBACK_SENT | actors=%d", len(heartbeat.market_health))
                 except Exception:
                     log.exception("WORKER_HEARTBEAT_FALLBACK_ERROR")
 
         async def heartbeat_loop() -> None:
             nonlocal worker_error
-            nonlocal last_retention_ms
             heartbeat_count = 0
             last_heartbeat_log_ms = 0
             last_heartbeat_monotonic = time.monotonic()
@@ -1174,7 +1386,15 @@ class FleetWorkerProcess(mp.Process):
                         (current_monotonic - last_heartbeat_monotonic - heartbeat_seconds) * 1000.0,
                     )
                     last_heartbeat_monotonic = current_monotonic
-                    health = {ticker: market_health(actor, now, rich=True) for ticker, actor in actors.items()}
+                    with actors_lock:
+                        actor_items = list(actors.items())
+                    rich_cache, *_ = cached_diagnostics_snapshot()
+                    health = {
+                        ticker: merge_cached_market_health(
+                            market_health(actor, now, rich=False), rich_cache.get(ticker)
+                        )
+                        for ticker, actor in actor_items
+                    }
                     # Markets still waiting for their actor stay visible as
                     # ``startup`` with the retry state as the reason.
                     for ticker, item in list(pending_adds.items()):
@@ -1191,13 +1411,15 @@ class FleetWorkerProcess(mp.Process):
                             book_available=False, book_age_ms=None, decision_age_ms=None,
                             risk_mode="startup", risk_age_ms=None, error=reason,
                         )
+                    update_heartbeat_state()
                     heartbeat = build_heartbeat(
                         now,
                         health,
                         source="rich",
                         measured_event_loop_lag_ms=int(event_loop_delay),
+                        state=heartbeat_state_snapshot(),
                     )
-                    self.heartbeat_queue.put(heartbeat)
+                    enqueue_heartbeat(heartbeat)
                     with heartbeat_signal_lock:
                         heartbeat_signal["last_async_ms"] = now
                     heartbeat_count += 1
@@ -1207,12 +1429,6 @@ class FleetWorkerProcess(mp.Process):
                             heartbeat_count, len(actors), len(pending_adds),
                         )
                         last_heartbeat_log_ms = now
-                    if actors:
-                        telemetry = next(iter(actors.values())).telemetry_store
-                        telemetry.flush()
-                        if now - last_retention_ms >= 86_400_000:
-                            telemetry.apply_retention(now_timestamp_ms=now, raw_days=7)
-                            last_retention_ms = now
                 except Exception as exc:
                     # A telemetry/metrics failure must not silently terminate
                     # the heartbeat task.  Keep the manager informed with a
@@ -1220,9 +1436,22 @@ class FleetWorkerProcess(mp.Process):
                     # repeatedly recycled as stale.
                     log.exception("WORKER_HEARTBEAT_ERROR | error=%s", exc)
                     worker_error = str(exc)
-                    fallback_health = {ticker: market_health(actor, now, rich=False) for ticker, actor in actors.items()}
+                    with actors_lock:
+                        actor_items = list(actors.items())
+                    fallback_health = {
+                        ticker: market_health(actor, now, rich=False)
+                        for ticker, actor in actor_items
+                    }
+                    update_heartbeat_state()
                     try:
-                        self.heartbeat_queue.put(build_heartbeat(now, fallback_health, source="fallback"))
+                        enqueue_heartbeat(
+                            build_heartbeat(
+                                now,
+                                fallback_health,
+                                source="fallback",
+                                state=heartbeat_state_snapshot(),
+                            )
+                        )
                         with heartbeat_signal_lock:
                             heartbeat_signal["last_async_ms"] = now
                         heartbeat_count += 1
@@ -1235,6 +1464,104 @@ class FleetWorkerProcess(mp.Process):
                     except Exception:
                         log.exception("WORKER_HEARTBEAT_FALLBACK_ERROR")
                 await asyncio.sleep(heartbeat_seconds)
+
+        async def diagnostics_loop() -> None:
+            """Refresh rich market diagnostics without blocking liveness."""
+            nonlocal cached_rich_health, cached_diagnostic_revisions, cached_diagnostic_at_ms
+            nonlocal cached_api_activity, cached_api_errors
+            nonlocal diagnostics_duration_ms, last_rich_diagnostics_at_ms, worker_error
+            interval_seconds = 5.0
+            while not stop_requested.is_set():
+                started = time.perf_counter()
+                now = int(time.time() * 1000)
+                with actors_lock:
+                    actor_items = list(actors.items())
+                refreshed: dict[str, MarketHealth] = {}
+                refreshed_revisions: dict[str, tuple[Any, ...]] = {}
+                refreshed_at_ms: dict[str, int] = {}
+                with diagnostics_state_lock:
+                    previous_health = dict(cached_rich_health)
+                    previous_revisions = dict(cached_diagnostic_revisions)
+                    previous_at_ms = dict(cached_diagnostic_at_ms)
+                for index, (ticker, actor) in enumerate(actor_items):
+                    revision = market_diagnostics_revision(actor)
+                    if (
+                        ticker in previous_health
+                        and previous_revisions.get(ticker) == revision
+                        and now - int(previous_at_ms.get(ticker, 0) or 0) < int(interval_seconds * 1000)
+                    ):
+                        refreshed[ticker] = previous_health[ticker]
+                        refreshed_revisions[ticker] = revision
+                        refreshed_at_ms[ticker] = int(previous_at_ms[ticker])
+                        continue
+                    try:
+                        refreshed[ticker] = market_health(actor, now, rich=True)
+                        refreshed_revisions[ticker] = revision
+                        refreshed_at_ms[ticker] = now
+                    except Exception as exc:
+                        worker_error = f"diagnostics: {exc}"
+                        log.exception("WORKER_DIAGNOSTICS_ERROR | ticker=%s error=%s", ticker, exc)
+                        if ticker in previous_health:
+                            refreshed[ticker] = previous_health[ticker]
+                            refreshed_revisions[ticker] = previous_revisions.get(ticker, revision)
+                            refreshed_at_ms[ticker] = int(previous_at_ms.get(ticker, now))
+                    if index % 4 == 3:
+                        await asyncio.sleep(0)
+                try:
+                    activity = await asyncio.to_thread(direct.activity_snapshot)
+                except Exception as exc:
+                    worker_error = f"diagnostics activity: {exc}"
+                    log.exception("WORKER_DIAGNOSTICS_ACTIVITY_ERROR | error=%s", exc)
+                    activity = None
+                try:
+                    api_errors = await asyncio.to_thread(client.api_errors_snapshot)
+                except Exception as exc:
+                    worker_error = f"diagnostics api errors: {exc}"
+                    log.exception("WORKER_DIAGNOSTICS_API_ERROR | error=%s", exc)
+                    api_errors = None
+                duration_ms = max(0, int((time.perf_counter() - started) * 1000))
+                with diagnostics_state_lock:
+                    cached_rich_health = refreshed
+                    cached_diagnostic_revisions = refreshed_revisions
+                    cached_diagnostic_at_ms = refreshed_at_ms
+                    if activity is not None:
+                        cached_api_activity = dict(activity)
+                    if api_errors is not None:
+                        cached_api_errors = dict(api_errors)
+                    diagnostics_duration_ms = duration_ms
+                    last_rich_diagnostics_at_ms = now
+                update_heartbeat_state()
+                await asyncio.sleep(interval_seconds)
+
+        async def telemetry_persistence_loop() -> None:
+            """Flush shard SQLite outside the liveness heartbeat task."""
+            nonlocal last_retention_ms, telemetry_flush_ms, worker_error
+            while not stop_requested.is_set():
+                await asyncio.sleep(5.0)
+                with actors_lock:
+                    actor_items = list(actors.values())
+                if not actor_items:
+                    continue
+                telemetry = actor_items[0].telemetry_store
+                started = time.perf_counter()
+                try:
+                    await asyncio.to_thread(telemetry.flush)
+                    now = int(time.time() * 1000)
+                    if now - last_retention_ms >= 86_400_000:
+                        await asyncio.to_thread(
+                            telemetry.apply_retention,
+                            now_timestamp_ms=now,
+                            raw_days=7,
+                        )
+                        last_retention_ms = now
+                    flush_duration_ms = max(0, int((time.perf_counter() - started) * 1000))
+                    with diagnostics_state_lock:
+                        telemetry_flush_ms = flush_duration_ms
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    worker_error = f"telemetry: {exc}"
+                    log.exception("WORKER_TELEMETRY_ERROR | error=%s", exc)
 
         async def supervised(name: str, factory) -> None:
             nonlocal worker_error
@@ -1255,6 +1582,8 @@ class FleetWorkerProcess(mp.Process):
             asyncio.create_task(supervised("add_loop", add_loop)),
             asyncio.create_task(supervised("stream_loop", stream_loop)),
             asyncio.create_task(supervised("risk_loop", risk_loop)),
+            asyncio.create_task(supervised("diagnostics_loop", diagnostics_loop)),
+            asyncio.create_task(supervised("telemetry_persistence_loop", telemetry_persistence_loop)),
             asyncio.create_task(supervised("heartbeat_loop", heartbeat_loop)),
         ]
         heartbeat_thread = threading.Thread(
@@ -1290,6 +1619,18 @@ class FleetWorkerProcess(mp.Process):
             for task in tasks:
                 task.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
+            with actors_lock:
+                shutdown_actors = list(actors.values())
+            if shutdown_actors:
+                try:
+                    await asyncio.wait_for(
+                        asyncio.to_thread(shutdown_actors[0].telemetry_store.flush),
+                        timeout=2.0,
+                    )
+                except asyncio.TimeoutError:
+                    log.warning("WORKER_TELEMETRY_FLUSH_TIMEOUT | phase=shutdown")
+                except Exception as exc:
+                    log.warning("WORKER_TELEMETRY_FLUSH_ERROR | phase=shutdown error=%s", exc)
             try:
                 await direct.close()
                 client.close_dispatcher()

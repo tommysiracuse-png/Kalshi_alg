@@ -2794,10 +2794,15 @@ class MarketActor:
                 self.session_markouts_by_horizon.get(key)
                 or empty_markout_aggregate(horizon_ms)
             )
-            pending = sum(
-                1 for timestamp_ms in self.session_fill_timestamps_ms
-                if timestamp_ms + horizon_ms > current
-            )
+            # Fill timestamps are appended chronologically.  Once the
+            # reverse scan reaches a settled fill, all older fills are also
+            # settled for this horizon; avoid rescanning the entire session
+            # history on every worker diagnostic heartbeat.
+            pending = 0
+            for timestamp_ms in reversed(self.session_fill_timestamps_ms):
+                if timestamp_ms + horizon_ms <= current:
+                    break
+                pending += 1
             result[key] = finalize_aggregate(
                 aggregate,
                 total_fill_count=self.session_fill_count,

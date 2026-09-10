@@ -121,6 +121,14 @@ class WorkerHeartbeat:
     recovery_count: int = 0
     last_recovery_at_ms: int = 0
     last_recovery_reason: str = ""
+    # Heartbeat-path timing is additive runtime telemetry.  Defaults keep
+    # older workers and persisted/test fixtures wire-compatible.
+    heartbeat_build_ms: int = 0
+    diagnostics_duration_ms: int = 0
+    telemetry_flush_ms: int = 0
+    heartbeat_publish_wait_ms: int = 0
+    heartbeat_coalesced_count: int = 0
+    last_rich_diagnostics_at_ms: int = 0
 
 
 @dataclass(frozen=True)

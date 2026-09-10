@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import queue
 from pathlib import Path
 
 import pytest
@@ -38,6 +39,7 @@ from fleet_runtime.worker import (
     evaluate_market_risk,
     is_market_data_event,
     observe_stream_event,
+    offer_latest_heartbeat,
     quiet_after_ms_for,
     quiet_market_sample,
     resolve_event_loop_lag,
@@ -114,6 +116,13 @@ def test_rolling_token_spend_tracks_actual_costs_and_partial_window():
 def test_worker_heartbeat_uses_measured_event_loop_lag_without_undefined_name():
     assert resolve_event_loop_lag(2_180, 0) == 2_180
     assert resolve_event_loop_lag(None, 37) == 37
+
+
+def test_heartbeat_handoff_replaces_stale_samples_without_growing():
+    handoff = queue.Queue(maxsize=1)
+    assert offer_latest_heartbeat(handoff, "first") is False
+    assert offer_latest_heartbeat(handoff, "latest") is True
+    assert handoff.get_nowait() == "latest"
 
 
 def test_rejected_token_request_is_not_recorded_as_spend():
