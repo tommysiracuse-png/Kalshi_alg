@@ -522,6 +522,12 @@ class KalshiApiClient(BaseClient):
         if monitor is not None:
             monitor.record_stream(event, event_type=event_type)
 
+    def _record_stream_message_result(self, started_at: float, *, success: bool) -> None:
+        monitor = getattr(self.websocket_client, "activity", None)
+        recorder = getattr(monitor, "record_stream_message", None)
+        if callable(recorder):
+            recorder(latency_ms=(time.perf_counter() - started_at) * 1000.0, success=success)
+
     def sign_message(self, message_bytes: bytes) -> str:
         self._require_authentication()
         signature = self.private_key.sign(
@@ -1494,9 +1500,11 @@ class KalshiApiClient(BaseClient):
                     self._record_stream_activity("event", event_type="reset")
                     yield StreamReset(ticker)
                 LOGGER.info("WS_CONNECTED_AND_SUBSCRIBED | market_count=%s", len(self._stream_market_ids))
+                message_started_at = 0.0
                 async for raw_message in self.websocket_client:
                     if self._closed:
                         return
+                    message_started_at = time.perf_counter()
                     data = json.loads(raw_message)
                     if data.get("type") == "subscribed":
                         message = data.get("msg") or {}
@@ -1504,10 +1512,14 @@ class KalshiApiClient(BaseClient):
                         sid = message.get("sid")
                         if channel and isinstance(sid, int):
                             self._subscription_sids[channel] = sid
+                        self._record_stream_message_result(message_started_at, success=True)
+                        message_started_at = 0.0
                         continue
                     fallback_market = next(iter(self._stream_market_ids)) if len(self._stream_market_ids) == 1 else ""
                     event = self._event(data, fallback_market)
                     if event is not None and event.market_id not in self._stream_market_ids:
+                        self._record_stream_message_result(message_started_at, success=True)
+                        message_started_at = 0.0
                         continue
                     is_orderbook_event = isinstance(event, (OrderBookSnapshot, OrderBookDelta))
                     raw_sid = data.get("sid")
@@ -1546,18 +1558,26 @@ class KalshiApiClient(BaseClient):
                         if "orderbook_delta" not in self._subscription_sids:
                             # Without the server SID a targeted snapshot cannot
                             # be requested, so use the safe reconnect path.
+                            self._record_stream_message_result(message_started_at, success=True)
+                            message_started_at = 0.0
                             break
                         await self._update_subscription(
                             tuple(sorted(affected_markets)), "get_snapshot", channels={"orderbook_delta"}
                         )
                         for ticker in sorted(affected_markets):
                             yield StreamReset(ticker)
+                        self._record_stream_message_result(message_started_at, success=True)
+                        message_started_at = 0.0
                         continue
 
                     if isinstance(event, OrderBookSnapshot):
                         self._unavailable_books.discard(event.market_id)
                     elif isinstance(event, OrderBookDelta) and event.market_id in self._unavailable_books:
+                        self._record_stream_message_result(message_started_at, success=True)
+                        message_started_at = 0.0
                         continue
+                    self._record_stream_message_result(message_started_at, success=True)
+                    message_started_at = 0.0
                     if event is not None:
                         self._record_stream_activity(
                             "event", event_type=type(event).__name__
@@ -1566,6 +1586,9 @@ class KalshiApiClient(BaseClient):
             except Exception as exc:
                 if self._closed:
                     return
+                if message_started_at:
+                    self._record_stream_message_result(message_started_at, success=False)
+                    message_started_at = 0.0
                 self._record_stream_activity("adapterErrors")
                 LOGGER.info("WS_DISCONNECT | error=%s reconnect_backoff_seconds=%s", exc, backoff)
                 await asyncio.sleep(backoff)

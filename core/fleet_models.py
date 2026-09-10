@@ -101,6 +101,26 @@ class WorkerHeartbeat:
     startup_error: str = ""
     worker_error: str = ""
     api_errors: Mapping[str, object] = field(default_factory=dict)
+    # Additive liveness/resource fields.  Defaults keep rolling deployments
+    # and older test fixtures wire-compatible with the current heartbeat.
+    heartbeat_sequence: int = 0
+    heartbeat_source: str = "rich"
+    published_at_ms: int = 0
+    event_loop_lag_ms: int = 0
+    cpu_percent: float = 0.0
+    thread_count: int = 0
+    command_queue_depth: int = 0
+    command_oldest_age_ms: int = 0
+    command_wait_ms: int = 0
+    fallback_heartbeat_count: int = 0
+    last_fallback_at_ms: int = 0
+    warning_count: int = 0
+    error_count: int = 0
+    last_warning: str = ""
+    last_error: str = ""
+    recovery_count: int = 0
+    last_recovery_at_ms: int = 0
+    last_recovery_reason: str = ""
 
 
 @dataclass(frozen=True)

@@ -473,6 +473,12 @@ class PolymarketClient(BaseClient):
             thread_name_prefix="polymarket-io",
         )
 
+    def _record_stream_message_result(self, started_at: float, *, success: bool, websocket: Any = None) -> None:
+        monitor = getattr(websocket or self.websocket_client, "activity", None)
+        recorder = getattr(monitor, "record_stream_message", None)
+        if callable(recorder):
+            recorder(latency_ms=(time.perf_counter() - started_at) * 1000.0, success=success)
+
     def begin_screener_scan(self) -> None:
         self._screener_cancel.clear()
 
@@ -2122,7 +2128,14 @@ class PolymarketClient(BaseClient):
             try:
                 await self._user_websocket.subscribe([self._user_subscription()])
                 async for raw in self._user_websocket:
-                    for event in self._parse_user_ws_message(raw):
+                    started_at = time.perf_counter()
+                    try:
+                        events = list(self._parse_user_ws_message(raw))
+                    except Exception:
+                        self._record_stream_message_result(started_at, success=False, websocket=self._user_websocket)
+                        raise
+                    self._record_stream_message_result(started_at, success=True, websocket=self._user_websocket)
+                    for event in events:
                         yield event
                 raise ConnectionError("Polymarket user stream ended")
             except asyncio.CancelledError:
@@ -2155,7 +2168,14 @@ class PolymarketClient(BaseClient):
         })])
         self._market_stream_started = True
         async for raw in self.websocket_client:
-            for event in self._parse_ws_message(raw, market_id):
+            started_at = time.perf_counter()
+            try:
+                events = list(self._parse_ws_message(raw, market_id))
+            except Exception:
+                self._record_stream_message_result(started_at, success=False)
+                raise
+            self._record_stream_message_result(started_at, success=True)
+            for event in events:
                 yield event
 
     async def stream_events_many(self, market_ids: Sequence[str], *, include_position_updates: bool = True) -> AsyncIterator[MarketEvent]:
@@ -2170,7 +2190,14 @@ class PolymarketClient(BaseClient):
         })])
         self._market_stream_started = True
         async for raw in self.websocket_client:
-            for event in self._parse_ws_message(raw):
+            started_at = time.perf_counter()
+            try:
+                events = list(self._parse_ws_message(raw))
+            except Exception:
+                self._record_stream_message_result(started_at, success=False)
+                raise
+            self._record_stream_message_result(started_at, success=True)
+            for event in events:
                 yield event
 
     async def bootstrap_market_books(

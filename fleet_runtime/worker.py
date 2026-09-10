@@ -450,6 +450,21 @@ class FleetWorkerProcess(mp.Process):
         heartbeat_thread_stop = threading.Event()
         heartbeat_signal = {"last_async_ms": 0}
         heartbeat_signal_lock = threading.Lock()
+        heartbeat_sequence = 0
+        fallback_heartbeat_count = 0
+        last_fallback_at_ms = 0
+        event_loop_lag_ms = 0
+        cpu_percent = 0.0
+        last_cpu_process_seconds = time.process_time()
+        last_cpu_sample_monotonic = time.monotonic()
+        command_state = {"active": False, "queued_at_ms": 0, "wait_ms": 0}
+        warning_count = 0
+        error_count = 0
+        last_warning_seen = ""
+        last_error_seen = ""
+        recovery_count = 0
+        last_recovery_at_ms = 0
+        last_recovery_reason = ""
         reconcile_lock = asyncio.Lock()
         stream_generation = 0
         # True between the first event of a (re)connected shard stream and
@@ -739,6 +754,11 @@ class FleetWorkerProcess(mp.Process):
                     await asyncio.sleep(1.0)
                     continue
                 action = str(command.get("action") or "")
+                command_received_at = int(time.time() * 1000)
+                with heartbeat_signal_lock:
+                    command_state["active"] = True
+                    command_state["queued_at_ms"] = int(command.get("queuedAtMs") or command_received_at)
+                    command_state["wait_ms"] = max(0, command_received_at - command_state["queued_at_ms"])
                 try:
                     if action == "reconcile":
                         if shutdown_frozen:
@@ -851,6 +871,10 @@ class FleetWorkerProcess(mp.Process):
                         quoting_enabled = False
                         for actor in actors.values():
                             actor.set_quoting_enabled(False)
+                finally:
+                    with heartbeat_signal_lock:
+                        command_state["active"] = False
+                        command_state["queued_at_ms"] = 0
 
         async def add_loop() -> None:
             while not stop_requested.is_set():
@@ -1011,6 +1035,81 @@ class FleetWorkerProcess(mp.Process):
                 error=str(getattr(actor, "model_refresh_error", "") or ""),
             )
 
+        def build_heartbeat(
+            now: int,
+            health: Mapping[str, MarketHealth],
+            *,
+            source: str,
+            event_lag: Optional[int] = None,
+        ) -> WorkerHeartbeat:
+            nonlocal heartbeat_sequence, fallback_heartbeat_count, last_fallback_at_ms
+            nonlocal event_loop_lag_ms, cpu_percent, last_cpu_process_seconds
+            nonlocal last_cpu_sample_monotonic, warning_count, error_count
+            nonlocal last_warning_seen, last_error_seen
+            with heartbeat_signal_lock:
+                heartbeat_sequence += 1
+                if source == "fallback":
+                    fallback_heartbeat_count += 1
+                    last_fallback_at_ms = now
+                if source == "rich":
+                    current_process_seconds = time.process_time()
+                    current_monotonic = time.monotonic()
+                    elapsed = max(0.001, current_monotonic - last_cpu_sample_monotonic)
+                    cpu_percent = max(
+                        0.0,
+                        min(10000.0, (current_process_seconds - last_cpu_process_seconds) / elapsed * 100.0),
+                    )
+                    last_cpu_process_seconds = current_process_seconds
+                    last_cpu_sample_monotonic = current_monotonic
+                if worker_error and worker_error != last_error_seen:
+                    error_count += 1
+                    last_error_seen = worker_error
+                if startup_error and startup_error != last_warning_seen:
+                    warning_count += 1
+                    last_warning_seen = startup_error
+                command_active = bool(command_state["active"])
+                command_age_ms = (
+                    max(0, now - int(command_state["queued_at_ms"]))
+                    if command_active and command_state["queued_at_ms"] else 0
+                )
+                command_wait_ms = int(command_state["wait_ms"])
+                current_event_loop_lag = int(event_loop_lag if event_lag is not None else event_loop_lag_ms)
+                return WorkerHeartbeat(
+                    self.worker_id,
+                    tuple(sorted(actors)),
+                    health,
+                    _rss_bytes(),
+                    len(pending_adds),
+                    max((item.book_age_ms or 0 for item in health.values()), default=0),
+                    now,
+                    self.venue,
+                    direct.activity_snapshot(),
+                    tuple(sorted(pending_adds)),
+                    {ticker: int(item.attempts) for ticker, item in pending_adds.items()},
+                    startup_progress_at_ms,
+                    startup_error,
+                    worker_error,
+                    api_errors=client.api_errors_snapshot(),
+                    heartbeat_sequence=heartbeat_sequence,
+                    heartbeat_source=source,
+                    published_at_ms=now,
+                    event_loop_lag_ms=current_event_loop_lag,
+                    cpu_percent=cpu_percent,
+                    thread_count=threading.active_count(),
+                    command_queue_depth=int(command_active),
+                    command_oldest_age_ms=command_age_ms,
+                    command_wait_ms=command_wait_ms,
+                    fallback_heartbeat_count=fallback_heartbeat_count,
+                    last_fallback_at_ms=last_fallback_at_ms,
+                    warning_count=warning_count,
+                    error_count=error_count,
+                    last_warning=startup_error,
+                    last_error=worker_error,
+                    recovery_count=recovery_count,
+                    last_recovery_at_ms=last_recovery_at_ms,
+                    last_recovery_reason=last_recovery_reason,
+                )
+
         def lightweight_heartbeat(now: int) -> WorkerHeartbeat:
             """Build a watchdog-only heartbeat without touching SQLite.
 
@@ -1023,23 +1122,7 @@ class FleetWorkerProcess(mp.Process):
             with actors_lock:
                 actor_items = list(actors.items())
             health = {ticker: market_health(actor, now, rich=False) for ticker, actor in actor_items}
-            return WorkerHeartbeat(
-                self.worker_id,
-                tuple(sorted(health)),
-                health,
-                _rss_bytes(),
-                len(pending_adds),
-                max((item.book_age_ms or 0 for item in health.values()), default=0),
-                now,
-                self.venue,
-                direct.activity_snapshot(),
-                tuple(sorted(pending_adds)),
-                {ticker: int(item.attempts) for ticker, item in pending_adds.items()},
-                startup_progress_at_ms,
-                startup_error,
-                worker_error,
-                api_errors=client.api_errors_snapshot(),
-            )
+            return build_heartbeat(now, health, source="fallback")
 
         def heartbeat_fallback_thread() -> None:
             # Let the async task publish its initial heartbeat first.  If the
@@ -1066,9 +1149,16 @@ class FleetWorkerProcess(mp.Process):
             nonlocal last_retention_ms
             heartbeat_count = 0
             last_heartbeat_log_ms = 0
+            last_heartbeat_monotonic = time.monotonic()
             while not stop_requested.is_set():
                 now = int(time.time() * 1000)
                 try:
+                    current_monotonic = time.monotonic()
+                    event_loop_delay = max(
+                        0.0,
+                        (current_monotonic - last_heartbeat_monotonic - heartbeat_seconds) * 1000.0,
+                    )
+                    last_heartbeat_monotonic = current_monotonic
                     health = {ticker: market_health(actor, now, rich=True) for ticker, actor in actors.items()}
                     # Markets still waiting for their actor stay visible as
                     # ``startup`` with the retry state as the reason.
@@ -1086,18 +1176,10 @@ class FleetWorkerProcess(mp.Process):
                             book_available=False, book_age_ms=None, decision_age_ms=None,
                             risk_mode="startup", risk_age_ms=None, error=reason,
                         )
-                    self.heartbeat_queue.put(WorkerHeartbeat(
-                        self.worker_id, tuple(sorted(actors)), health, _rss_bytes(),
-                        len(pending_adds), max((item.book_age_ms or 0 for item in health.values()), default=0), now,
-                        self.venue,
-                        direct.activity_snapshot(),
-                        tuple(sorted(pending_adds)),
-                        {ticker: int(item.attempts) for ticker, item in pending_adds.items()},
-                        startup_progress_at_ms,
-                        startup_error,
-                        worker_error,
-                        api_errors=client.api_errors_snapshot(),
-                    ))
+                    heartbeat = build_heartbeat(
+                        now, health, source="rich", event_lag=int(event_loop_delay)
+                    )
+                    self.heartbeat_queue.put(heartbeat)
                     with heartbeat_signal_lock:
                         heartbeat_signal["last_async_ms"] = now
                     heartbeat_count += 1
@@ -1122,17 +1204,7 @@ class FleetWorkerProcess(mp.Process):
                     worker_error = str(exc)
                     fallback_health = {ticker: market_health(actor, now, rich=False) for ticker, actor in actors.items()}
                     try:
-                        self.heartbeat_queue.put(WorkerHeartbeat(
-                            self.worker_id, tuple(sorted(actors)), fallback_health, _rss_bytes(),
-                            len(pending_adds), 0, now, self.venue,
-                            direct.activity_snapshot(),
-                            tuple(sorted(pending_adds)),
-                            {ticker: int(item.attempts) for ticker, item in pending_adds.items()},
-                            startup_progress_at_ms,
-                            startup_error,
-                            worker_error,
-                            api_errors=client.api_errors_snapshot(),
-                        ))
+                        self.heartbeat_queue.put(build_heartbeat(now, fallback_health, source="fallback"))
                         with heartbeat_signal_lock:
                             heartbeat_signal["last_async_ms"] = now
                         heartbeat_count += 1

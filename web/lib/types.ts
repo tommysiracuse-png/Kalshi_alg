@@ -136,8 +136,8 @@ export type Overview = {
 export type Market = { ticker: string; title: string; rank?: number; expectedEdgeCents?: number; quotedEdgeCents?: number; watchdogMode: string; watchdogConfidence?: number; watchdogReason?: string; botRunning: boolean; disabled: boolean; pnl?: { netPosition: number; totalCents: number }; source?: Record<string, SourceState> };
 
 export type ApiActivity = {
-  rest?: { total?: number; successes?: number; errors?: number; requestsLast60s?: number; averageLatencyMs?: number; lastActivityAtMs?: number; byMethod?: Record<string, number>; byOperation?: Record<string, number>; byStatus?: Record<string, number> };
-  stream?: { connections?: number; reconnects?: number; connectionErrors?: number; streamErrors?: number; adapterErrors?: number; subscriptionsSent?: number; message?: number; event?: number; messagesLast60s?: number; sequenceResets?: number; lastActivityAtMs?: number; byEventType?: Record<string, number> };
+  rest?: { total?: number; successes?: number; errors?: number; requestsLast60s?: number; averageLatencyMs?: number; lastActivityAtMs?: number; disconnects?: number; lastDisconnectAtMs?: number; byMethod?: Record<string, number>; byOperation?: Record<string, number>; byStatus?: Record<string, number> };
+  stream?: { connections?: number; disconnects?: number; closes?: number; reconnects?: number; connectionErrors?: number; streamErrors?: number; adapterErrors?: number; subscriptionsSent?: number; message?: number; messages?: number; messageSuccesses?: number; messageFailures?: number; totalMessageLatencyMs?: number; averageMessageLatencyMs?: number; event?: number; messagesLast60s?: number; sequenceResets?: number; lastActivityAtMs?: number; lastMessageAtMs?: number; lastDisconnectAtMs?: number; byEventType?: Record<string, number> };
   openInterest?: { batches?: number; marketsRequested?: number; marketsResolved?: number; marketsMissing?: number; apiErrors?: number; forbiddenResponses?: number; cloudflare403?: number; retries?: number; retryExhausted?: number; suppressedRequests?: number };
   openInterestDiagnostics?: { lastCloudflare?: { atMs?: number; statusCode?: number; batch?: number; attempt?: number; cfRay?: string; cfCacheStatus?: string; server?: string; retryAfter?: string } | null };
 };
@@ -160,10 +160,10 @@ export type ClientMonitoring = {
 };
 export type Monitoring = {
   generatedAt: number; schemaVersion?: number; source: SourceState; warnings: string[];
-  manager: { running?: boolean; lifecycle?: string; startedAtMs?: number; runningForMs?: number; activeVenues?: string[]; configuredBots?: number; botsRunning?: number; portfolio?: { items?: Array<{ marketId: string; title?: string; positionUnits?: number | null; updatedAtMs?: number; stale?: boolean; available?: boolean }>; grossPositionUnits?: number; netPositionUnits?: number; unknownMarkets?: number; staleMarkets?: number }; pnl?: PnlTotals; apiActivity?: ApiActivity; threadBudget?: Record<string, number | null> };
+  manager: { running?: boolean; lifecycle?: string; startedAtMs?: number; runningForMs?: number; activeVenues?: string[]; configuredBots?: number; botsRunning?: number; portfolio?: { items?: Array<{ marketId: string; title?: string; positionUnits?: number | null; updatedAtMs?: number; stale?: boolean; available?: boolean }>; grossPositionUnits?: number; netPositionUnits?: number; unknownMarkets?: number; staleMarkets?: number }; pnl?: PnlTotals; apiActivity?: ApiActivity; threadBudget?: Record<string, number | null>; shardHealth?: ShardHealth };
   venues?: Array<{ venue: string; active: boolean; botsRunning: number; configuredBots: number; apiActivity?: ApiActivity }>;
   clients: ClientMonitoring[];
-  workers?: Array<{ venue?: string; workerId: string; pid?: number; running: boolean; phase?: string; lastRecoveryError?: string | null; recoveryReason?: string | null; startedAtMs?: number | null; runningForMs?: number | null; assignedMarkets: number; marketIds?: string[]; botsRunning?: number; startupPendingMarkets?: string[]; startupAttempts?: Record<string, number>; startupProgressAtMs?: number | null; startupElapsedMs?: number; lastStartupError?: string | null; workerError?: string | null; watchdog?: { mode?: string; counts?: Record<string, number> }; heartbeatAtMs?: number | null; stale: boolean; memoryRssBytes?: number | null; queueDepth?: number | null; eventLagMs?: number | null; apiActivity?: ApiActivity; apiErrors?: ApiErrors }>;
+  workers?: Array<{ venue?: string; workerId: string; pid?: number; running: boolean; phase?: string; lastRecoveryError?: string | null; recoveryReason?: string | null; startedAtMs?: number | null; runningForMs?: number | null; assignedMarkets: number; marketIds?: string[]; botsRunning?: number; startupPendingMarkets?: string[]; startupAttempts?: Record<string, number>; startupProgressAtMs?: number | null; startupElapsedMs?: number; lastStartupError?: string | null; workerError?: string | null; watchdog?: { mode?: string; counts?: Record<string, number> }; heartbeatAtMs?: number | null; heartbeatReceivedAtMs?: number | null; heartbeatAgeMs?: number | null; heartbeatSequence?: number | null; heartbeatSource?: string | null; heartbeatQueueLagMs?: number | null; stale: boolean; degraded?: boolean; starved?: boolean; recovering?: boolean; memoryRssBytes?: number | null; cpuPercent?: number | null; threadCount?: number | null; queueDepth?: number | null; commandQueueDepth?: number | null; commandOldestAgeMs?: number | null; commandWaitMs?: number | null; eventLagMs?: number | null; eventLoopLagMs?: number | null; fallbackHeartbeatCount?: number; lastFallbackAtMs?: number | null; warningCount?: number; errorCount?: number; lastWarning?: string | null; lastError?: string | null; recoveryCount?: number; lastRecoveryAtMs?: number | null; apiActivity?: ApiActivity; apiErrors?: ApiErrors }>;
   threadBudget?: Record<string, number | null>;
   broker?: { pid?: number | null; running?: boolean; queue?: { queueWaitMs?: Record<string, unknown> }; apiActivity?: ApiActivity; apiErrors?: ApiErrors };
   capacity?: Record<string, unknown> | null;
@@ -177,6 +177,22 @@ export type Monitoring = {
     lastRun?: ScreenerRunMetrics; scanMetadata?: Record<string, unknown>;
     history?: ScreenerRun[]; historySummary?: ScreenerRunSummary; historyNextCursor?: string | null; historyWarnings?: string[];
   };
+};
+
+export type ShardHealth = {
+  activeShards?: number;
+  totalShards?: number;
+  activeActors?: number;
+  totalMemoryRssBytes?: number;
+  totalCpuPercent?: number;
+  staleShards?: number;
+  degradedShards?: number;
+  starvedShards?: number;
+  recoveringShards?: number;
+  oldestHeartbeatAgeMs?: number | null;
+  latestHeartbeatAtMs?: number | null;
+  recoveryCount?: number;
+  lastRecoveryAtMs?: number | null;
 };
 
 export type ScreenerRunMetrics = {

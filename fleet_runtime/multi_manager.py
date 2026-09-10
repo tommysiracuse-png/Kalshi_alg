@@ -193,6 +193,27 @@ class MultiVenueBotManager:
                 item.get("apiActivity") or {} for item in venue_status.values()
             ),
         }
+        worker_rows = [worker for item in venue_status.values() for worker in item.get("workers", [])]
+        heartbeat_ages = [int(item["heartbeatAgeMs"]) for item in worker_rows if item.get("heartbeatAgeMs") is not None]
+        heartbeat_times = [int(item["heartbeatAtMs"]) for item in worker_rows if item.get("heartbeatAtMs")]
+        monitoring["shardHealth"] = {
+            "activeShards": sum(1 for item in worker_rows if item.get("running") and not item.get("stale")),
+            "totalShards": len(worker_rows),
+            "activeActors": sum(int(item.get("botsRunning") or 0) for item in worker_rows),
+            "totalMemoryRssBytes": sum(int(item.get("memoryRssBytes") or 0) for item in worker_rows),
+            "totalCpuPercent": round(sum(float(item.get("cpuPercent") or 0.0) for item in worker_rows), 3),
+            "staleShards": sum(1 for item in worker_rows if item.get("stale")),
+            "degradedShards": sum(1 for item in worker_rows if item.get("degraded")),
+            "starvedShards": sum(1 for item in worker_rows if item.get("starved")),
+            "recoveringShards": sum(1 for item in worker_rows if item.get("recovering")),
+            "oldestHeartbeatAgeMs": max(heartbeat_ages, default=None),
+            "latestHeartbeatAtMs": max(heartbeat_times, default=None),
+            "recoveryCount": sum(int(item.get("recoveryCount") or 0) for item in worker_rows),
+            "lastRecoveryAtMs": max(
+                (int(item["lastRecoveryAtMs"]) for item in worker_rows if item.get("lastRecoveryAtMs")),
+                default=None,
+            ),
+        }
         return {
             "venues": venue_status,
             "counts": {"configuredBots": configured, "activeBots": active},

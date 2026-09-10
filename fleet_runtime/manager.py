@@ -157,6 +157,9 @@ class ManagedWorker:
     startup_error: str = ""
     worker_error: str = ""
     recovery_reason: str = ""
+    last_heartbeat_received_at_ms: int = 0
+    recovery_count: int = 0
+    last_recovery_at_ms: int = 0
 
 
 def _startup_snapshot_from_payload(payload: Mapping[str, Any]) -> StartupAccountSnapshot:
@@ -520,7 +523,12 @@ class ShardedBotManager:
             managed.startup_error = ""
             managed.worker_error = ""
         managed.phase = "reconciling" if action == "reconcile" else "quiescing" if action == "freeze" else "stopping"
-        managed.command_queue.put({"request_id": request_id, "action": action, **payload})
+        managed.command_queue.put({
+            "request_id": request_id,
+            "action": action,
+            "queuedAtMs": now,
+            **payload,
+        })
         return request_id
 
     def _drain_control_acks(self) -> None:
@@ -780,7 +788,10 @@ class ShardedBotManager:
         if self._broker_restarted_at_ms and now - self._broker_restarted_at_ms < interval * 1000:
             return False
         for managed in self._workers.values():
-            managed.command_queue.put({"action": "enable_quoting", "enabled": False, "allocations": {}})
+            managed.command_queue.put({
+                "action": "enable_quoting", "enabled": False, "allocations": {},
+                "queuedAtMs": int(time.time() * 1000),
+            })
         self._capacity_error = f"execution broker {reason}; fleet is reduction-only during restart"
         previous = self._broker
         if previous is not None and previous.is_alive():
@@ -1175,7 +1186,10 @@ class ShardedBotManager:
         self._publish_shard_exposure_limits()
         for managed in self._workers.values():
             if not managed.recovering and managed.process.is_alive():
-                managed.command_queue.put({"action": "enable_quoting", "enabled": gate_open, "allocations": allocations})
+                managed.command_queue.put({
+                    "action": "enable_quoting", "enabled": gate_open,
+                    "allocations": allocations, "queuedAtMs": int(time.time() * 1000),
+                })
         return gate_open, allocations
 
     async def _ensure_startup_account_snapshot(self) -> Optional[StartupAccountSnapshot]:
@@ -1323,7 +1337,10 @@ class ShardedBotManager:
         self._publish_shard_exposure_limits()
         for managed in self._workers.values():
             if not managed.recovering and managed.process.is_alive():
-                managed.command_queue.put({"action": "enable_quoting", "enabled": gate_open, "allocations": allocations})
+                managed.command_queue.put({
+                    "action": "enable_quoting", "enabled": gate_open,
+                    "allocations": allocations, "queuedAtMs": int(time.time() * 1000),
+                })
         if not gate_open:
             await self._emit(
                 "capacity_fail_closed", "*",
@@ -1437,6 +1454,7 @@ class ShardedBotManager:
                 "action": "enable_quoting",
                 "enabled": gate_open,
                 "allocations": allocations,
+                "queuedAtMs": int(time.time() * 1000),
             })
             managed.phase = "healthy"
             managed.recovering = False
@@ -1458,6 +1476,8 @@ class ShardedBotManager:
         now = int(time.time() * 1000)
         if managed.recovery_retry_at_ms > now:
             return
+        managed.recovery_count += 1
+        managed.last_recovery_at_ms = now
         managed.recovering = True
         managed.reconcile_owed = False     # the replacement is reconciled below
         managed.phase = "quiescing"
@@ -1632,7 +1652,14 @@ class ShardedBotManager:
             managed = self._workers.get(heartbeat.worker_id)
             if managed:
                 previous = managed.heartbeat
+                previous_sequence = int(getattr(previous, "heartbeat_sequence", 0) or 0) if previous else 0
+                incoming_sequence = int(getattr(heartbeat, "heartbeat_sequence", 0) or 0)
+                if previous_sequence and incoming_sequence and incoming_sequence <= previous_sequence:
+                    # A delayed queue sample must not roll the manager back to
+                    # an older liveness/resource state.
+                    continue
                 managed.heartbeat = heartbeat
+                managed.last_heartbeat_received_at_ms = int(time.time() * 1000)
                 managed.last_liveness_at_ms = max(managed.last_liveness_at_ms, heartbeat.generated_at_ms)
                 previous_actors = set(previous.assigned_tickers) if previous else set()
                 previous_pending = set(getattr(previous, "pending_tickers", ()) or ()) if previous else set()
@@ -2038,6 +2065,34 @@ class ShardedBotManager:
                 )
             if heartbeat and managed.process.is_alive() and not worker_stale and isinstance(heartbeat.api_activity, Mapping):
                 activity_sources.append(heartbeat.api_activity)
+            heartbeat_at_ms = (
+                int(getattr(heartbeat, "published_at_ms", 0) or heartbeat.generated_at_ms)
+                if heartbeat else None
+            )
+            heartbeat_received_at_ms = managed.last_heartbeat_received_at_ms or heartbeat_at_ms
+            heartbeat_age_ms = (
+                max(0, now - heartbeat_received_at_ms)
+                if heartbeat_received_at_ms else None
+            )
+            heartbeat_queue_lag_ms = (
+                max(0, heartbeat_received_at_ms - int(getattr(heartbeat, "published_at_ms", 0)))
+                if heartbeat and heartbeat_received_at_ms and getattr(heartbeat, "published_at_ms", 0)
+                else 0
+            )
+            api_error_total = int((getattr(heartbeat, "api_errors", {}) or {}).get("total", 0) or 0) if heartbeat else 0
+            event_loop_lag_ms = int(getattr(heartbeat, "event_loop_lag_ms", 0) or 0) if heartbeat else None
+            command_oldest_age_ms = int(getattr(heartbeat, "command_oldest_age_ms", 0) or 0) if heartbeat else None
+            starvation_signal = bool(
+                heartbeat and not worker_stale and (
+                    (event_loop_lag_ms or 0) > stale_ms
+                    or (command_oldest_age_ms or 0) > stale_ms
+                )
+            )
+            degraded = bool(
+                worker_stale or managed.recovering or starvation_signal
+                or (heartbeat and managed.phase not in {"healthy", "starting", "reconciling"})
+                or (heartbeat and api_error_total > 0 and bool(managed.startup_pending_tickers))
+            )
             workers.append({
                 "venue": self.venue,
                 "workerId": worker_id, "pid": managed.process.pid,
@@ -2061,10 +2116,32 @@ class ShardedBotManager:
                 "workerError": managed.worker_error or None,
                 "watchdog": {"mode": shard_watchdog, "counts": shard_modes},
                 "heartbeatAtMs": heartbeat.generated_at_ms if heartbeat else None,
+                "heartbeatReceivedAtMs": heartbeat_received_at_ms,
+                "heartbeatAgeMs": heartbeat_age_ms,
+                "heartbeatSequence": int(getattr(heartbeat, "heartbeat_sequence", 0) or 0) if heartbeat else None,
+                "heartbeatSource": str(getattr(heartbeat, "heartbeat_source", "") or "") if heartbeat else None,
+                "heartbeatQueueLagMs": heartbeat_queue_lag_ms,
                 "stale": worker_stale,
+                "degraded": degraded,
+                "starved": starvation_signal,
+                "recovering": managed.recovering,
                 "memoryRssBytes": heartbeat.memory_rss_bytes if heartbeat else None,
+                "cpuPercent": float(getattr(heartbeat, "cpu_percent", 0.0) or 0.0) if heartbeat else None,
+                "threadCount": int(getattr(heartbeat, "thread_count", 0) or 0) if heartbeat else None,
                 "queueDepth": heartbeat.queue_depth if heartbeat else None,
+                "commandQueueDepth": int(getattr(heartbeat, "command_queue_depth", 0) or 0) if heartbeat else None,
+                "commandOldestAgeMs": command_oldest_age_ms,
+                "commandWaitMs": int(getattr(heartbeat, "command_wait_ms", 0) or 0) if heartbeat else None,
                 "eventLagMs": heartbeat.event_lag_ms if heartbeat else None,
+                "eventLoopLagMs": event_loop_lag_ms,
+                "fallbackHeartbeatCount": int(getattr(heartbeat, "fallback_heartbeat_count", 0) or 0) if heartbeat else 0,
+                "lastFallbackAtMs": int(getattr(heartbeat, "last_fallback_at_ms", 0) or 0) if heartbeat else None,
+                "warningCount": int(getattr(heartbeat, "warning_count", 0) or 0) if heartbeat else 0,
+                "errorCount": int(getattr(heartbeat, "error_count", 0) or 0) if heartbeat else 0,
+                "lastWarning": str(getattr(heartbeat, "last_warning", "") or "") if heartbeat else None,
+                "lastError": str(getattr(heartbeat, "last_error", "") or "") if heartbeat else None,
+                "recoveryCount": managed.recovery_count,
+                "lastRecoveryAtMs": managed.last_recovery_at_ms or None,
                 "apiActivity": dict(heartbeat.api_activity) if heartbeat else {},
                 "apiErrors": dict(getattr(heartbeat, "api_errors", {}) or {}) if heartbeat else {},
             })
@@ -2195,6 +2272,26 @@ class ShardedBotManager:
             "unknownMarkets": sum(1 for item in portfolio_items if not item["available"]),
             "staleMarkets": sum(1 for item in portfolio_items if item["stale"]),
         }
+        heartbeat_ages = [int(item["heartbeatAgeMs"]) for item in workers if item.get("heartbeatAgeMs") is not None]
+        heartbeat_times = [int(item["heartbeatAtMs"]) for item in workers if item.get("heartbeatAtMs")]
+        shard_health = {
+            "activeShards": sum(1 for item in workers if item.get("running") and not item.get("stale")),
+            "totalShards": len(workers),
+            "activeActors": bots_running,
+            "totalMemoryRssBytes": sum(int(item.get("memoryRssBytes") or 0) for item in workers),
+            "totalCpuPercent": round(sum(float(item.get("cpuPercent") or 0.0) for item in workers), 3),
+            "staleShards": sum(1 for item in workers if item.get("stale")),
+            "degradedShards": sum(1 for item in workers if item.get("degraded")),
+            "starvedShards": sum(1 for item in workers if item.get("starved")),
+            "recoveringShards": sum(1 for item in workers if item.get("recovering")),
+            "oldestHeartbeatAgeMs": max(heartbeat_ages, default=None),
+            "latestHeartbeatAtMs": max(heartbeat_times, default=None),
+            "recoveryCount": sum(int(item.get("recoveryCount") or 0) for item in workers),
+            "lastRecoveryAtMs": max(
+                (int(item["lastRecoveryAtMs"]) for item in workers if item.get("lastRecoveryAtMs")),
+                default=None,
+            ),
+        }
         return {
             "venue": self.venue,
             "bots": rows,
@@ -2223,6 +2320,8 @@ class ShardedBotManager:
                 "activeBots": bots_running,
                 "configuredBots": len(self._desired),
                 "workers": len(workers), "staleWorkers": sum(1 for item in workers if item["stale"]),
+                "degradedWorkers": sum(1 for item in workers if item.get("degraded")),
+                "starvedWorkers": sum(1 for item in workers if item.get("starved")),
                 "watchdogModes": risk_modes,
             },
             "monitoring": {
@@ -2233,7 +2332,9 @@ class ShardedBotManager:
                 "portfolio": portfolio,
                 "pnl": rounded_pnl,
                 "apiActivity": api_activity,
+                "shardHealth": shard_health,
             },
+            "shardHealth": shard_health,
             "clients": clients,
             "portfolio": portfolio,
             "pnl": rounded_pnl,

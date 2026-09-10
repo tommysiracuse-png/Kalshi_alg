@@ -39,6 +39,8 @@ class RestActivitySnapshot(TypedDict):
     averageLatencyMs: float
     totalLatencyMs: float
     lastActivityAtMs: Optional[int]
+    disconnects: int
+    lastDisconnectAtMs: Optional[int]
     lastError: Optional[RestErrorSnapshot]
     lastRateLimitError: Optional[RestErrorSnapshot]
     byMethod: Dict[str, int]
@@ -48,6 +50,16 @@ class RestActivitySnapshot(TypedDict):
 
 
 class StreamActivitySnapshot(TypedDict, total=False):
+    connections: int
+    disconnects: int
+    connectionErrors: int
+    messages: int
+    messageSuccesses: int
+    messageFailures: int
+    totalMessageLatencyMs: float
+    averageMessageLatencyMs: float
+    lastMessageAtMs: Optional[int]
+    lastDisconnectAtMs: Optional[int]
     messagesLast60s: int
     lastActivityAtMs: Optional[int]
     byEventType: Dict[str, int]
@@ -72,6 +84,8 @@ class ActivityMonitor:
         self._rest_total = self._rest_successes = self._rest_errors = 0
         self._rest_latency_ms = 0.0
         self._rest_last_at_ms: Optional[int] = None
+        self._rest_disconnects = 0
+        self._rest_last_disconnect_at_ms: Optional[int] = None
         self._rest_recent: Deque[int] = deque()
         self._rest_error_recent: Deque[int] = deque()
         self._rest_rate_limit_errors = 0
@@ -92,6 +106,11 @@ class ActivityMonitor:
         self._stream_events: Counter[str] = Counter()
         self._stream_recent: Deque[int] = deque()
         self._stream_last_at_ms: Optional[int] = None
+        self._stream_message_successes = 0
+        self._stream_message_failures = 0
+        self._stream_message_latency_ms = 0.0
+        self._stream_last_message_at_ms: Optional[int] = None
+        self._stream_last_disconnect_at_ms: Optional[int] = None
 
     @staticmethod
     def _trim(values: Deque[int], current_ms: int) -> None:
@@ -141,6 +160,9 @@ class ActivityMonitor:
                 self._rest_error_recent.append(timestamp)
                 self._trim(self._rest_error_recent, timestamp)
                 self._rest_last_error = error_snapshot
+                if status_code is None:
+                    self._rest_disconnects += 1
+                    self._rest_last_disconnect_at_ms = timestamp
                 operation_errors = self._operation_error_recent.setdefault(operation_name, deque())
                 operation_errors.append(timestamp)
                 self._trim(operation_errors, timestamp)
@@ -158,9 +180,30 @@ class ActivityMonitor:
             if event_type:
                 self._stream_events[event_type] += 1
             self._stream_last_at_ms = timestamp
+            if event in {"closes", "disconnects"}:
+                self._stream["disconnects"] += int(event != "disconnects")
+                self._stream_last_disconnect_at_ms = timestamp
             if event in {"message", "event"}:
                 self._stream_recent.append(timestamp)
                 self._trim(self._stream_recent, timestamp)
+                if event == "message":
+                    self._stream_last_message_at_ms = timestamp
+
+    def record_stream_message(self, *, latency_ms: float, success: bool, event_type: Optional[str] = None) -> None:
+        """Record adapter processing of one received WebSocket message.
+
+        The raw transport records receipt; adapters call this method after
+        parsing/dispatch so message failures and processing latency remain
+        distinct from provider event age.
+        """
+        timestamp = now_ms()
+        with self._lock:
+            self._stream_message_successes += int(bool(success))
+            self._stream_message_failures += int(not success)
+            self._stream_message_latency_ms += max(0.0, float(latency_ms))
+            self._stream_last_message_at_ms = timestamp
+            if event_type:
+                self._stream_events[event_type] += 1
 
     def snapshot(self) -> ClientActivitySnapshot:
         timestamp = now_ms()
@@ -201,6 +244,8 @@ class ActivityMonitor:
                     "averageLatencyMs": round(average, 3),
                     "totalLatencyMs": round(self._rest_latency_ms, 3),
                     "lastActivityAtMs": self._rest_last_at_ms,
+                    "disconnects": self._rest_disconnects,
+                    "lastDisconnectAtMs": self._rest_last_disconnect_at_ms,
                     "lastError": self._rest_last_error,
                     "lastRateLimitError": self._rest_last_rate_limit_error,
                     "byMethod": dict(self._by_method),
@@ -210,6 +255,18 @@ class ActivityMonitor:
                 },
                 "stream": {
                     **dict(self._stream),
+                    "messages": int(self._stream.get("message", 0)),
+                    "messageSuccesses": self._stream_message_successes,
+                    "messageFailures": self._stream_message_failures,
+                    "totalMessageLatencyMs": round(self._stream_message_latency_ms, 3),
+                    "averageMessageLatencyMs": round(
+                        self._stream_message_latency_ms
+                        / (self._stream_message_successes + self._stream_message_failures)
+                        if (self._stream_message_successes + self._stream_message_failures) else 0.0,
+                        3,
+                    ),
+                    "lastMessageAtMs": self._stream_last_message_at_ms,
+                    "lastDisconnectAtMs": self._stream_last_disconnect_at_ms,
                     "messagesLast60s": len(self._stream_recent),
                     "lastActivityAtMs": self._stream_last_at_ms,
                     "byEventType": dict(self._stream_events),
@@ -233,12 +290,17 @@ def merge_activity_snapshots(snapshots: Iterable[Mapping[str, Any]]) -> dict[str
         "requestsLast60s": 0, "errorsLast60s": 0,
         "rateLimitErrors": 0, "rateLimitErrorsLast60s": 0,
         "averageLatencyMs": 0.0, "totalLatencyMs": 0.0,
-        "lastActivityAtMs": None, "lastError": None,
+        "lastActivityAtMs": None, "disconnects": 0, "lastDisconnectAtMs": None,
+        "lastError": None,
         "lastRateLimitError": None, "byMethod": {}, "byOperation": {},
         "byStatus": {}, "operations": {},
     }
     stream: dict[str, Any] = {
-        "messagesLast60s": 0, "lastActivityAtMs": None, "byEventType": {},
+        "messagesLast60s": 0, "messages": 0, "messageSuccesses": 0,
+        "messageFailures": 0, "totalMessageLatencyMs": 0.0,
+        "averageMessageLatencyMs": 0.0, "connections": 0, "disconnects": 0,
+        "lastMessageAtMs": None, "lastDisconnectAtMs": None,
+        "lastActivityAtMs": None, "byEventType": {},
     }
 
     def add_counter(target: dict[str, int], source: Any) -> None:
@@ -263,6 +325,7 @@ def merge_activity_snapshots(snapshots: Iterable[Mapping[str, Any]]) -> dict[str
             for key in (
                 "total", "successes", "errors", "requestsLast60s", "errorsLast60s",
                 "rateLimitErrors", "rateLimitErrorsLast60s", "totalLatencyMs",
+                "disconnects",
             ):
                 value = snapshot_rest.get(key)
                 if value is not None:
@@ -270,6 +333,11 @@ def merge_activity_snapshots(snapshots: Iterable[Mapping[str, Any]]) -> dict[str
             last_at = snapshot_rest.get("lastActivityAtMs")
             if last_at is not None and (rest["lastActivityAtMs"] is None or int(last_at) > int(rest["lastActivityAtMs"])):
                 rest["lastActivityAtMs"] = int(last_at)
+            disconnect_at = snapshot_rest.get("lastDisconnectAtMs")
+            if disconnect_at is not None and (
+                rest["lastDisconnectAtMs"] is None or int(disconnect_at) > int(rest["lastDisconnectAtMs"])
+            ):
+                rest["lastDisconnectAtMs"] = int(disconnect_at)
             rest["lastError"] = newer(rest["lastError"], snapshot_rest.get("lastError"))
             rest["lastRateLimitError"] = newer(rest["lastRateLimitError"], snapshot_rest.get("lastRateLimitError"))
             add_counter(rest["byMethod"], snapshot_rest.get("byMethod"))
@@ -294,19 +362,37 @@ def merge_activity_snapshots(snapshots: Iterable[Mapping[str, Any]]) -> dict[str
         snapshot_stream = snapshot.get("stream")
         if isinstance(snapshot_stream, Mapping):
             stream["messagesLast60s"] += int(snapshot_stream.get("messagesLast60s") or 0)
+            for key in ("messages", "messageSuccesses", "messageFailures", "connections", "disconnects"):
+                stream[key] += int(snapshot_stream.get(key) or 0)
+            stream["totalMessageLatencyMs"] += float(snapshot_stream.get("totalMessageLatencyMs") or 0.0)
             stream["lastActivityAtMs"] = max(
                 [value for value in (stream["lastActivityAtMs"], snapshot_stream.get("lastActivityAtMs")) if value is not None],
                 default=None,
             )
+            for timestamp_key in ("lastMessageAtMs", "lastDisconnectAtMs"):
+                candidate = snapshot_stream.get(timestamp_key)
+                if candidate is not None and (
+                    stream[timestamp_key] is None or int(candidate) > int(stream[timestamp_key])
+                ):
+                    stream[timestamp_key] = int(candidate)
             add_counter(stream["byEventType"], snapshot_stream.get("byEventType"))
             for key, value in snapshot_stream.items():
-                if key not in {"messagesLast60s", "lastActivityAtMs", "byEventType"}:
+                if key not in {
+                    "messagesLast60s", "lastActivityAtMs", "byEventType",
+                    "messages", "messageSuccesses", "messageFailures",
+                    "totalMessageLatencyMs", "averageMessageLatencyMs",
+                    "connections", "disconnects", "lastMessageAtMs", "lastDisconnectAtMs",
+                }:
                     try:
                         stream[key] = stream.get(key, 0) + int(value or 0)
                     except (TypeError, ValueError):
                         pass
 
     rest["averageLatencyMs"] = round(rest["totalLatencyMs"] / rest["total"] if rest["total"] else 0.0, 3)
+    stream["averageMessageLatencyMs"] = round(
+        stream["totalMessageLatencyMs"] / stream["messages"] if stream["messages"] else 0.0,
+        3,
+    )
     for metrics in rest["operations"].values():
         metrics["averageLatencyMs"] = round(metrics["totalLatencyMs"] / metrics["total"] if metrics["total"] else 0.0, 3)
     starts = [int(item.get("startedAtMs")) for item in values if item.get("startedAtMs")]

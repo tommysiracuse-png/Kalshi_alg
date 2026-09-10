@@ -31,18 +31,23 @@ const MONITORING_COLUMNS: Record<MonitoringTableKind, MonitoringColumn[]> = {
     { id: "venue", label: "Venue", width: 150, locked: true },
     { id: "restTotal", label: "REST total", width: 120 }, { id: "restRate", label: "REST / min", width: 120 },
     { id: "restSuccesses", label: "REST successes", width: 135 }, { id: "restErrors", label: "REST errors", width: 120 },
+    { id: "restDisconnects", label: "REST disconnects", width: 145 },
     { id: "restLatency", label: "Avg latency", width: 125 }, { id: "restLast", label: "Last REST", width: 180 },
     { id: "wsConnections", label: "WS connections", width: 145 }, { id: "wsReconnects", label: "WS reconnects", width: 140 },
-    { id: "wsErrors", label: "WS errors", width: 115 }, { id: "wsMessages", label: "WS messages", width: 130 },
+    { id: "wsDisconnects", label: "WS disconnects", width: 140 }, { id: "wsErrors", label: "WS errors", width: 115 }, { id: "wsSuccesses", label: "WS successes", width: 130 },
+    { id: "wsFailures", label: "WS failures", width: 120 }, { id: "wsLatency", label: "WS avg latency", width: 140 }, { id: "wsMessages", label: "WS messages", width: 130 },
     { id: "wsEvents", label: "WS events", width: 115 }, { id: "wsRate", label: "WS / min", width: 115 },
     { id: "wsLast", label: "Last WS", width: 180 },
   ],
   shards: [
-    { id: "identity", label: "Venue / shard", width: 210, locked: true }, { id: "runtime", label: "Running for", width: 125 },
-    { id: "markets", label: "Assigned markets", width: 230 }, { id: "state", label: "Running state", width: 170 },
-    { id: "watchdog", label: "Watchdog", width: 230 }, { id: "bots", label: "Bots running", width: 125 },
-    { id: "heartbeat", label: "Heartbeat", width: 180 }, { id: "queue", label: "Queue depth", width: 115 },
-    { id: "eventLag", label: "Event lag", width: 120 }, { id: "memory", label: "Memory", width: 110 },
+    { id: "identity", label: "Venue / shard", width: 210, locked: true }, { id: "started", label: "Started at", width: 180 },
+    { id: "runtime", label: "Running for", width: 125 }, { id: "markets", label: "Assigned markets", width: 230 },
+    { id: "state", label: "Running state", width: 190 }, { id: "watchdog", label: "Watchdog", width: 230 },
+    { id: "bots", label: "Active actors", width: 125 }, { id: "heartbeat", label: "Last heartbeat", width: 180 },
+    { id: "heartbeatAge", label: "Heartbeat age", width: 125 }, { id: "resources", label: "CPU / memory", width: 150 },
+    { id: "queue", label: "Queue / wait", width: 145 }, { id: "eventLag", label: "Event-loop lag", width: 135 },
+    { id: "transport", label: "REST / WS", width: 190 }, { id: "errors", label: "Errors / warnings", width: 170 },
+    { id: "recovery", label: "Recovery", width: 180 },
   ],
   markets: [
     { id: "identity", label: "Market", width: 330, locked: true }, { id: "venueShard", label: "Venue / shard", width: 180 },
@@ -326,6 +331,7 @@ export function LiveMonitoring({ initial }: { initial: Monitoring }) {
   const selectSort = (kind: MonitoringTableKind, id: string) => setSorts(previous => ({ ...previous, [kind]: previous[kind].id === id ? { id, direction: previous[kind].direction === "asc" ? "desc" : "asc" } : { id, direction: "asc" } }));
   const activeVenues = manager.activeVenues;
   const pnl = manager.pnl;
+  const shardHealth = manager.shardHealth;
   const venues = data.venues ?? [];
   const workers = data.workers ?? [];
   const apiCell = useCallback((row: NonNullable<Monitoring["venues"]>[number], id: string): ReactNode => {
@@ -334,29 +340,43 @@ export function LiveMonitoring({ initial }: { initial: Monitoring }) {
       case "venue": return <><strong>{row.venue}</strong><small><StatusBadge value={row.active ? "active" : "stopped"} /></small></>;
       case "restTotal": return rest?.total ?? "Unavailable"; case "restRate": return rest?.requestsLast60s ?? "Unavailable";
       case "restSuccesses": return rest?.successes ?? "Unavailable"; case "restErrors": return rest?.errors ?? "Unavailable";
+      case "restDisconnects": return rest?.disconnects ?? 0;
       case "restLatency": return rest?.averageLatencyMs == null ? "Unavailable" : `${rest.averageLatencyMs.toFixed(1)} ms`;
       case "restLast": return <Time value={rest?.lastActivityAtMs} />; case "wsConnections": return stream?.connections ?? "Unavailable";
       case "wsReconnects": return stream?.reconnects ?? "Unavailable";
+      case "wsDisconnects": return stream?.disconnects ?? stream?.closes ?? 0;
       case "wsErrors": return stream ? (stream.connectionErrors ?? 0) + (stream.streamErrors ?? 0) + (stream.adapterErrors ?? 0) : "Unavailable";
+      case "wsSuccesses": return stream?.messageSuccesses ?? "Unavailable";
+      case "wsFailures": return stream?.messageFailures ?? "Unavailable";
+      case "wsLatency": return stream?.averageMessageLatencyMs == null ? "Unavailable" : `${stream.averageMessageLatencyMs.toFixed(1)} ms`;
       case "wsMessages": return stream?.message ?? "Unavailable"; case "wsEvents": return stream?.event ?? "Unavailable";
       case "wsRate": return stream?.messagesLast60s ?? "Unavailable"; case "wsLast": return <Time value={stream?.lastActivityAtMs} />;
       default: return null;
     }
   }, []);
-  const apiSort = useCallback((row: NonNullable<Monitoring["venues"]>[number], id: string) => { const rest = row.apiActivity?.rest; const stream = row.apiActivity?.stream; const values: Record<string, unknown> = { venue: row.venue, restTotal: rest?.total, restRate: rest?.requestsLast60s, restSuccesses: rest?.successes, restErrors: rest?.errors, restLatency: rest?.averageLatencyMs, restLast: rest?.lastActivityAtMs, wsConnections: stream?.connections, wsReconnects: stream?.reconnects, wsErrors: stream ? (stream.connectionErrors ?? 0) + (stream.streamErrors ?? 0) + (stream.adapterErrors ?? 0) : null, wsMessages: stream?.message, wsEvents: stream?.event, wsRate: stream?.messagesLast60s, wsLast: stream?.lastActivityAtMs }; return values[id]; }, []);
+  const apiSort = useCallback((row: NonNullable<Monitoring["venues"]>[number], id: string) => { const rest = row.apiActivity?.rest; const stream = row.apiActivity?.stream; const values: Record<string, unknown> = { venue: row.venue, restTotal: rest?.total, restRate: rest?.requestsLast60s, restSuccesses: rest?.successes, restErrors: rest?.errors, restDisconnects: rest?.disconnects, restLatency: rest?.averageLatencyMs, restLast: rest?.lastActivityAtMs, wsConnections: stream?.connections, wsReconnects: stream?.reconnects, wsDisconnects: stream?.disconnects ?? stream?.closes, wsErrors: stream ? (stream.connectionErrors ?? 0) + (stream.streamErrors ?? 0) + (stream.adapterErrors ?? 0) : null, wsSuccesses: stream?.messageSuccesses, wsFailures: stream?.messageFailures, wsLatency: stream?.averageMessageLatencyMs, wsMessages: stream?.message, wsEvents: stream?.event, wsRate: stream?.messagesLast60s, wsLast: stream?.lastActivityAtMs }; return values[id]; }, []);
   const shardCell = useCallback((row: NonNullable<Monitoring["workers"]>[number], id: string): ReactNode => {
+    const rest = row.apiActivity?.rest;
+    const stream = row.apiActivity?.stream;
     switch (id) {
       case "identity": return <><strong>{row.venue ?? "unknown"} / {row.workerId}</strong><small className="mono">PID {row.pid ?? "—"}</small></>;
+      case "started": return <Time value={row.startedAtMs} />;
       case "runtime": return formatDuration(row.startedAtMs ? clockMs - row.startedAtMs : row.runningForMs);
       case "markets": return <details><summary>{row.assignedMarkets ?? "Unavailable"} assigned</summary><div className="monitor-detail mono">{row.marketIds?.map(market => <span key={market}>{market}</span>)}</div></details>;
-      case "state": return <><StatusBadge value={row.running == null ? "Unavailable" : !row.running ? "stopped" : row.stale ? "stale" : "running"} /><small>{row.phase ?? "Unavailable"}{row.lastRecoveryError ? ` · ${row.lastRecoveryError}` : ""}</small></>;
+      case "state": return <><StatusBadge value={row.running == null ? "Unavailable" : !row.running ? "stopped" : row.stale ? "stale" : row.starved ? "starved" : row.degraded ? "degraded" : "running"} /><small>{row.phase ?? "Unavailable"}{row.heartbeatSource ? ` · ${row.heartbeatSource}` : ""}</small></>;
       case "watchdog": return <><StatusBadge value={row.watchdog?.mode} /><small>{Object.entries(row.watchdog?.counts ?? {}).map(([mode, count]) => `${mode}: ${count}`).join(" · ") || "No market states"}</small></>;
-      case "bots": return `${row.botsRunning ?? "Unavailable"} / ${row.assignedMarkets}`; case "heartbeat": return <Time value={row.heartbeatAtMs} />;
-      case "queue": return row.queueDepth ?? "Unavailable"; case "eventLag": return formatDuration(row.eventLagMs); case "memory": return bytes(row.memoryRssBytes);
+      case "bots": return `${row.botsRunning ?? "Unavailable"} / ${row.assignedMarkets}`; case "heartbeat": return <Time value={row.heartbeatReceivedAtMs ?? row.heartbeatAtMs} />;
+      case "heartbeatAge": return formatDuration(row.heartbeatAgeMs);
+      case "resources": return <><strong>{row.cpuPercent == null ? "Unavailable" : `${row.cpuPercent.toFixed(1)}%`}</strong><small>{bytes(row.memoryRssBytes)} · {row.threadCount ?? "—"} threads</small></>;
+      case "queue": return <><strong>{row.commandQueueDepth ?? row.queueDepth ?? "Unavailable"}</strong><small>{row.commandWaitMs == null ? "—" : `${row.commandWaitMs} ms wait`}</small></>;
+      case "eventLag": return <><strong>{formatDuration(row.eventLoopLagMs)}</strong><small>market {formatDuration(row.eventLagMs)}</small></>;
+      case "transport": return <details><summary>{rest?.total ?? "—"} REST · {stream?.messages ?? stream?.message ?? "—"} WS</summary><div className="monitor-detail"><span>REST: {rest?.requestsLast60s ?? "—"}/min · {rest?.errors ?? "—"} errors · {rest?.disconnects ?? 0} disconnects · {rest?.averageLatencyMs?.toFixed(1) ?? "—"} ms</span><span>WS: {stream?.messagesLast60s ?? "—"}/min · {stream?.messageFailures ?? 0} failures · {stream?.disconnects ?? stream?.closes ?? 0} disconnects · {stream?.averageMessageLatencyMs?.toFixed(1) ?? "—"} ms</span></div></details>;
+      case "errors": return <details><summary>{row.errorCount ?? 0} errors · {row.warningCount ?? 0} warnings</summary><div className="monitor-detail"><span>{row.lastError || row.lastWarning || "No recent worker errors"}</span>{row.apiErrors?.last?.message && <span>API: {row.apiErrors.last.message}</span>}</div></details>;
+      case "recovery": return <><strong>{row.recoveryCount ?? 0} recoveries</strong><small>{row.recoveryReason || (row.lastRecoveryAtMs ? <Time value={row.lastRecoveryAtMs} /> : "No recovery recorded")}</small></>;
       default: return null;
     }
   }, [clockMs]);
-  const shardSort = useCallback((row: NonNullable<Monitoring["workers"]>[number], id: string) => ({ identity: `${row.venue}:${row.workerId}`, runtime: row.startedAtMs, markets: row.assignedMarkets, state: row.running ? row.stale ? 1 : 2 : 0, watchdog: row.watchdog?.mode, bots: row.botsRunning, heartbeat: row.heartbeatAtMs, queue: row.queueDepth, eventLag: row.eventLagMs, memory: row.memoryRssBytes } as Record<string, unknown>)[id], []);
+  const shardSort = useCallback((row: NonNullable<Monitoring["workers"]>[number], id: string) => ({ identity: `${row.venue}:${row.workerId}`, started: row.startedAtMs, runtime: row.startedAtMs, markets: row.assignedMarkets, state: row.running ? row.stale ? 1 : row.starved ? 2 : row.degraded ? 3 : 4 : 0, watchdog: row.watchdog?.mode, bots: row.botsRunning, heartbeat: row.heartbeatReceivedAtMs ?? row.heartbeatAtMs, heartbeatAge: row.heartbeatAgeMs, resources: row.cpuPercent, queue: row.commandWaitMs ?? row.commandQueueDepth ?? row.queueDepth, eventLag: row.eventLoopLagMs, transport: row.apiActivity?.rest?.errors, errors: row.errorCount, recovery: row.recoveryCount } as Record<string, unknown>)[id], []);
   const marketCell = useCallback((client: ClientMonitoring, id: string): ReactNode => {
     switch (id) {
       case "identity": return <><strong>{client.title || client.market?.title || client.marketId}</strong><small className="mono">{client.marketId} · PID {client.pid ?? "—"}</small><details><summary>Activity details</summary><div className="monitor-detail"><span>Active orders: {Object.values(client.orderActivity?.active ?? {}).filter(item => item.orderId).length}</span><span>Last fill: <Time value={client.fills?.lastFillAtMs} /></span><span>Last order: <Time value={client.orderActivity?.lastActivityAtMs} /></span><span>Socket: {client.socketHealthy == null ? "Unavailable" : client.socketHealthy ? "healthy" : "unavailable"}</span>{client.orderActivity?.recent?.slice(-3).reverse().map((item, index) => <span key={`order-${index}`}>Order: {String(item.action ?? "unknown")} · {String(item.outcome ?? "unknown")}</span>)}{client.fills?.recent?.slice(-3).reverse().map((item, index) => <span key={`fill-${index}`}>Fill: {String(item.side ?? "unknown")} · {units(Number(item.quantityUnits ?? 0))} contracts</span>)}</div></details></>;
@@ -374,7 +394,7 @@ export function LiveMonitoring({ initial }: { initial: Monitoring }) {
   return <>
     <header className="page-header"><div><span className="eyebrow">LIVE TELEMETRY</span><h1>Monitoring</h1><p>Aggregate venue, shard, transport, and market activity.</p></div><div className="metrics-header-actions"><MonitoringColumnChooser preferences={preferences} onToggle={toggle} onMove={move} /><div className="header-status"><StatusBadge value={manager.lifecycle} /><span className={connected ? "positive" : "negative"}>{connected ? "Live" : "Reconnecting"}</span></div></div></header>
     {(data.source.stale || data.warnings.length > 0) && <section className="warning-panel"><strong>Monitoring data may be stale</strong><ul>{data.warnings.map(item => <li key={item}>{item}</li>)}</ul></section>}
-    <section className="metrics"><article><span>Active venues</span><strong>{activeVenues?.length ?? "Unavailable"}</strong><p>{activeVenues?.join(" · ") || "No venue data available"}</p></article><article><span>Bots running</span><strong>{manager.botsRunning ?? "Unavailable"}<small> / {manager.configuredBots ?? "Unavailable"}</small></strong><p>Manager uptime {formatDuration(manager.startedAtMs ? clockMs - manager.startedAtMs : manager.runningForMs)}</p></article><article><span>Session P&amp;L</span><strong><Money cents={pnl?.totalCents} signed /></strong><p><Money cents={pnl?.realizedCents} signed /> realized · {pnl?.fills ?? "Unavailable"} fills{pnl?.complete === false ? " · partial" : ""}</p></article><article><span>Total API requests</span><strong>{manager.apiActivity?.rest?.total ?? "Unavailable"}</strong><p>{manager.apiActivity?.rest?.requestsLast60s ?? "Unavailable"} REST / min · {manager.apiActivity?.rest?.errors ?? "Unavailable"} errors</p></article></section>
+    <section className="metrics"><article><span>Active venues</span><strong>{activeVenues?.length ?? "Unavailable"}</strong><p>{activeVenues?.join(" · ") || "No venue data available"}</p></article><article><span>Active shards</span><strong>{shardHealth?.activeShards ?? "Unavailable"}<small> / {shardHealth?.totalShards ?? "Unavailable"}</small></strong><p>{shardHealth?.degradedShards ?? "—"} degraded · {shardHealth?.starvedShards ?? "—"} starved</p></article><article><span>Active actors</span><strong>{shardHealth?.activeActors ?? manager.botsRunning ?? "Unavailable"}</strong><p>{shardHealth?.recoveringShards ?? "—"} shards recovering</p></article><article><span>Resource consumption</span><strong>{shardHealth?.totalCpuPercent == null ? "Unavailable" : `${shardHealth.totalCpuPercent.toFixed(1)}%`}</strong><p>{bytes(shardHealth?.totalMemoryRssBytes)} memory</p></article><article><span>Last heartbeat</span><strong>{formatDuration(shardHealth?.oldestHeartbeatAgeMs)}</strong><p>oldest shard heartbeat age</p></article><article><span>Bots running</span><strong>{manager.botsRunning ?? "Unavailable"}<small> / {manager.configuredBots ?? "Unavailable"}</small></strong><p>Manager uptime {formatDuration(manager.startedAtMs ? clockMs - manager.startedAtMs : manager.runningForMs)}</p></article><article><span>Session P&amp;L</span><strong><Money cents={pnl?.totalCents} signed /></strong><p><Money cents={pnl?.realizedCents} signed /> realized · {pnl?.fills ?? "Unavailable"} fills{pnl?.complete === false ? " · partial" : ""}</p></article><article><span>Total API requests</span><strong>{manager.apiActivity?.rest?.total ?? "Unavailable"}</strong><p>{manager.apiActivity?.rest?.requestsLast60s ?? "Unavailable"} REST / min · {manager.apiActivity?.rest?.errors ?? "Unavailable"} errors</p></article></section>
     <section className="panel"><div className="panel-heading"><div><span className="eyebrow">API INFORMATION</span><h2>Venue transport activity</h2></div><strong>{venues.length} venues</strong></div><MonitoringTable kind="api" rows={venues} preferences={preferences.api} widths={widths.api} sort={sorts.api} rowKey={row => row.venue} sortValue={apiSort} renderCell={apiCell} empty="No per-venue API activity is available." onSort={id => selectSort("api", id)} onReorder={(source, target, position) => reorder("api", source, target, position)} onResize={(id, width) => resize("api", id, width)} /></section>
     <section className="panel"><div className="panel-heading"><div><span className="eyebrow">SHARDS</span><h2>Shard health</h2></div><strong>{workers.length} shards</strong></div><MonitoringTable kind="shards" rows={workers} preferences={preferences.shards} widths={widths.shards} sort={sorts.shards} rowKey={row => `${row.venue}:${row.workerId}`} sortValue={shardSort} renderCell={shardCell} empty="No shards are currently reporting." onSort={id => selectSort("shards", id)} onReorder={(source, target, position) => reorder("shards", source, target, position)} onResize={(id, width) => resize("shards", id, width)} /></section>
     <section className="panel"><div className="panel-heading"><div><span className="eyebrow">MARKETS</span><h2>Market activity</h2></div><strong>{data.clients.length} markets</strong></div><MonitoringTable kind="markets" rows={data.clients} preferences={preferences.markets} widths={widths.markets} sort={sorts.markets} rowKey={row => `${row.venue}:${row.workerId}:${row.marketId}`} sortValue={marketSort} renderCell={marketCell} empty="No market clients are currently reporting." onSort={id => selectSort("markets", id)} onReorder={(source, target, position) => reorder("markets", source, target, position)} onResize={(id, width) => resize("markets", id, width)} /></section>

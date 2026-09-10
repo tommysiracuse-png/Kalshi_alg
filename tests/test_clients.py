@@ -4,7 +4,7 @@ import pytest
 
 from clients.http_client import HTTPClient, HTTPClientError
 from clients.websocket_client import WebsocketClient
-from clients.monitoring import SessionActivityAccumulator
+from clients.monitoring import ActivityMonitor, SessionActivityAccumulator, merge_activity_snapshots
 
 
 class FakeResponse:
@@ -36,6 +36,38 @@ def test_session_activity_retains_old_generations_but_not_their_rolling_rate():
     assert restarted["rest"]["requestsLast60s"] == 2
     assert restarted["stream"]["message"] == 5
     assert restarted["stream"]["messagesLast60s"] == 1
+
+
+def test_activity_monitor_tracks_transport_disconnects_and_message_processing():
+    monitor = ActivityMonitor()
+    monitor.record_rest(
+        method="GET", operation="positions", status_code=None,
+        latency_ms=12, error=True, error_message="connection reset",
+    )
+    monitor.record_rest(
+        method="GET", operation="markets", status_code=200,
+        latency_ms=8, error=False,
+    )
+    monitor.record_stream("connections")
+    monitor.record_stream("message")
+    monitor.record_stream_message(latency_ms=4, success=True)
+    monitor.record_stream("message")
+    monitor.record_stream_message(latency_ms=10, success=False)
+    monitor.record_stream("closes")
+
+    snapshot = monitor.snapshot()
+    assert snapshot["rest"]["disconnects"] == 1
+    assert snapshot["rest"]["lastDisconnectAtMs"] is not None
+    assert snapshot["stream"]["messages"] == 2
+    assert snapshot["stream"]["messageSuccesses"] == 1
+    assert snapshot["stream"]["messageFailures"] == 1
+    assert snapshot["stream"]["averageMessageLatencyMs"] == 7.0
+    assert snapshot["stream"]["disconnects"] == 1
+
+    merged = merge_activity_snapshots([snapshot])
+    assert merged["rest"]["disconnects"] == 1
+    assert merged["stream"]["messageFailures"] == 1
+    assert merged["stream"]["averageMessageLatencyMs"] == 7.0
 
 
 class FakeSession:
